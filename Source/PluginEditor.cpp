@@ -1191,7 +1191,7 @@ void GranulumEditor::resized()
     lfoFrame = r.removeFromBottom (S (100));
     r.removeFromBottom (S (12));
 
-    auto knobs = r.removeFromBottom (S (234));
+    auto knobs = r.removeFromBottom (S (228));
     r.removeFromBottom (S (12));
 
     // ---- screen frame: grain field (left) + source panel (right) ----
@@ -1219,8 +1219,8 @@ void GranulumEditor::resized()
         srcSample.setBounds (btns.removeFromLeft (bw).reduced (S (2), 0));
         srcMix.setBounds    (btns.reduced (S (2), 0));
         sa.removeFromTop (S (6));
-        auto bottom = sa.removeFromBottom (S (60));
-        sa.removeFromBottom (S (4));
+        auto bottom = sa.removeFromBottom (S (76));
+        sa.removeFromBottom (S (2));
         harmonics.setBounds (sa);
         rndBars.setBounds (bottom.removeFromRight (S (72)).withSizeKeepingCentre (S (72), S (26)));
         bottom.removeFromRight (S (6));
@@ -1231,8 +1231,8 @@ void GranulumEditor::resized()
     // ---- knob sections ----
     const int gap = S (18);
     const float colW = (float) (knobs.getWidth() - gap * 2) / 10.0f;
-    grainArea = knobs.removeFromLeft ((int) (colW * 4.3f)); knobs.removeFromLeft (gap);
-    bassArea  = knobs.removeFromLeft ((int) (colW * 2.6f)); knobs.removeFromLeft (gap);
+    grainArea = knobs.removeFromLeft ((int) (colW * 4.75f)); knobs.removeFromLeft (gap);
+    bassArea  = knobs.removeFromLeft ((int) (colW * 2.3f)); knobs.removeFromLeft (gap);
     fxArea    = knobs;
 
     auto headerButtons = [&] (Rectangle<int> area, std::initializer_list<std::pair<Button*, int>> bs)
