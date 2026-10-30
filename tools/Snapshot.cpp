@@ -75,10 +75,12 @@ int main (int argc, char** argv)
     p.rebuildNow();
     setP (ParamID::waveSpacing, 0.4f);
     setP (ParamID::smear, 0.2f);
-    setP (ParamID::addSemi, 7.0f);
+    setP (ParamID::osc1Semi, 7.0f);
+    setP (ParamID::distDrive, 0.5f);
+    setP (ParamID::distType, 2.0f);
     p.setModulation (GranulumProcessor::modIndexOf (ParamID::cutoff), 0, 0.45f);
     p.setModulation (GranulumProcessor::modIndexOf (ParamID::waveSpacing), 1, -0.3f);
-    p.setModulation (GranulumProcessor::modIndexOf (ParamID::addSemi), 1, 0.25f);
+    p.setModulation (GranulumProcessor::modIndexOf (ParamID::osc1Semi), 1, 0.25f);
     setP (ParamID::cutoff, 400.0f);
     p.keyboardState.noteOn (1, 36, 0.9f);
     pump (p, 120, 300);
@@ -89,7 +91,8 @@ int main (int argc, char** argv)
     // 2) sample + additive together
     String err;
     p.loadSample (makeTestSample(), err);
-    setP (ParamID::source, 2.0f);
+    setP (ParamID::osc2Grain, 1.0f);
+    setP (ParamID::osc1Grain, 0.0f);
     p.rebuildNow();
     pump (p, 4, 100);
     p.keyboardState.noteOn (1, 40, 0.9f);

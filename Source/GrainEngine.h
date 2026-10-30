@@ -1,5 +1,5 @@
 #pragma once
-// Granulum — bass granulizer engine. Pure C++17, no JUCE dependency.
+// Granulum — bass granulizer engine (one instance per oscillator). Pure C++17, no JUCE dependency.
 
 #include <algorithm>
 #include <array>
@@ -17,15 +17,15 @@ struct SampleData
 {
     std::vector<std::vector<float>> channels; // 1 or 2 channels
     std::vector<int> transients;              // onset positions in frames, sorted
-    double sampleRate = 44100.0;              // rate at which the data plays at "original pitch" on MIDI note 60
+    double sampleRate = 44100.0;              // plays at "original pitch" on MIDI note 60
 
     int numFrames() const   { return channels.empty() ? 0 : (int) channels[0].size(); }
     int numChannels() const { return (int) channels.size(); }
 };
 
 // ---------------------------------------------------------------------------
-// Additive source: 32 harmonics -> seamless looping buffer with slowly
-// "breathing" partials, so wave spacing scrubs through a living timbre.
+// Additive oscillator: 32 harmonics -> seamless looping buffer with slowly
+// "breathing" partials. Levels are absolute: lower bars = quieter, all zero = silence.
 static constexpr int kNumHarmonics = 32;
 
 inline SampleData renderAdditive (const std::array<float, kNumHarmonics>& amps)
@@ -43,7 +43,6 @@ inline SampleData renderAdditive (const std::array<float, kNumHarmonics>& amps)
     for (int i = 0; i < period; ++i)
         sine[(size_t) i] = (float) std::sin (2.0 * kPi * i / period);
 
-    // deterministic per-harmonic drift (integer number of cycles over the buffer => seamless loop)
     uint32_t seed = 0x1234567u;
     auto rnd = [&seed]() { seed = seed * 1664525u + 1013904223u; return (float) (seed >> 8) / 16777216.0f; };
 
@@ -51,11 +50,12 @@ inline SampleData renderAdditive (const std::array<float, kNumHarmonics>& amps)
     for (int k = 1; k <= kNumHarmonics; ++k)
     {
         const float a = amps[(size_t) k - 1];
-        if (a <= 0.0005f || k * c4 > 20000.0) continue;
+        // keep the random stream identical regardless of which bars are up
         const int    driftCycles = 1 + (int) (rnd() * 3.0f);
         const double driftPhase  = rnd() * 2.0 * kPi;
-        const float  driftDepth  = 0.25f + 0.5f * rnd() * std::min (1.0f, (float) k / 4.0f); // upper partials move more
-        const int    phaseOff    = (int) (rnd() * period);
+        const float  driftDepth  = (k == 1 ? 0.0f : 0.2f + 0.4f * rnd() * std::min (1.0f, (float) k / 4.0f));
+        const int    phaseOff    = k == 1 ? 0 : (int) (rnd() * period);
+        if (a <= 0.0005f || k * c4 > 20000.0) continue;
         for (int i = 0; i < N; ++i)
         {
             const float drift = 1.0f - driftDepth * 0.5f * (1.0f + (float) std::sin (2.0 * kPi * driftCycles * (double) i / N + driftPhase));
@@ -63,10 +63,12 @@ inline SampleData renderAdditive (const std::array<float, kNumHarmonics>& amps)
         }
     }
 
+    // absolute level: one full bar = 0.7 peak; only scale down if it would clip
+    for (auto& v : out) v *= 0.7f;
     float peak = 0.0f;
     for (float v : out) peak = std::max (peak, std::abs (v));
-    if (peak > 1.0e-6f)
-        for (auto& v : out) v *= 0.89f / peak;
+    if (peak > 0.95f)
+        for (auto& v : out) v *= 0.95f / peak;
     return s;
 }
 
@@ -77,7 +79,7 @@ inline std::vector<int> detectTransients (const SampleData& s)
     const int N = s.numFrames();
     if (N < 1024) return out;
 
-    const int hop = std::max (64, (int) (s.sampleRate * 0.005)); // 5 ms
+    const int hop = std::max (64, (int) (s.sampleRate * 0.005));
     const int frames = N / hop;
     std::vector<float> env ((size_t) frames, 0.0f);
     for (int f = 0; f < frames; ++f)
@@ -117,29 +119,27 @@ inline std::vector<int> detectTransients (const SampleData& s)
 
 struct Params
 {
+    // granular
     float attack      = 0.35f;
     float holdMs      = 80.0f;
     float spacingMs   = 60.0f;
     float waveSpacing = 1.0f;
-
     float position    = 0.0f;
     float rand        = 0.0f;
     float smear       = 0.0f;
     float pan         = 0.5f;
-    float lfoDepth    = 0.0f;
-    float lfoRate     = 0.5f;
-
-    float pitch       = 0.0f;   // semitones (global: grains + sub)
-    float transpose   = 0.0f;   // semitones (this layer only: grains + key-sync rate)
-    float pitchSpray  = 0.0f;
-    float octaveProb  = 0.0f;
-    float reverseProb = 0.0f;
-
     bool  transients  = false;
-    bool  keySync     = false;  // grain rate = note frequency -> tonal bass from any source
+    bool  keySync     = false;  // grain rate = note frequency
+    bool  grainOn     = true;   // false = plain looping oscillator / sampler
+
+    // oscillator
+    float transpose   = 0.0f;   // semitones (oct * 12 + semi)
+
+    // voicing
     bool  mono        = false;
-    float glideMs     = 0.0f;
-    float sub         = 0.0f;   // sine sub level
+    float portaMs     = 0.0f;
+    bool  portaAlways = false;  // glide on every note, not only overlapping ones
+    bool  portaScaled = false;  // glide time grows with the interval
 };
 
 class Random
@@ -176,7 +176,7 @@ public:
     std::array<std::atomic<float>, kMaxViz> vizAmp {};
     std::array<std::atomic<int>,   kMaxViz> vizHit {};
     std::atomic<int> vizCount { 0 };
-    std::array<std::atomic<float>, kMaxVoices> vizHead {};
+    std::array<std::atomic<float>, kMaxVoices> vizHead {};   // absolute read position 0..1
     std::atomic<int> vizHeadCount { 0 };
 
     void prepare (double hostSampleRate)
@@ -192,29 +192,39 @@ public:
             v.active = false; v.stage = Stage::Off; v.env = 0.0f;
             for (auto& g : v.grains) g.active = false;
         }
-        stackSize = 0;
+        stackSize = 0; heldCount = 0; lastPitch = -1.0;
         vizCount.store (0); vizHeadCount.store (0);
     }
 
-    void noteOn (int note, float velocity, bool mono)
+    void noteOn (int note, float velocity, const Params& p)
     {
-        if (mono)
+        const bool overlap = heldCount > 0;
+        ++heldCount;
+        const bool porta = p.portaMs > 0.5f && lastPitch >= 0.0 && (p.portaAlways || overlap);
+
+        if (p.mono)
         {
             pushNote (note);
             auto& v = voices[0];
             for (size_t i = 1; i < voices.size(); ++i)
                 if (voices[i].active) voices[i].stage = Stage::Release;
 
-            const bool legato = v.active && v.stage != Stage::Release;
-            v.targetNote = note;
-            v.velocity = velocity;
-            if (legato) return;                     // glide, no retrigger
-            startVoice (v, note, velocity, ! v.active);
+            if (v.active && v.stage != Stage::Release)   // legato: no retrigger
+            {
+                v.note = note;
+                v.velocity = velocity;
+                glideTo (v, note, p, p.portaMs > 0.5f);
+                lastPitch = note;
+                return;
+            }
+            startVoice (v, note, velocity, p, ! v.active);
+            if (porta) startGlide (v, lastPitch, note, p);
+            lastPitch = note;
             return;
         }
 
         Voice* target = nullptr;
-        for (size_t i = 0; i < voices.size(); ++i) if (! voices[i].active) { target = &voices[i]; break; }
+        for (auto& v : voices) if (! v.active) { target = &v; break; }
         if (target == nullptr)
         {
             int64_t oldest = INT64_MAX;
@@ -224,18 +234,27 @@ public:
                 if (score < oldest) { oldest = score; target = &v; }
             }
         }
-        startVoice (*target, note, velocity, ! target->active);
+        startVoice (*target, note, velocity, p, ! target->active);
+        if (porta) startGlide (*target, lastPitch, note, p);
+        lastPitch = note;
     }
 
-    void noteOff (int note, bool mono)
+    void noteOff (int note, const Params& p)
     {
-        if (mono)
+        heldCount = std::max (0, heldCount - 1);
+        if (p.mono)
         {
             removeNote (note);
             auto& v = voices[0];
             if (! v.active) return;
-            if (stackSize > 0) v.targetNote = noteStack[(size_t) stackSize - 1]; // fall back legato
-            else               v.stage = Stage::Release;
+            if (stackSize > 0)
+            {
+                const int back = noteStack[(size_t) stackSize - 1];
+                v.note = back;
+                glideTo (v, back, p, p.portaMs > 0.5f);
+                lastPitch = back;
+            }
+            else v.stage = Stage::Release;
             return;
         }
         for (auto& v : voices)
@@ -244,12 +263,12 @@ public:
 
     void allNotesOff()
     {
-        stackSize = 0;
+        stackSize = 0; heldCount = 0;
         for (auto& v : voices) if (v.active) v.stage = Stage::Release;
     }
 
-    // Grains are added into outL/outR, the clean sine sub into subOut.
-    void render (float* outL, float* outR, float* subOut, int numSamples, const Params& p, const SampleData* sample)
+    // Adds into outL/outR. sample == nullptr keeps voices/glides running silently.
+    void render (float* outL, float* outR, int numSamples, const Params& p, const SampleData* sample)
     {
         const bool hasSample = sample != nullptr && sample->numFrames() >= 4;
         const int    N        = hasSample ? sample->numFrames() : 1;
@@ -258,11 +277,8 @@ public:
         const float* srcR     = hasSample ? (sample->numChannels() > 1 ? sample->channels[1].data() : srcL) : nullptr;
 
         const float  attackInc  = 1.0f / (0.002f * (float) sr);
-        const float  releaseDec = 1.0f / (0.18f * (float) sr);
+        const float  releaseDec = 1.0f / (0.12f * (float) sr);
         const double holdBase   = std::max (16.0, p.holdMs * 0.001 * sr * (1.0 + 7.0 * (double) (p.smear * p.smear)));
-        const double lfoInc     = 2.0 * kPi * (double) p.lfoRate / sr;
-        const double glideCoef  = p.glideMs > 0.5f ? std::exp (-1.0 / (p.glideMs * 0.001 * sr)) : 0.0;
-        const double transposeRatio = std::pow (2.0, (double) p.transpose / 12.0);
 
         for (auto& v : voices)
         {
@@ -286,34 +302,48 @@ public:
                     }
                 }
 
-                // glide
-                v.curNote = (double) v.targetNote + (v.curNote - (double) v.targetNote) * glideCoef;
-                const double freq = 440.0 * std::pow (2.0, (v.curNote + (double) p.pitch - 69.0) / 12.0);
-
-                // sub
-                v.subPhase += 2.0 * kPi * freq / sr;
-                if (v.subPhase > 2.0 * kPi) v.subPhase -= 2.0 * kPi;
-                const float amp = v.env * v.velocity;
-                subOut[i] += (float) std::sin (v.subPhase) * amp * p.sub * 0.8f;
+                // portamento (linear in pitch, fixed time)
+                if (v.glideAge < v.glideLen)
+                {
+                    ++v.glideAge;
+                    v.curNote = v.glideFrom + (v.glideTarget - v.glideFrom) * (double) v.glideAge / (double) v.glideLen;
+                }
 
                 if (! hasSample) continue;
 
-                v.nextGrainIn -= 1.0;
-                if (v.nextGrainIn <= 0.0)
+                const double semis = v.curNote - 60.0 + (double) p.transpose;
+                const double ratio = std::exp2 (semis / 12.0) * fileRate;
+                const float  amp   = v.env * v.velocity;
+
+                if (! p.grainOn)
                 {
-                    const double spacing = p.keySync ? sr / (freq * transposeRatio) : std::max (16.0, p.spacingMs * 0.001 * sr);
-                    spawnGrain (v, p, *sample, fileRate, holdBase, spacing);
+                    // plain looping oscillator / sampler
+                    float l, r;
+                    readHermite (srcL, srcR, N, v.playPos, l, r);
+                    v.playPos += ratio;
+                    if (v.playPos >= (double) N) v.playPos -= (double) N;
+                    outL[i] += l * amp * 0.85f;
+                    outR[i] += r * amp * 0.85f;
+                }
+                else
+                {
+                    v.nextGrainIn -= 1.0;
+                    if (v.nextGrainIn <= 0.0)
+                    {
+                        const double freq = 440.0 * std::exp2 ((v.curNote + (double) p.transpose - 69.0) / 12.0);
+                        const double spacing = p.keySync ? sr / freq : std::max (16.0, p.spacingMs * 0.001 * sr);
+                        spawnGrain (v, p, *sample, ratio, holdBase, spacing, fileRate);
 
-                    const double lfo = std::sin (lfoPhase + v.lfoOffset);
-                    const double ws  = (double) p.waveSpacing + (double) p.lfoDepth * 3.0 * lfo;
-                    v.travel += ws * spacing * fileRate / (double) N;
-                    v.travel -= std::floor (v.travel);
+                        v.travel += (double) p.waveSpacing * spacing * fileRate / (double) N;
+                        v.travel -= std::floor (v.travel);
 
-                    const float overlap = (float) std::min ((double) kGrainsPerVoice, holdBase / spacing);
-                    v.norm = 1.0f / std::sqrt (std::max (1.0f, overlap));
-                    v.nextGrainIn += spacing;
+                        const float overlap = (float) std::min ((double) kGrainsPerVoice, holdBase / spacing);
+                        v.norm = 1.0f / std::sqrt (std::max (1.0f, overlap));
+                        v.nextGrainIn += spacing;
+                    }
                 }
 
+                // grains (also lets running grains finish after switching to plain mode)
                 float sumL = 0.0f, sumR = 0.0f;
                 for (auto& g : v.grains)
                 {
@@ -326,15 +356,13 @@ public:
                     g.pos += g.inc;
                     if (++g.age >= g.length) g.active = false;
                 }
-
                 const float ga = amp * v.norm * 1.41421356f;
                 outL[i] += sumL * ga;
                 outR[i] += sumR * ga;
             }
         }
 
-        lfoPhase = std::fmod (lfoPhase + lfoInc * numSamples, 2.0 * kPi);
-        publishViz (N, hasSample);
+        publishViz (N, hasSample, p);
     }
 
     int activeVoiceCount() const
@@ -360,28 +388,46 @@ private:
     {
         bool     active = false;
         int      note = 60;
-        int      targetNote = 60;
-        double   curNote = 60.0;
         float    velocity = 1.0f;
         Stage    stage = Stage::Off;
         float    env = 0.0f;
         float    norm = 1.0f;
+        double   curNote = 60.0, glideFrom = 60.0, glideTarget = 60.0;
+        int      glideLen = 0, glideAge = 0;
         double   travel = 0.0;
         double   nextGrainIn = 0.0;
-        double   lfoOffset = 0.0;
-        double   subPhase = 0.0;
+        double   playPos = 0.0;
         uint64_t startStamp = 0;
         uint32_t grainCount = 0;
         int      lastTransient = -1;
         std::array<Grain, kGrainsPerVoice> grains {};
     };
 
-    void startVoice (Voice& v, int note, float velocity, bool fresh)
+    void startVoice (Voice& v, int note, float velocity, const Params& p, bool fresh)
     {
-        v.active = true; v.note = note; v.targetNote = note; v.curNote = note;
-        v.velocity = velocity; v.stage = Stage::Attack; v.startStamp = ++stamp;
+        v.active = true; v.note = note; v.velocity = velocity;
+        v.curNote = v.glideFrom = v.glideTarget = note; v.glideLen = v.glideAge = 0;
+        v.stage = Stage::Attack; v.startStamp = ++stamp;
         v.travel = 0.0; v.nextGrainIn = 0.0; v.grainCount = 0; v.lastTransient = -1;
-        if (fresh) { v.env = 0.0f; v.subPhase = 0.0; for (auto& g : v.grains) g.active = false; }
+        v.playPos = (double) std::clamp (p.position, 0.0f, 0.9999f) * (double) lastNumFrames;
+        if (fresh) { v.env = 0.0f; for (auto& g : v.grains) g.active = false; }
+    }
+
+    void startGlide (Voice& v, double from, double to, const Params& p)
+    {
+        double len = p.portaMs * 0.001 * sr;
+        if (p.portaScaled) len *= std::max (0.1, std::abs (to - from) / 12.0);
+        v.glideFrom = from;
+        v.glideTarget = to;
+        v.glideLen = std::max (1, (int) len);
+        v.glideAge = 0;
+        v.curNote = from;
+    }
+
+    void glideTo (Voice& v, double to, const Params& p, bool withPorta)
+    {
+        if (withPorta) startGlide (v, v.curNote, to, p);
+        else { v.curNote = v.glideFrom = v.glideTarget = to; v.glideLen = v.glideAge = 0; }
     }
 
     void pushNote (int note)
@@ -423,20 +469,14 @@ private:
         outR = (R == L) ? outL : herm (R[i0], R[i1], R[i2], R[i3]);
     }
 
-    void spawnGrain (Voice& v, const Params& p, const SampleData& s, double fileRate, double hold, double spacing)
+    void spawnGrain (Voice& v, const Params& p, const SampleData& s, double baseRatio, double hold, double spacing, double fileRate)
     {
         Grain* g = nullptr;
         for (auto& c : v.grains) if (! c.active) { g = &c; break; }
         if (g == nullptr) return;
 
         const int N = s.numFrames();
-
-        // grains always follow the played note; key sync additionally locks the grain rate to it
-        float semis = (float) (v.curNote - 60.0) + p.pitch + p.transpose
-                    + p.pitchSpray * rng.bipolar() + p.smear * 0.25f * rng.bipolar();
-        if (p.octaveProb > 0.0f && rng.uni() < p.octaveProb)
-            semis += (rng.uni() < 0.66f) ? 12.0f : -12.0f;
-        const double ratio = std::pow (2.0, (double) semis / 12.0) * fileRate;
+        const double ratio = p.smear > 0.0f ? baseRatio * std::exp2 ((double) (p.smear * 0.25f * rng.bipolar()) / 12.0) : baseRatio;
 
         double start = (double) p.position + v.travel;
         if (p.rand > 0.0f)
@@ -467,15 +507,12 @@ private:
             }
         }
 
-        const bool reverse = ! hit && p.reverseProb > 0.0f && rng.uni() < p.reverseProb;
-
         g->active = true;
         g->age = 0;
         g->length = length;
-        g->fade = std::max (8, (int) (attack * (float) length * 0.5f));
-        if (hit) g->fade = std::max (8, (int) (0.0008 * sr));
-        g->inc = reverse ? -ratio : ratio;
-        g->pos = reverse ? start + ratio * (double) length : start;
+        g->fade = hit ? std::max (8, (int) (0.0008 * sr)) : std::max (8, (int) (attack * (float) length * 0.5f));
+        g->inc = ratio;
+        g->pos = start;
         g->hit = hit;
 
         const float side = (v.grainCount++ & 1u) ? 1.0f : -1.0f;
@@ -485,13 +522,18 @@ private:
         g->gainR = std::sin (a);
     }
 
-    void publishViz (int N, bool hasSample)
+    void publishViz (int N, bool hasSample, const Params& p)
     {
+        if (hasSample) lastNumFrames = N;
         int n = 0, h = 0;
         for (auto& v : voices)
         {
             if (! v.active || ! hasSample) continue;
-            if (h < kMaxVoices) vizHead[(size_t) h++].store ((float) v.travel, std::memory_order_relaxed);
+            if (h < kMaxVoices)
+            {
+                const double head = p.grainOn ? wrap ((double) p.position + v.travel, 1.0) : v.playPos / (double) N;
+                vizHead[(size_t) h++].store ((float) head, std::memory_order_relaxed);
+            }
             for (auto& g : v.grains)
             {
                 if (! g.active || n >= kMaxViz) continue;
@@ -506,10 +548,10 @@ private:
     }
 
     double sr = 44100.0;
-    double lfoPhase = 0.0;
     std::array<Voice, kMaxVoices> voices {};
     std::array<int, 32> noteStack {};
-    int stackSize = 0;
+    int stackSize = 0, heldCount = 0, lastNumFrames = 1;
+    double lastPitch = -1.0;
     Random rng;
     uint64_t stamp = 0;
 };

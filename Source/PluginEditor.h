@@ -174,6 +174,14 @@ private:
     GranulumProcessor& proc;
 };
 
+// Block on/off: LED + title, click toggles
+class Lamp final : public juce::Button
+{
+public:
+    explicit Lamp (const juce::String& name) : juce::Button (name) { setClickingTogglesState (true); }
+    void paintButton (juce::Graphics&, bool over, bool down) override;
+};
+
 class GranulumEditor final : public juce::AudioProcessorEditor,
                              public juce::DragAndDropContainer,
                              public juce::FileDragAndDropTarget,
@@ -195,9 +203,7 @@ private:
     void timerCallback() override;
     void openFile (const juce::File&);
     void launchChooser();
-    void setSource (int s);
     void selectLfo (int i);
-    void drawSectionHeader (juce::Graphics&, juce::Rectangle<int> area, const juce::String& title, bool lit);
 
     GranulumProcessor& proc;
     GranulumLook look;
@@ -205,40 +211,47 @@ private:
     WaveformView waveform;
     HarmonicEditor harmonics;
 
+    using ButtonAtt = juce::AudioProcessorValueTreeState::ButtonAttachment;
+    using ComboAtt  = juce::AudioProcessorValueTreeState::ComboBoxAttachment;
+
+    // block lamps
+    Lamp grainLamp { "GRANULAR" }, filterLamp { "FILTER" }, fxLamp { "EFFECTS" };
+    std::unique_ptr<ButtonAtt> grainLampA, filterLampA, fxLampA;
+
     juce::TextButton randomButton { "RANDOM ALL" }, loadButton { "LOAD" };
-    juce::TextButton rndGrains { "RANDOM" }, rndBass { "RANDOM" }, rndFx { "RANDOM" }, rndBars { "RANDOM" };
-    juce::TextButton srcAdd { "ADD" }, srcSample { "SAMPLE" }, srcMix { "MIX" };
-    juce::TextButton transButton { "TRANSIENTS" }, keySyncButton { "KEY SYNC" }, monoButton { "MONO" };
-    std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> transAttachment, keySyncAttachment, monoAttachment;
+    juce::TextButton rndGrains { "RANDOM" }, rndFilter { "RANDOM" }, rndFx { "RANDOM" }, rndBars { "RANDOM" };
+    juce::TextButton osc1Grain { "GRAIN" }, osc2Grain { "GRAIN" };
+    juce::TextButton transButton { "TRANSIENTS" }, keySyncButton { "KEY SYNC" };
+    juce::TextButton polyButton { "POLY" }, monoButton { "MONO" }, alwaysButton { "ALWAYS" }, scaledButton { "SCALED" };
+    std::unique_ptr<ButtonAtt> osc1GrainA, osc2GrainA, transA, keySyncA, alwaysA, scaledA;
     juce::Label sampleName;
-    juce::ComboBox filterType;
-    std::unique_ptr<juce::AudioProcessorValueTreeState::ComboBoxAttachment> filterTypeAttachment;
+    juce::ComboBox filterType, distType;
+    std::unique_ptr<ComboAtt> filterTypeA, distTypeA;
     juce::MidiKeyboardComponent keyboard;
     std::unique_ptr<juce::FileChooser> chooser;
     juce::TooltipWindow tooltips { this, 600 };
 
-    std::vector<std::unique_ptr<Knob>> heroKnobs, motionKnobs, bassKnobs, fxKnobs, sourceKnobs;
+    std::vector<std::unique_ptr<Knob>> heroKnobs, motionKnobs, osc1Knobs, osc2Knobs, filterKnobs, distKnobs, revKnobs, globalKnobs;
     std::vector<Knob*> allKnobs;
 
-    // LFO strip
     struct LfoControls
     {
         juce::ComboBox shape, div, mode;
         juce::TextButton sync { "SYNC" };
         std::unique_ptr<Knob> rate;
-        std::unique_ptr<juce::AudioProcessorValueTreeState::ComboBoxAttachment> shapeA, divA, modeA;
-        std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> syncA;
+        std::unique_ptr<ComboAtt> shapeA, divA, modeA;
+        std::unique_ptr<ButtonAtt> syncA;
     };
     std::array<std::unique_ptr<LfoTab>, kNumLfos> lfoTabs;
     std::array<std::unique_ptr<LfoControls>, kNumLfos> lfoControls;
     LfoDisplay lfoDisplay;
     int selectedLfo = 0;
 
-    juce::Rectangle<int> titleArea, gemsArea, screenFrame, sourceArea, grainArea, bassArea, fxArea, ledArea,
-                         lfoFrame, lfoHintArea, lfoShapeLabel, lfoModeLabel, lfoDivLabel;
+    juce::Rectangle<int> titleArea, gemsArea, screenFrame, osc1Area, osc2Area, osc1Label, osc2Label,
+                         grainArea, filterArea, fxArea, ledArea, lfoFrame, voiceArea,
+                         lfoShapeLabel, lfoModeLabel, lfoDivLabel, distLabel, revLabel, distTypeLabel;
     float meter = 0.0f;
     float activity = 0.0f;
-    int shownSource = -1;
     uint32_t shownModVersion = 0;
     juce::String statusText;
 

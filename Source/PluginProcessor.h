@@ -7,7 +7,8 @@
 
 namespace ParamID
 {
-    // grains
+    // granular block
+    inline constexpr const char* grainOn     = "grainOn";
     inline constexpr const char* attack      = "gAttack";
     inline constexpr const char* hold        = "hold";
     inline constexpr const char* spacing     = "spacing";
@@ -18,25 +19,34 @@ namespace ParamID
     inline constexpr const char* pan         = "pan";
     inline constexpr const char* transients  = "transients";
     inline constexpr const char* keySync     = "keySync";
-    // bass
-    inline constexpr const char* sub         = "sub";
-    inline constexpr const char* xover       = "xover";
-    inline constexpr const char* drive       = "drive";
-    inline constexpr const char* glide       = "glide";
-    inline constexpr const char* pitch       = "pitch";
-    inline constexpr const char* mono        = "mono";
-    // filter / space
+    // oscillators
+    inline constexpr const char* osc1Vol     = "osc1Vol";
+    inline constexpr const char* osc1Oct     = "osc1Oct";
+    inline constexpr const char* osc1Semi    = "osc1Semi";
+    inline constexpr const char* osc1Grain   = "osc1Grain";
+    inline constexpr const char* osc2Vol     = "osc2Vol";
+    inline constexpr const char* osc2Oct     = "osc2Oct";
+    inline constexpr const char* osc2Semi    = "osc2Semi";
+    inline constexpr const char* osc2Grain   = "osc2Grain";
+    // filter block
+    inline constexpr const char* filterOn    = "filterOn";
     inline constexpr const char* cutoff      = "cutoff";
     inline constexpr const char* reso        = "reso";
     inline constexpr const char* ftype       = "ftype";
+    // effects block
+    inline constexpr const char* fxOn        = "fxOn";
+    inline constexpr const char* distType    = "distType";
+    inline constexpr const char* distDrive   = "distDrive";
+    inline constexpr const char* distTone    = "distTone";
+    inline constexpr const char* distMix     = "distMix";
     inline constexpr const char* space       = "space";
     inline constexpr const char* room        = "room";
+    // voice / global
+    inline constexpr const char* mono        = "mono";
+    inline constexpr const char* porta       = "porta";
+    inline constexpr const char* portaAlways = "portaAlways";
+    inline constexpr const char* portaScaled = "portaScaled";
     inline constexpr const char* output      = "output";
-    // source
-    inline constexpr const char* source      = "source";   // 0 additive, 1 sample, 2 mix
-    inline constexpr const char* mix         = "mix";      // 0 = all sample, 1 = all additive
-    inline constexpr const char* addOct      = "addOct";
-    inline constexpr const char* addSemi     = "addSemi";
     // LFOs: "lfo1Shape", "lfo1Rate", "lfo1Sync", "lfo1Div", "lfo1Mode" ...
     inline juce::String lfo (int index, const char* what) { return "lfo" + juce::String (index + 1) + what; }
 }
@@ -47,9 +57,10 @@ static constexpr int kMaxMods = 48;
 enum ModTarget
 {
     mtAttack, mtHold, mtSpacing, mtWave, mtPosition, mtRand, mtSmear, mtPan,
-    mtSub, mtXover, mtDrive, mtGlide, mtPitch,
-    mtCutoff, mtReso, mtSpace, mtRoom, mtOutput,
-    mtAddOct, mtAddSemi, mtMix,
+    mtOsc1Vol, mtOsc1Oct, mtOsc1Semi, mtOsc2Vol, mtOsc2Oct, mtOsc2Semi,
+    mtCutoff, mtReso,
+    mtDistDrive, mtDistTone, mtDistMix, mtSpace, mtRoom,
+    mtPorta, mtOutput,
     mtLfo1Rate, mtLfo2Rate,
     kNumModTargets
 };
@@ -90,6 +101,25 @@ struct SourceSlot
     }
 };
 
+// Five distortion algorithms with tone + mix
+class Distortion
+{
+public:
+    void prepare (double sampleRate) { sr = sampleRate; reset(); }
+    void reset()
+    {
+        for (int c = 0; c < 2; ++c) { lp[c] = dcX[c] = dcY[c] = hold[c] = 0.0f; count[c] = 0; }
+    }
+    void process (float* L, float* R, int n, int type, float drive, float tone, float mix);
+    static const juce::StringArray& typeNames();
+
+private:
+    float shape (int type, float x, float drive, int ch);
+    double sr = 44100.0;
+    float lp[2] {}, dcX[2] {}, dcY[2] {}, hold[2] {};
+    int count[2] {};
+};
+
 class GranulumProcessor final : public juce::AudioProcessor,
                                 private juce::Timer
 {
@@ -124,7 +154,7 @@ public:
     bool loadSample (const juce::File& file, juce::String& error);
     juce::String getSampleName() const;
     bool hasSample() const { return sampleLoaded.load(); }
-    bool showingSample() const;    // waveform view shows the sample (otherwise the additive tone)
+    bool showingSample() const;   // waveform view shows OSC 2 (otherwise OSC 1)
     std::shared_ptr<const WaveformPeaks> getPeaks() const;
     double getSampleLengthSeconds() const;
     static bool isSupportedAudioFile (const juce::String& path);
@@ -135,7 +165,7 @@ public:
     void rebuildNow() { timerCallback(); }
 
     void randomize();
-    void randomizeSection (int section); // 0 grains, 1 bass, 2 filter/space, 3 additive bars
+    void randomizeSection (int section); // 0 granular, 1 filter, 2 effects, 3 additive bars
 
     // ---- modulation ----
     static const char* modTargetId (int target);
@@ -167,6 +197,7 @@ private:
     void renderRange (int from, int to);
     void processChunk (int from, int len);
     void computeModulated (float* values);
+    granulum::Params voiceParams() const;
     void advanceLfos (int endSample, int len, const float* values);
     void noteOn (int note, float velocity);
     void noteOff (int note);
@@ -184,7 +215,6 @@ private:
     std::shared_ptr<const WaveformPeaks> addPeaks, smpPeaks;
     double addSeconds = 0.0, smpSeconds = 0.0;
 
-    // modulation
     struct ModSlot
     {
         std::atomic<int>   target { -1 };
@@ -194,24 +224,26 @@ private:
     std::array<ModSlot, kMaxMods> mods;
     std::array<juce::RangedAudioParameter*, kNumModTargets> modParams {};
 
-    // LFO state (audio thread)
     std::array<double, kNumLfos> lfoPhase {};
     std::array<float, kNumLfos>  lfoValue {}, lfoSH {}, lfoPrev {}, lfoNext {};
     granulum::Random lfoRng { 0xC0FFEEull };
     int heldNotes = 0;
     double hostBpm = 120.0, hostPpq = -1.0;
     bool hostPlaying = false;
+    float lastPorta = 0.0f;
 
-    // dsp
     juce::dsp::StateVariableTPTFilter<float> filter;
-    juce::dsp::LinkwitzRileyFilter<float> crossover;
+    Distortion distortion;
     juce::dsp::Reverb reverb;
     juce::SmoothedValue<float> outGain;
-    juce::AudioBuffer<float> addBuf, smpBuf, work, subBuf;
-    float lastAddGain = 1.0f, lastSmpGain = 0.0f, blockPeak = 0.0f;
+    juce::AudioBuffer<float> addBuf, smpBuf, work;
+    float lastG1 = 0.8f, lastG2 = 0.8f, blockPeak = 0.0f;
 
-    std::atomic<float>* pTrans {};  std::atomic<float>* pKeySync {}; std::atomic<float>* pMono {};
-    std::atomic<float>* pFtype {};  std::atomic<float>* pSource {};
+    std::atomic<float>* pGrainOn {};  std::atomic<float>* pTrans {};    std::atomic<float>* pKeySync {};
+    std::atomic<float>* pOsc1Grain {}; std::atomic<float>* pOsc2Grain {};
+    std::atomic<float>* pFilterOn {}; std::atomic<float>* pFtype {};
+    std::atomic<float>* pFxOn {};     std::atomic<float>* pDistType {};
+    std::atomic<float>* pMono {};     std::atomic<float>* pPortaAlways {}; std::atomic<float>* pPortaScaled {};
     std::array<std::atomic<float>*, kNumLfos> pLfoShape {}, pLfoSync {}, pLfoDiv {}, pLfoMode {};
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (GranulumProcessor)
