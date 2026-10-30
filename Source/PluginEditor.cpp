@@ -534,7 +534,7 @@ void HarmonicEditor::paint (Graphics& g)
     g.setColour (Palette::textDim.withAlpha (0.55f));
     g.setFont (uiFont (9.5f));
     for (int k : { 1, 8, 16, 24, 32 })
-        g.drawText (String (k), Rectangle<float> (a.getX() + bw * (float) (k - 1), a.getBottom() + 1.0f, bw, 10.0f), Justification::centred, false);
+        g.drawText (String (k), Rectangle<float> (a.getX() + bw * ((float) k - 0.5f) - 12.0f, a.getBottom() + 1.0f, 24.0f, 10.0f), Justification::centred, false);
 }
 
 // ============================================================================
@@ -849,11 +849,11 @@ void GranulumEditor::resized()
         mixSlider.setBounds (bottom.withTrimmedRight (S (4)).withTrimmedBottom (S (8)));
     }
 
-    // ---- sections: grains 5, bass 2, fx 3 ----
+    // ---- sections: grains 4.7, bass 2.4, fx 2.9 ----
     const int gap = S (18);
     const float colW = (float) (knobs.getWidth() - gap * 2) / 10.0f;
-    grainArea = knobs.removeFromLeft ((int) (colW * 5)); knobs.removeFromLeft (gap);
-    bassArea  = knobs.removeFromLeft ((int) (colW * 2)); knobs.removeFromLeft (gap);
+    grainArea = knobs.removeFromLeft ((int) (colW * 4.7f)); knobs.removeFromLeft (gap);
+    bassArea  = knobs.removeFromLeft ((int) (colW * 2.4f)); knobs.removeFromLeft (gap);
     fxArea    = knobs;
 
     auto headerButtons = [&] (Rectangle<int> area, std::initializer_list<std::pair<Button*, int>> bs)
