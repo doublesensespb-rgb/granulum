@@ -7,31 +7,33 @@
 
 namespace ParamID
 {
-    inline constexpr const char* position   = "position";
-    inline constexpr const char* spray      = "spray";
-    inline constexpr const char* scan       = "scan";
-    inline constexpr const char* size       = "size";
-    inline constexpr const char* density    = "density";
-    inline constexpr const char* chaos      = "chaos";
-    inline constexpr const char* pitch      = "pitch";
-    inline constexpr const char* pitchSpray = "pitchSpray";
-    inline constexpr const char* octave     = "octave";
-    inline constexpr const char* reverse    = "reverse";
-    inline constexpr const char* shape      = "shape";
-    inline constexpr const char* spread     = "spread";
-    inline constexpr const char* attack     = "attack";
-    inline constexpr const char* release    = "release";
-    inline constexpr const char* cutoff     = "cutoff";
-    inline constexpr const char* reso       = "reso";
-    inline constexpr const char* ftype      = "ftype";
-    inline constexpr const char* space      = "space";
-    inline constexpr const char* room       = "room";
-    inline constexpr const char* output     = "output";
+    inline constexpr const char* attack      = "gAttack";
+    inline constexpr const char* hold        = "hold";
+    inline constexpr const char* spacing     = "spacing";
+    inline constexpr const char* waveSpacing = "waveSpacing";
+    inline constexpr const char* position    = "position";
+    inline constexpr const char* rand        = "rand";
+    inline constexpr const char* smear       = "smear";
+    inline constexpr const char* pan         = "pan";
+    inline constexpr const char* lfoDepth    = "lfoDepth";
+    inline constexpr const char* lfoRate     = "lfoRate";
+    inline constexpr const char* pitch       = "pitch";
+    inline constexpr const char* pitchSpray  = "pitchSpray";
+    inline constexpr const char* octave      = "octave";
+    inline constexpr const char* reverse     = "reverse";
+    inline constexpr const char* transients  = "transients";
+    inline constexpr const char* cutoff      = "cutoff";
+    inline constexpr const char* reso        = "reso";
+    inline constexpr const char* ftype       = "ftype";
+    inline constexpr const char* space       = "space";
+    inline constexpr const char* room        = "room";
+    inline constexpr const char* output      = "output";
 }
 
 struct WaveformPeaks
 {
     std::vector<float> mins, maxs; // per bin, both channels merged
+    std::vector<float> transients; // normalised 0..1
 };
 
 class GranulumProcessor final : public juce::AudioProcessor,
@@ -53,7 +55,7 @@ public:
     bool acceptsMidi() const override  { return true; }
     bool producesMidi() const override { return false; }
     bool isMidiEffect() const override { return false; }
-    double getTailLengthSeconds() const override { return 10.0; }
+    double getTailLengthSeconds() const override { return 8.0; }
 
     int getNumPrograms() override { return 1; }
     int getCurrentProgram() override { return 0; }
@@ -72,6 +74,7 @@ public:
     static bool isSupportedAudioFile (const juce::String& path);
 
     void randomize();
+    void randomizeSection (int section); // 0 grains, 1 pitch, 2 filter/space
 
     juce::AudioProcessorValueTreeState apvts;
     granulum::GrainEngine engine;
@@ -102,13 +105,13 @@ private:
     juce::SmoothedValue<float> outGain;
     juce::AudioBuffer<float> work;
 
-    std::atomic<float>* pPosition {}; std::atomic<float>* pSpray {};  std::atomic<float>* pScan {};
-    std::atomic<float>* pSize {};     std::atomic<float>* pDensity {}; std::atomic<float>* pChaos {};
+    std::atomic<float>* pAttack {};   std::atomic<float>* pHold {};     std::atomic<float>* pSpacing {};
+    std::atomic<float>* pWave {};     std::atomic<float>* pPosition {}; std::atomic<float>* pRand {}; std::atomic<float>* pSmear {};
+    std::atomic<float>* pPan {};      std::atomic<float>* pLfoDepth {}; std::atomic<float>* pLfoRate {};
     std::atomic<float>* pPitch {};    std::atomic<float>* pPitchSpray {}; std::atomic<float>* pOctave {};
-    std::atomic<float>* pReverse {};  std::atomic<float>* pShape {};  std::atomic<float>* pSpread {};
-    std::atomic<float>* pAttack {};   std::atomic<float>* pRelease {}; std::atomic<float>* pCutoff {};
-    std::atomic<float>* pReso {};     std::atomic<float>* pFtype {};  std::atomic<float>* pSpace {};
-    std::atomic<float>* pRoom {};     std::atomic<float>* pOutput {};
+    std::atomic<float>* pReverse {};  std::atomic<float>* pTrans {};
+    std::atomic<float>* pCutoff {};   std::atomic<float>* pReso {};     std::atomic<float>* pFtype {};
+    std::atomic<float>* pSpace {};    std::atomic<float>* pRoom {};     std::atomic<float>* pOutput {};
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (GranulumProcessor)
 };

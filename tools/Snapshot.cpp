@@ -20,7 +20,7 @@ static File makeTestSample()
         b.setSample (0, i, (float) (v * env));
         b.setSample (1, i, (float) (v * env * 0.9));
     }
-    auto f = File::getSpecialLocation (File::tempDirectory).getChildFile ("Dusty Vox Pad.wav");
+    auto f = File::getSpecialLocation (File::tempDirectory).getChildFile ("Vocal Chop.wav");
     f.deleteFile();
     WavAudioFormat wav;
     std::unique_ptr<FileOutputStream> os (f.createOutputStream());
@@ -75,10 +75,14 @@ int main (int argc, char** argv)
     // play a chord so grains appear on the screen
     p.keyboardState.noteOn (1, 60, 0.9f);
     p.keyboardState.noteOn (1, 67, 0.8f);
-    if (auto* sp = p.apvts.getParameter (ParamID::spray))   sp->setValueNotifyingHost (0.35f);
-    if (auto* sc = p.apvts.getParameter (ParamID::scan))    sc->setValueNotifyingHost (0.6f);
-    if (auto* oc = p.apvts.getParameter (ParamID::octave))  oc->setValueNotifyingHost (0.3f);
-    if (auto* dn = p.apvts.getParameter (ParamID::density)) dn->setValueNotifyingHost (0.7f);
+    auto setP = [&p] (const char* id, float v) { if (auto* x = p.apvts.getParameter (id)) x->setValueNotifyingHost (x->convertTo0to1 (v)); };
+    setP (ParamID::transients, 1.0f);
+    setP (ParamID::hold, 150.0f);
+    setP (ParamID::spacing, 40.0f);
+    setP (ParamID::waveSpacing, 0.6f);
+    setP (ParamID::rand, 0.25f);
+    setP (ParamID::position, 0.15f);
+    setP (ParamID::octave, 0.3f);
     pump (p, 120, 300);
     shot ("ui-playing.png");
 

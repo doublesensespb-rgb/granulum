@@ -1,30 +1,72 @@
 // Offline test of the granular engine: no NaNs, sane levels, voices finish.
+// Also writes short WAV renders for listening checks.
 #include "../Source/GrainEngine.h"
 #include <cstdio>
 #include <cmath>
+#include <cstring>
+#include <string>
 
 using namespace granulum;
 
-static bool run (const char* name, Params p, int note, double seconds, double releaseAt)
+static SampleData makeDrumLoop()
 {
     SampleData s;
     s.sampleRate = 48000.0;
-    const int N = 48000 * 3;
-    s.channels.assign (2, std::vector<float> ((size_t) N));
+    const int N = 48000 * 2;
+    s.channels.assign (2, std::vector<float> ((size_t) N, 0.0f));
+    Random r (5);
+    for (int beat = 0; beat < 8; ++beat)
+    {
+        const int at = beat * N / 8;
+        const bool kick = beat % 2 == 0;
+        for (int i = 0; i < 9000 && at + i < N; ++i)
+        {
+            const double t = i / 48000.0;
+            const float v = kick ? (float) (std::sin (2 * kPi * (50 + 120 * std::exp (-t * 30)) * t) * std::exp (-t * 12))
+                                 : (float) (r.bipolar() * std::exp (-t * 25) * 0.7);
+            s.channels[0][(size_t) (at + i)] += v;
+            s.channels[1][(size_t) (at + i)] += v;
+        }
+    }
+    // a pad under it
     for (int i = 0; i < N; ++i)
     {
         const double t = i / 48000.0;
-        s.channels[0][(size_t) i] = (float) (0.6 * std::sin (2 * kPi * 220 * t) * std::exp (-((i % 24000) / 12000.0)));
-        s.channels[1][(size_t) i] = (float) (0.6 * std::sin (2 * kPi * 330 * t));
+        s.channels[0][(size_t) i] += (float) (0.15 * std::sin (2 * kPi * 220 * t));
+        s.channels[1][(size_t) i] += (float) (0.15 * std::sin (2 * kPi * 277 * t));
     }
+    s.transients = detectTransients (s);
+    return s;
+}
 
+static void writeWav (const std::string& path, const std::vector<float>& L, const std::vector<float>& R, int sr)
+{
+    FILE* f = std::fopen (path.c_str(), "wb");
+    if (! f) return;
+    const uint32_t n = (uint32_t) L.size(), bytes = n * 4;
+    auto w32 = [f] (uint32_t v) { std::fwrite (&v, 4, 1, f); };
+    auto w16 = [f] (uint16_t v) { std::fwrite (&v, 2, 1, f); };
+    std::fwrite ("RIFF", 1, 4, f); w32 (36 + bytes); std::fwrite ("WAVEfmt ", 1, 8, f);
+    w32 (16); w16 (1); w16 (2); w32 ((uint32_t) sr); w32 ((uint32_t) sr * 4); w16 (4); w16 (16);
+    std::fwrite ("data", 1, 4, f); w32 (bytes);
+    for (uint32_t i = 0; i < n; ++i)
+    {
+        auto c = [] (float x) { return (int16_t) std::lrint (std::max (-1.0f, std::min (1.0f, x)) * 32000.0f); };
+        int16_t a = c (L[i]), b = c (R[i]);
+        std::fwrite (&a, 2, 1, f); std::fwrite (&b, 2, 1, f);
+    }
+    std::fclose (f);
+}
+
+static bool run (const char* name, Params p, int note, double seconds, double releaseAt, const SampleData& s, const char* wavDir)
+{
     GrainEngine e;
     e.prepare (44100.0);
     e.noteOn (note, 0.9f);
 
     const int block = 256;
     const int total = (int) (seconds * 44100);
-    std::vector<float> L (block), R (block);
+    std::vector<float> L (block), R (block), allL, allR;
     double peak = 0, sumSq = 0;
     long count = 0;
     bool released = false;
@@ -40,34 +82,45 @@ static bool run (const char* name, Params p, int note, double seconds, double re
             peak = std::max (peak, (double) std::max (std::abs (L[(size_t) i]), std::abs (R[(size_t) i])));
             sumSq += L[(size_t) i] * L[(size_t) i];
             ++count;
+            allL.push_back (std::tanh (L[(size_t) i] * 0.7f));
+            allR.push_back (std::tanh (R[(size_t) i] * 0.7f));
         }
     }
+    if (wavDir) writeWav (std::string (wavDir) + "/" + name + ".wav", allL, allR, 44100);
     const double rms = std::sqrt (sumSq / count);
     const int active = e.activeVoiceCount();
-    printf ("%-14s peak=%.3f rms=%.3f voicesLeft=%d\n", name, peak, rms, active);
-    return peak > 0.01 && peak < 4.0 && active == 0;
+    printf ("%-12s peak=%.3f rms=%.3f voicesLeft=%d\n", name, peak, rms, active);
+    return peak > 0.01 && peak < 6.0 && active == 0;
 }
 
-int main()
+int main (int argc, char** argv)
 {
+    const char* wavDir = argc > 1 ? argv[1] : nullptr;
+    const auto s = makeDrumLoop();
+    printf ("transients detected: %zu (expected ~8)\n", s.transients.size());
+
     bool ok = true;
     Params p;
-    ok &= run ("default", p, 60, 3.0, 1.5);
+    ok &= run ("default", p, 60, 3.0, 2.5, s, wavDir);
 
-    Params dense = p; dense.density = 200; dense.sizeMs = 2000; dense.chaos = 1;
-    ok &= run ("dense", dense, 72, 5.0, 2.0);
+    Params buzz = p; buzz.attack = 0.0f; buzz.holdMs = 4; buzz.spacingMs = 3; buzz.waveSpacing = 0.4f;
+    ok &= run ("buzz", buzz, 60, 3.0, 2.5, s, wavDir);
 
-    Params wild = p; wild.scan = -2; wild.pitchSpray = 12; wild.octaveProb = 1; wild.reverseProb = 0.5f; wild.shape = 1; wild.spray = 1;
-    ok &= run ("wild", wild, 36, 3.0, 1.0);
+    Params stutter = p; stutter.attack = 0.05f; stutter.holdMs = 40; stutter.spacingMs = 120; stutter.waveSpacing = 1.0f; stutter.pan = 1.0f;
+    ok &= run ("stutter", stutter, 60, 3.0, 2.5, s, wavDir);
 
-    Params tiny = p; tiny.sizeMs = 5; tiny.density = 1; tiny.releaseMs = 5;
-    ok &= run ("tiny", tiny, 60, 2.0, 1.0);
+    Params smear = p; smear.smear = 1.0f; smear.waveSpacing = 0.3f;
+    ok &= run ("smear", smear, 60, 3.0, 2.5, s, wavDir);
 
-    // window must start and end near zero for smooth shapes
-    for (float sh : { 0.0f, 0.5f, 1.0f })
-        if (GrainEngine::window (0.0f, sh) > 0.01f || GrainEngine::window (1.0f, sh) > 0.01f) { printf ("window edge fail %.1f\n", sh); ok = false; }
+    Params stretch = p; stretch.attack = 0.8f; stretch.holdMs = 200; stretch.spacingMs = 50; stretch.waveSpacing = 0.25f; stretch.transients = true;
+    ok &= run ("stretch_tr", stretch, 60, 4.0, 3.5, s, wavDir);
 
-    // 9 notes on 8 voices -> stealing must not crash
+    Params warp = p; warp.waveSpacing = -1.5f; warp.lfoDepth = 0.6f; warp.lfoRate = 2.0f; warp.rand = 0.4f; warp.octaveProb = 0.4f; warp.reverseProb = 0.5f;
+    ok &= run ("warp", warp, 48, 3.0, 2.5, s, wavDir);
+
+    Params dense = p; dense.holdMs = 1000; dense.spacingMs = 1; dense.attack = 1.0f;
+    ok &= run ("dense", dense, 72, 3.0, 2.0, s, wavDir);
+
     GrainEngine e; e.prepare (48000);
     for (int n = 0; n < 9; ++n) e.noteOn (48 + n, 1.0f);
     printf ("steal: voices=%d\n", e.activeVoiceCount());

@@ -45,13 +45,14 @@ public:
 class Knob final : public juce::Component
 {
 public:
-    Knob (juce::AudioProcessorValueTreeState&, const juce::String& paramId, const juce::String& title, juce::Colour accent);
+    Knob (juce::AudioProcessorValueTreeState&, const juce::String& paramId, const juce::String& title, juce::Colour accent, bool hero = false);
     void resized() override;
     void paint (juce::Graphics&) override;
 
     juce::Slider slider;
 private:
     juce::String title;
+    bool hero = false;
     std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> attachment;
 };
 
@@ -72,6 +73,7 @@ private:
 
     GranulumProcessor& proc;
     std::vector<float> grainX, grainA;
+    std::vector<int> grainHit;
     std::vector<float> heads;
     juce::Image glass; // grid + scanlines + vignette, cached
 };
@@ -121,15 +123,19 @@ private:
 
     WaveformView waveform;
     SampleBlock sampleBlock;
-    juce::TextButton randomButton { "RANDOM" }, loadButton { "LOAD" };
+    juce::TextButton randomButton { "RANDOM ALL" }, loadButton { "LOAD" };
+    juce::TextButton rndGrains { "RANDOM" }, rndPitch { "RANDOM" }, rndFx { "RANDOM" };
+    juce::Label sampleName;
     juce::ComboBox filterType;
     std::unique_ptr<juce::AudioProcessorValueTreeState::ComboBoxAttachment> filterTypeAttachment;
     juce::MidiKeyboardComponent keyboard;
     std::unique_ptr<juce::FileChooser> chooser;
 
-    std::vector<std::unique_ptr<Knob>> grainKnobs, pitchKnobs, shapeKnobs, fxKnobs;
+    std::vector<std::unique_ptr<Knob>> heroKnobs, motionKnobs, pitchKnobs, fxKnobs;
+    juce::TextButton transButton { "TRANSIENTS" };
+    std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> transAttachment;
 
-    juce::Rectangle<int> titleArea, gemsArea, screenFrame, grainArea, pitchArea, shapeArea, fxArea, keysFrame, ledArea;
+    juce::Rectangle<int> titleArea, gemsArea, screenFrame, grainArea, pitchArea, fxArea, keysFrame, ledArea;
     juce::Image background;       // cached textured panel
     juce::Image sandOverlay;      // dust drawn over everything (cached)
     float meter = 0.0f;

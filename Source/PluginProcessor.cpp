@@ -23,28 +23,27 @@ AudioProcessorValueTreeState::ParameterLayout GranulumProcessor::createLayout()
 
     auto pct = A().withStringFromValueFunction ([] (float v, int) { return String (roundToInt (v * 100.0f)) + " %"; });
 
-    ps.push_back (std::make_unique<P> (ParameterID { ParamID::position, 1 },   "Position",    NormalisableRange<float> (0.0f, 1.0f), 0.3f, pct));
-    ps.push_back (std::make_unique<P> (ParameterID { ParamID::spray, 1 },      "Spray",       skewed (0.0f, 1.0f, 0.15f), 0.05f, pct));
-    ps.push_back (std::make_unique<P> (ParameterID { ParamID::scan, 1 },       "Scan",        NormalisableRange<float> (-2.0f, 2.0f), 0.0f,
-                                       A().withStringFromValueFunction ([] (float v, int) { return std::abs (v) < 0.005f ? String ("Freeze") : fmt (v, 2, "x"); })));
-    ps.push_back (std::make_unique<P> (ParameterID { ParamID::size, 1 },       "Grain Size",  skewed (5.0f, 2000.0f, 150.0f), 120.0f,
-                                       A().withStringFromValueFunction ([] (float v, int) { return v < 1000.0f ? fmt (v, 0, " ms") : fmt (v / 1000.0f, 2, " s"); })));
-    ps.push_back (std::make_unique<P> (ParameterID { ParamID::density, 1 },    "Density",     skewed (1.0f, 200.0f, 25.0f), 25.0f,
-                                       A().withStringFromValueFunction ([] (float v, int) { return fmt (v, 1, " /s"); })));
-    ps.push_back (std::make_unique<P> (ParameterID { ParamID::chaos, 1 },      "Chaos",       NormalisableRange<float> (0.0f, 1.0f), 0.2f, pct));
-    ps.push_back (std::make_unique<P> (ParameterID { ParamID::pitch, 1 },      "Pitch",       NormalisableRange<float> (-24.0f, 24.0f, 0.01f), 0.0f,
+    auto msFmt = A().withStringFromValueFunction ([] (float v, int) { return v < 1000.0f ? fmt (v, v < 10.0f ? 1 : 0, " ms") : fmt (v / 1000.0f, 2, " s"); });
+
+    ps.push_back (std::make_unique<P> (ParameterID { ParamID::attack, 1 },      "Attack",       NormalisableRange<float> (0.0f, 1.0f), 0.35f, pct));
+    ps.push_back (std::make_unique<P> (ParameterID { ParamID::hold, 1 },        "Hold",         skewed (1.0f, 1000.0f, 60.0f), 80.0f, msFmt));
+    ps.push_back (std::make_unique<P> (ParameterID { ParamID::spacing, 1 },     "Grain Spacing",skewed (1.0f, 1000.0f, 60.0f), 60.0f, msFmt));
+    ps.push_back (std::make_unique<P> (ParameterID { ParamID::waveSpacing, 1 }, "Wave Spacing", NormalisableRange<float> (-3.0f, 3.0f, 0.001f), 1.0f,
+                                       A().withStringFromValueFunction ([] (float v, int) { return std::abs (v) < 0.005f ? String ("FREEZE") : String (roundToInt (v * 100.0f)) + " %"; })));
+    ps.push_back (std::make_unique<P> (ParameterID { ParamID::position, 1 },    "Start",        NormalisableRange<float> (0.0f, 1.0f), 0.0f, pct));
+    ps.push_back (std::make_unique<P> (ParameterID { ParamID::rand, 1 },        "Rand",         NormalisableRange<float> (0.0f, 1.0f), 0.0f, pct));
+    ps.push_back (std::make_unique<P> (ParameterID { ParamID::smear, 1 },       "Smear",        NormalisableRange<float> (0.0f, 1.0f), 0.0f, pct));
+    ps.push_back (std::make_unique<P> (ParameterID { ParamID::pan, 1 },         "Pan",          NormalisableRange<float> (0.0f, 1.0f), 0.5f, pct));
+    ps.push_back (std::make_unique<P> (ParameterID { ParamID::lfoDepth, 1 },    "LFO Depth",    NormalisableRange<float> (0.0f, 1.0f), 0.0f, pct));
+    ps.push_back (std::make_unique<P> (ParameterID { ParamID::lfoRate, 1 },     "LFO Speed",    skewed (0.02f, 20.0f, 1.0f), 0.5f,
+                                       A().withStringFromValueFunction ([] (float v, int) { return fmt (v, v < 1.0f ? 2 : 1, " Hz"); })));
+    ps.push_back (std::make_unique<P> (ParameterID { ParamID::pitch, 1 },       "Pitch",        NormalisableRange<float> (-24.0f, 24.0f, 0.01f), 0.0f,
                                        A().withStringFromValueFunction ([] (float v, int) { return (v > 0 ? "+" : "") + fmt (v, 2, " st"); })));
-    ps.push_back (std::make_unique<P> (ParameterID { ParamID::pitchSpray, 1 }, "Pitch Spray", skewed (0.0f, 12.0f, 1.0f), 0.0f,
+    ps.push_back (std::make_unique<P> (ParameterID { ParamID::pitchSpray, 1 },  "Pitch Spray",  skewed (0.0f, 12.0f, 1.0f), 0.0f,
                                        A().withStringFromValueFunction ([] (float v, int) { return String::fromUTF8 ("\xc2\xb1") + fmt (v, 2, " st"); })));
-    ps.push_back (std::make_unique<P> (ParameterID { ParamID::octave, 1 },     "Octaves",     NormalisableRange<float> (0.0f, 1.0f), 0.0f, pct));
-    ps.push_back (std::make_unique<P> (ParameterID { ParamID::reverse, 1 },    "Reverse",     NormalisableRange<float> (0.0f, 1.0f), 0.0f, pct));
-    ps.push_back (std::make_unique<P> (ParameterID { ParamID::shape, 1 },      "Window",      NormalisableRange<float> (0.0f, 1.0f), 0.0f,
-                                       A().withStringFromValueFunction ([] (float v, int) { return v < 0.25f ? String ("Smooth") : v < 0.75f ? String ("Flat") : String ("Pluck"); })));
-    ps.push_back (std::make_unique<P> (ParameterID { ParamID::spread, 1 },     "Stereo",      NormalisableRange<float> (0.0f, 1.0f), 0.6f, pct));
-    ps.push_back (std::make_unique<P> (ParameterID { ParamID::attack, 1 },     "Attack",      skewed (1.0f, 5000.0f, 200.0f), 10.0f,
-                                       A().withStringFromValueFunction ([] (float v, int) { return v < 1000.0f ? fmt (v, 0, " ms") : fmt (v / 1000.0f, 2, " s"); })));
-    ps.push_back (std::make_unique<P> (ParameterID { ParamID::release, 1 },    "Release",     skewed (5.0f, 10000.0f, 600.0f), 400.0f,
-                                       A().withStringFromValueFunction ([] (float v, int) { return v < 1000.0f ? fmt (v, 0, " ms") : fmt (v / 1000.0f, 2, " s"); })));
+    ps.push_back (std::make_unique<P> (ParameterID { ParamID::octave, 1 },      "Octaves",      NormalisableRange<float> (0.0f, 1.0f), 0.0f, pct));
+    ps.push_back (std::make_unique<P> (ParameterID { ParamID::reverse, 1 },     "Reverse",      NormalisableRange<float> (0.0f, 1.0f), 0.0f, pct));
+    ps.push_back (std::make_unique<AudioParameterBool> (ParameterID { ParamID::transients, 1 }, "Transients", false));
     ps.push_back (std::make_unique<P> (ParameterID { ParamID::cutoff, 1 },     "Cutoff",      skewed (20.0f, 20000.0f, 1000.0f), 20000.0f,
                                        A().withStringFromValueFunction ([] (float v, int) { return v < 1000.0f ? fmt (v, 0, " Hz") : fmt (v / 1000.0f, 1, " kHz"); })));
     ps.push_back (std::make_unique<P> (ParameterID { ParamID::reso, 1 },       "Resonance",   skewed (0.5f, 10.0f, 1.5f), 0.707f,
@@ -64,20 +63,21 @@ GranulumProcessor::GranulumProcessor()
 {
     formatManager.registerBasicFormats();
 
+    pAttack     = apvts.getRawParameterValue (ParamID::attack);
+    pHold       = apvts.getRawParameterValue (ParamID::hold);
+    pSpacing    = apvts.getRawParameterValue (ParamID::spacing);
+    pWave       = apvts.getRawParameterValue (ParamID::waveSpacing);
     pPosition   = apvts.getRawParameterValue (ParamID::position);
-    pSpray      = apvts.getRawParameterValue (ParamID::spray);
-    pScan       = apvts.getRawParameterValue (ParamID::scan);
-    pSize       = apvts.getRawParameterValue (ParamID::size);
-    pDensity    = apvts.getRawParameterValue (ParamID::density);
-    pChaos      = apvts.getRawParameterValue (ParamID::chaos);
+    pRand       = apvts.getRawParameterValue (ParamID::rand);
+    pSmear      = apvts.getRawParameterValue (ParamID::smear);
+    pPan        = apvts.getRawParameterValue (ParamID::pan);
+    pLfoDepth   = apvts.getRawParameterValue (ParamID::lfoDepth);
+    pLfoRate    = apvts.getRawParameterValue (ParamID::lfoRate);
     pPitch      = apvts.getRawParameterValue (ParamID::pitch);
     pPitchSpray = apvts.getRawParameterValue (ParamID::pitchSpray);
     pOctave     = apvts.getRawParameterValue (ParamID::octave);
     pReverse    = apvts.getRawParameterValue (ParamID::reverse);
-    pShape      = apvts.getRawParameterValue (ParamID::shape);
-    pSpread     = apvts.getRawParameterValue (ParamID::spread);
-    pAttack     = apvts.getRawParameterValue (ParamID::attack);
-    pRelease    = apvts.getRawParameterValue (ParamID::release);
+    pTrans      = apvts.getRawParameterValue (ParamID::transients);
     pCutoff     = apvts.getRawParameterValue (ParamID::cutoff);
     pReso       = apvts.getRawParameterValue (ParamID::reso);
     pFtype      = apvts.getRawParameterValue (ParamID::ftype);
@@ -116,20 +116,21 @@ void GranulumProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
 
 void GranulumProcessor::readParams (granulum::Params& p) const
 {
+    p.attack      = pAttack->load();
+    p.holdMs      = pHold->load();
+    p.spacingMs   = pSpacing->load();
+    p.waveSpacing = pWave->load();
     p.position    = pPosition->load();
-    p.spray       = pSpray->load();
-    p.scan        = pScan->load();
-    p.sizeMs      = pSize->load();
-    p.density     = pDensity->load();
-    p.chaos       = pChaos->load();
+    p.rand        = pRand->load();
+    p.smear       = pSmear->load();
+    p.pan         = pPan->load();
+    p.lfoDepth    = pLfoDepth->load();
+    p.lfoRate     = pLfoRate->load();
     p.pitch       = pPitch->load();
     p.pitchSpray  = pPitchSpray->load();
     p.octaveProb  = pOctave->load();
     p.reverseProb = pReverse->load();
-    p.shape       = pShape->load();
-    p.spread      = pSpread->load();
-    p.attackMs    = pAttack->load();
-    p.releaseMs   = pRelease->load();
+    p.transients  = pTrans->load() > 0.5f;
 }
 
 void GranulumProcessor::processBlock (AudioBuffer<float>& buffer, MidiBuffer& midi)
@@ -270,8 +271,12 @@ bool GranulumProcessor::loadSample (const File& file, String& error)
             data->channels[(size_t) c][(size_t) i] = src[i] * normGain;
     }
 
+    data->transients = granulum::detectTransients (*data);
+
     // waveform overview
     auto pk = std::make_shared<WaveformPeaks>();
+    for (int t : data->transients)
+        pk->transients.push_back ((float) t / (float) frames);
     const int bins = 2048;
     pk->mins.assign (bins, 0.0f);
     pk->maxs.assign (bins, 0.0f);
@@ -334,6 +339,13 @@ void GranulumProcessor::timerCallback()
 
 void GranulumProcessor::randomize()
 {
+    randomizeSection (0);
+    randomizeSection (1);
+    randomizeSection (2);
+}
+
+void GranulumProcessor::randomizeSection (int section)
+{
     Random r;
     auto set = [this] (const char* id, float norm)
     {
@@ -344,18 +356,40 @@ void GranulumProcessor::randomize()
             p->endChangeGesture();
         }
     };
-    set (ParamID::position,   r.nextFloat());
-    set (ParamID::spray,      r.nextFloat() * 0.6f);
-    set (ParamID::scan,       r.nextFloat() < 0.4f ? 0.5f : 0.5f + (r.nextFloat() - 0.5f) * 0.4f);
-    set (ParamID::size,       0.15f + r.nextFloat() * 0.7f);
-    set (ParamID::density,    0.2f + r.nextFloat() * 0.6f);
-    set (ParamID::chaos,      r.nextFloat());
-    set (ParamID::pitch,      r.nextFloat() < 0.5f ? 0.5f : 0.5f + (float) (r.nextInt (5) - 2) * 12.0f / 48.0f);
-    set (ParamID::pitchSpray, r.nextFloat() < 0.5f ? 0.0f : r.nextFloat() * 0.5f);
-    set (ParamID::octave,     r.nextFloat() < 0.5f ? 0.0f : r.nextFloat() * 0.5f);
-    set (ParamID::reverse,    r.nextFloat() < 0.5f ? 0.0f : r.nextFloat());
-    set (ParamID::shape,      r.nextFloat());
-    set (ParamID::spread,     0.3f + r.nextFloat() * 0.7f);
+    auto maybe = [&r] (float chance, float value) { return r.nextFloat() < chance ? value : 0.0f; };
+
+    if (section == 0)
+    {
+        set (ParamID::attack,      r.nextFloat());
+        set (ParamID::hold,        0.1f + r.nextFloat() * 0.75f);
+        set (ParamID::spacing,     0.1f + r.nextFloat() * 0.7f);
+        set (ParamID::waveSpacing, r.nextFloat() < 0.25f ? 0.5f : 0.5f + (r.nextFloat() - 0.35f) * 0.55f);
+        set (ParamID::position,    r.nextFloat() * 0.8f);
+        set (ParamID::rand,        maybe (0.5f, r.nextFloat() * 0.6f));
+        set (ParamID::smear,       maybe (0.4f, r.nextFloat() * 0.8f));
+        set (ParamID::pan,         0.2f + r.nextFloat() * 0.8f);
+        set (ParamID::lfoDepth,    maybe (0.4f, r.nextFloat() * 0.5f));
+        set (ParamID::lfoRate,     r.nextFloat());
+    }
+    else if (section == 1)
+    {
+        set (ParamID::pitch,       r.nextFloat() < 0.5f ? 0.5f : 0.5f + (float) (r.nextInt (5) - 2) * 12.0f / 48.0f);
+        set (ParamID::pitchSpray,  maybe (0.5f, r.nextFloat() * 0.5f));
+        set (ParamID::octave,      maybe (0.5f, r.nextFloat() * 0.6f));
+        set (ParamID::reverse,     maybe (0.5f, r.nextFloat()));
+    }
+    else
+    {
+        // keep it musical: never kill the sound completely
+        const int type = r.nextInt (3);
+        set (ParamID::ftype,  (float) type / 2.0f);
+        set (ParamID::cutoff, type == 0 ? 0.45f + r.nextFloat() * 0.55f
+                            : type == 1 ? 0.35f + r.nextFloat() * 0.4f
+                                        : r.nextFloat() * 0.55f);
+        set (ParamID::reso,   r.nextFloat() * 0.7f);
+        set (ParamID::space,  r.nextFloat() * 0.8f);
+        set (ParamID::room,   0.3f + r.nextFloat() * 0.7f);
+    }
 }
 
 // ---------------------------------------------------------------------------
