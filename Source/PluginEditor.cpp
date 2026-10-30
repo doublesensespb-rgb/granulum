@@ -237,13 +237,16 @@ void GranulumLook::drawComboBox (Graphics& g, int w, int h, bool, int, int, int,
     g.fillPath (arrow);
 }
 
-Font GranulumLook::getComboBoxFont (ComboBox&) { return uiFont (13.0f, true, 0.05f); }
+Font GranulumLook::getComboBoxFont (ComboBox&) { return uiFont (12.0f, true, 0.02f); }
 
 Label* GranulumLook::createSliderTextBox (Slider& s)
 {
     auto* l = LookAndFeel_V4::createSliderTextBox (s);
     l->setFont (uiFont (12.5f, false, 0.04f));
     l->setJustificationType (Justification::centred);
+    l->setColour (Label::outlineColourId, Colours::transparentBlack);
+    l->setColour (Label::backgroundColourId, Colours::transparentBlack);
+    l->setColour (Label::outlineWhenEditingColourId, Palette::teal);
     return l;
 }
 
@@ -256,6 +259,9 @@ Knob::Knob (AudioProcessorValueTreeState& state, const String& paramId, const St
     slider.setSliderStyle (Slider::RotaryHorizontalVerticalDrag);
     slider.setTextBoxStyle (Slider::TextBoxBelow, false, 84, 18);
     slider.setColour (Slider::rotarySliderFillColourId, accent);
+    slider.setColour (Slider::textBoxOutlineColourId, Colours::transparentBlack);
+    slider.setColour (Slider::textBoxBackgroundColourId, Colours::transparentBlack);
+    slider.setColour (Slider::textBoxTextColourId, Palette::teal);
     slider.setRotaryParameters (MathConstants<float>::pi * 1.25f, MathConstants<float>::pi * 2.75f, true);
     auto* param = state.getParameter (paramId);
     slider.setDoubleClickReturnValue (true, param->convertFrom0to1 (param->getDefaultValue()));
@@ -646,7 +652,7 @@ GranulumEditor::GranulumEditor (GranulumProcessor& p)
     keyboard.setColour (MidiKeyboardComponent::shadowColourId, Colours::black.withAlpha (0.4f));
     keyboard.setColour (MidiKeyboardComponent::upDownButtonBackgroundColourId, Colour (0xff141516));
     keyboard.setColour (MidiKeyboardComponent::upDownButtonArrowColourId, Palette::teal);
-    keyboard.setAvailableRange (24, 108);
+    keyboard.setAvailableRange (36, 96);
     keyboard.setKeyWidth (18.0f);
     keyboard.setLowestVisibleKey (36);
     keyboard.setWantsKeyboardFocus (false);
@@ -912,7 +918,8 @@ void GranulumEditor::resized()
     // keyboard
     keysFrame = r.removeFromBottom (S (62));
     keyboard.setBounds (keysFrame.reduced (S (4), S (4)));
-    keyboard.setKeyWidth (18.0f * sc);
+    keyboard.setKeyWidth ((float) keyboard.getWidth() / 36.0f);
+    keyboard.setLowestVisibleKey (36);
     r.removeFromBottom (S (16));
 
     // knobs row
@@ -959,7 +966,7 @@ void GranulumEditor::resized()
     layoutGrid (pitchKnobs, pitchArea, 2);
     layoutGrid (shapeKnobs, shapeArea, 2);
     auto comboSlot = layoutGrid (fxKnobs, fxArea, 3, 1);
-    filterType.setBounds (comboSlot.withSizeKeepingCentre (jmin (comboSlot.getWidth() - S (6), S (112)), S (32)));
+    filterType.setBounds (comboSlot.withSizeKeepingCentre (comboSlot.getWidth() - S (4), S (32)));
 
     rebuildBackground();
 }
