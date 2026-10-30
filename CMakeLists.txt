@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.22)
-project(Granulum VERSION 0.1.0)
+project(Granulum VERSION 0.2.0)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -26,7 +26,8 @@ juce_add_plugin(Granulum
 
 target_sources(Granulum PRIVATE
     Source/PluginProcessor.cpp
-    Source/PluginEditor.cpp)
+    Source/PluginEditor.cpp
+    Source/Visuals.cpp)
 
 target_compile_definitions(Granulum PUBLIC
     JUCE_WEB_BROWSER=0
@@ -53,7 +54,8 @@ juce_add_console_app(Snapshot PRODUCT_NAME "Snapshot")
 target_sources(Snapshot PRIVATE
     tools/Snapshot.cpp
     Source/PluginProcessor.cpp
-    Source/PluginEditor.cpp)
+    Source/PluginEditor.cpp
+    Source/Visuals.cpp)
 target_compile_definitions(Snapshot PRIVATE
     JUCE_WEB_BROWSER=0
     JUCE_USE_CURL=0

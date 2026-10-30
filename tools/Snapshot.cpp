@@ -1,4 +1,4 @@
-// Renders the plugin editor to a PNG (used by CI to preview the design).
+// Renders the plugin editor to PNGs (used by CI to preview the design).
 #include "../Source/PluginProcessor.h"
 #include "../Source/PluginEditor.h"
 #include <iostream>
@@ -8,37 +8,26 @@ using namespace juce;
 static File makeTestSample()
 {
     const double sr = 44100.0;
-    const int n = (int) (sr * 4.0);
+    const int n = (int) (sr * 3.0);
     AudioBuffer<float> b (2, n);
     Random r (7);
     for (int i = 0; i < n; ++i)
     {
         const double t = i / sr;
-        const double env = std::pow (std::sin (MathConstants<double>::pi * std::fmod (t * 1.5, 1.0)), 3.0);
-        const double v = 0.5 * std::sin (2 * MathConstants<double>::pi * 110 * t + 3 * std::sin (2 * MathConstants<double>::pi * 0.7 * t))
-                       + 0.2 * (r.nextFloat() * 2 - 1) * (0.3 + 0.7 * std::sin (t * 2.3));
-        b.setSample (0, i, (float) (v * env));
-        b.setSample (1, i, (float) (v * env * 0.9));
+        const double env = 0.6 + 0.4 * std::sin (t * 3.0);
+        double v = 0.0;
+        for (int k = 1; k < 12; ++k) v += std::sin (2 * MathConstants<double>::pi * 110.0 * k * t) / k * (k == 3 || k == 5 ? 1.8 : 1.0);
+        v = v * 0.3 * env + 0.05 * (r.nextFloat() * 2 - 1);
+        b.setSample (0, i, (float) v);
+        b.setSample (1, i, (float) v);
     }
-    auto f = File::getSpecialLocation (File::tempDirectory).getChildFile ("Vocal Chop.wav");
+    auto f = File::getSpecialLocation (File::tempDirectory).getChildFile ("Growl Vox.wav");
     f.deleteFile();
     WavAudioFormat wav;
     std::unique_ptr<FileOutputStream> os (f.createOutputStream());
     std::unique_ptr<AudioFormatWriter> w (wav.createWriterFor (os.get(), sr, 2, 24, {}, 0));
     if (w != nullptr) { os.release(); w->writeFromAudioSampleBuffer (b, 0, n); }
     return f;
-}
-
-static void pump (GranulumProcessor& p, int blocks, int ms)
-{
-    AudioBuffer<float> buf (2, 512);
-    MidiBuffer midi;
-    for (int i = 0; i < blocks; ++i)
-    {
-        midi.clear();
-        p.processBlock (buf, midi);
-    }
-    MessageManager::getInstance()->runDispatchLoopUntil (ms);
 }
 
 int main (int argc, char** argv)
@@ -52,8 +41,18 @@ int main (int argc, char** argv)
     p.prepareToPlay (44100.0, 512);
 
     std::unique_ptr<AudioProcessorEditor> ed (p.createEditor());
-    ed->setSize (1080, 800);
+    ed->setSize (1100, 860);
 
+    auto live = [&] (int frames)
+    {
+        AudioBuffer<float> buf (2, 512);
+        MidiBuffer midi;
+        for (int f = 0; f < frames; ++f)
+        {
+            for (int b = 0; b < 2; ++b) { midi.clear(); p.processBlock (buf, midi); }
+            MessageManager::getInstance()->runDispatchLoopUntil (22);
+        }
+    };
     auto shot = [&] (const char* name)
     {
         auto img = ed->createComponentSnapshot (ed->getLocalBounds(), true, 1.0f);
@@ -64,46 +63,36 @@ int main (int argc, char** argv)
         png.writeImageToStream (img, os);
         std::cout << "wrote " << f.getFullPathName() << std::endl;
     };
-
     auto setP = [&p] (const char* id, float v) { if (auto* x = p.apvts.getParameter (id)) x->setValueNotifyingHost (x->convertTo0to1 (v)); };
 
-    // 1) additive source, playing a bass note
-    std::array<float, granulum::kNumHarmonics> h {};
-    const float bars[] = { 1.0f, 0.7f, 0.15f, 0.55f, 0.1f, 0.4f, 0.0f, 0.3f, 0.05f, 0.22f, 0.0f, 0.15f, 0.0f, 0.1f };
-    for (size_t i = 0; i < std::size (bars); ++i) h[i] = bars[i];
-    p.setHarmonics (h);
-    p.rebuildNow();
-    setP (ParamID::waveSpacing, 0.4f);
-    setP (ParamID::smear, 0.2f);
-    setP (ParamID::osc1Semi, 7.0f);
-    setP (ParamID::distDrive, 0.5f);
-    setP (ParamID::distType, 2.0f);
-    p.setModulation (GranulumProcessor::modIndexOf (ParamID::cutoff), 0, 0.45f);
-    p.setModulation (GranulumProcessor::modIndexOf (ParamID::waveSpacing), 1, -0.3f);
-    p.setModulation (GranulumProcessor::modIndexOf (ParamID::osc1Semi), 1, 0.25f);
-    setP (ParamID::cutoff, 400.0f);
-    p.keyboardState.noteOn (1, 36, 0.9f);
-    pump (p, 120, 300);
+    // scene 1: growling additive bass with grains flying
+    const float bars[] = { 1.0f, 0.72f, 0.2f, 0.58f, 0.12f, 0.45f, 0.05f, 0.33f, 0.0f, 0.24f, 0.0f, 0.16f, 0.0f, 0.1f, 0.0f, 0.06f };
+    for (int i = 0; i < granulum::kNumHarmonics; ++i) p.setHarmonic (i, bars[i]);
+    setP (ParamID::mono, 0.0f);
+    setP (ParamID::tone, 5.0f);
+    setP (ParamID::texture, 0.55f);
+    setP (ParamID::motion, 0.45f);
+    setP (ParamID::dirtDrive, 0.45f);
+    setP (ParamID::dirtType, 2.0f);
+    setP (ParamID::cutoff, 2500.0f);
+    p.setModulation (GranulumProcessor::modIndexOf (ParamID::tone), 0, 0.3f);
+    p.setModulation (GranulumProcessor::modIndexOf (ParamID::cutoff), 1, -0.25f);
+    p.keyboardState.noteOn (1, 33, 1.0f);
+    p.keyboardState.noteOn (1, 45, 0.9f);
+    live (60);
     shot ("ui-add.png");
-    p.keyboardState.noteOff (1, 36, 0.0f);
-    pump (p, 40, 100);
+    p.keyboardState.noteOff (1, 33, 0.0f);
+    p.keyboardState.noteOff (1, 45, 0.0f);
+    live (20);
 
-    // 2) sample + additive together
+    // scene 2: sampler + add, sharp shards
     String err;
     p.loadSample (makeTestSample(), err);
-    setP (ParamID::osc2Grain, 1.0f);
-    setP (ParamID::osc1Grain, 0.0f);
-    p.rebuildNow();
-    pump (p, 4, 100);
-    p.keyboardState.noteOn (1, 40, 0.9f);
-    setP (ParamID::transients, 1.0f);
-    setP (ParamID::keySync, 0.0f);
-    setP (ParamID::hold, 150.0f);
-    setP (ParamID::spacing, 40.0f);
-    setP (ParamID::waveSpacing, 0.6f);
-    setP (ParamID::rand, 0.25f);
-    setP (ParamID::position, 0.15f);
-    pump (p, 120, 300);
+    setP (ParamID::texture, 0.85f);
+    setP (ParamID::tone, -4.0f);
+    setP (ParamID::motion, 0.7f);
+    p.keyboardState.noteOn (1, 36, 1.0f);
+    live (60);
     shot ("ui-playing.png");
 
     ed.reset();
