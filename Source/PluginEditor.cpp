@@ -1161,7 +1161,7 @@ void GranulumEditor::paint (Graphics& g)
     g.drawText ("OSC 2", osc2Label, Justification::centredLeft, false);
     g.setFont (uiFont (11.0f, false, 0.08f));
     g.setColour (Palette::textDim);
-    g.drawText ("ADDITIVE", osc1Label.withTrimmedLeft ((int) (50 * sc)), Justification::centredLeft, false);
+    g.drawText ("ADD", osc1Label.withTrimmedLeft ((int) (50 * sc)), Justification::centredLeft, false);
     g.drawText ("SAMPLE",   osc2Label.withTrimmedLeft ((int) (50 * sc)), Justification::centredLeft, false);
 
     const float ls = (float) ledArea.getHeight();
