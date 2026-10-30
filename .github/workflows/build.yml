@@ -2,7 +2,11 @@ name: Build
 
 on:
   push:
+    branches: [main]
   workflow_dispatch:
+
+permissions:
+  contents: write
 
 jobs:
   windows:
@@ -25,8 +29,21 @@ jobs:
           New-Item -ItemType Directory -Force out | Out-Null
           Copy-Item -Recurse "build/Granulum_artefacts/Release/VST3/Granulum.vst3" out/
           Copy-Item "build/Granulum_artefacts/Release/Standalone/Granulum.exe" out/
+          Compress-Archive -Path out/* -DestinationPath Granulum-Windows.zip -Force
 
       - uses: actions/upload-artifact@v4
         with:
           name: Granulum-Windows
           path: out/
+
+      - name: Publish to builds branch
+        shell: bash
+        run: |
+          mkdir pub && cp Granulum-Windows.zip pub/
+          cd pub
+          git init -q -b builds
+          git config user.name "github-actions"
+          git config user.email "github-actions@users.noreply.github.com"
+          git add Granulum-Windows.zip
+          git commit -q -m "Build ${GITHUB_SHA::7}"
+          git push -f "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${GITHUB_REPOSITORY}.git" builds
