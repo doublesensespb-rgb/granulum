@@ -47,3 +47,22 @@ target_link_libraries(Granulum
         juce::juce_recommended_config_flags
         juce::juce_recommended_lto_flags
         juce::juce_recommended_warning_flags)
+
+# Offscreen renderer used by CI to preview the UI
+juce_add_console_app(Snapshot PRODUCT_NAME "Snapshot")
+target_sources(Snapshot PRIVATE
+    tools/Snapshot.cpp
+    Source/PluginProcessor.cpp
+    Source/PluginEditor.cpp)
+target_compile_definitions(Snapshot PRIVATE
+    JUCE_WEB_BROWSER=0
+    JUCE_USE_CURL=0
+    JUCE_MODAL_LOOPS_PERMITTED=1)
+if(MSVC)
+    target_compile_options(Snapshot PRIVATE /utf-8)
+endif()
+target_link_libraries(Snapshot PRIVATE
+    juce::juce_audio_utils
+    juce::juce_audio_formats
+    juce::juce_dsp
+    juce::juce_recommended_config_flags)

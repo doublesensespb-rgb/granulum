@@ -21,7 +21,15 @@ jobs:
         run: cmake -B build -A x64
 
       - name: Build
-        run: cmake --build build --config Release --parallel
+        run: cmake --build build --config Release --parallel --target Granulum_VST3 Granulum_Standalone Snapshot
+
+      - name: Render UI preview
+        continue-on-error: true
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force shots | Out-Null
+          $exe = Get-ChildItem -Recurse build/Snapshot_artefacts -Filter Snapshot.exe | Select-Object -First 1
+          & $exe.FullName "$PWD/shots"
 
       - name: Package
         shell: pwsh
@@ -40,10 +48,11 @@ jobs:
         shell: bash
         run: |
           mkdir pub && cp Granulum-Windows.zip pub/
+          cp shots/*.png pub/ || true
           cd pub
           git init -q -b builds
           git config user.name "github-actions"
           git config user.email "github-actions@users.noreply.github.com"
-          git add Granulum-Windows.zip
+          git add -A
           git commit -q -m "Build ${GITHUB_SHA::7}"
           git push -f "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${GITHUB_REPOSITORY}.git" builds
