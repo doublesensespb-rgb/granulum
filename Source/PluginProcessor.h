@@ -16,8 +16,6 @@ namespace ParamID
     inline constexpr const char* rand        = "rand";
     inline constexpr const char* smear       = "smear";
     inline constexpr const char* pan         = "pan";
-    inline constexpr const char* lfoDepth    = "lfoDepth";
-    inline constexpr const char* lfoRate     = "lfoRate";
     inline constexpr const char* transients  = "transients";
     inline constexpr const char* keySync     = "keySync";
     // bass
@@ -35,14 +33,61 @@ namespace ParamID
     inline constexpr const char* room        = "room";
     inline constexpr const char* output      = "output";
     // source
-    inline constexpr const char* source      = "source";   // 0 additive, 1 sample, 2 both
-    inline constexpr const char* mix         = "mix";
+    inline constexpr const char* source      = "source";   // 0 additive, 1 sample, 2 mix
+    inline constexpr const char* mix         = "mix";      // 0 = all sample, 1 = all additive
+    inline constexpr const char* addOct      = "addOct";
+    inline constexpr const char* addSemi     = "addSemi";
+    // LFOs: "lfo1Shape", "lfo1Rate", "lfo1Sync", "lfo1Div", "lfo1Mode" ...
+    inline juce::String lfo (int index, const char* what) { return "lfo" + juce::String (index + 1) + what; }
 }
+
+static constexpr int kNumLfos = 2;
+static constexpr int kMaxMods = 48;
+
+enum ModTarget
+{
+    mtAttack, mtHold, mtSpacing, mtWave, mtPosition, mtRand, mtSmear, mtPan,
+    mtSub, mtXover, mtDrive, mtGlide, mtPitch,
+    mtCutoff, mtReso, mtSpace, mtRoom, mtOutput,
+    mtAddOct, mtAddSemi, mtMix,
+    mtLfo1Rate, mtLfo2Rate,
+    kNumModTargets
+};
 
 struct WaveformPeaks
 {
     std::vector<float> mins, maxs;  // per bin, both channels merged
     std::vector<float> transients;  // normalised 0..1
+};
+
+// Lock-free hand-over of a source buffer from the message thread to the audio thread
+struct SourceSlot
+{
+    juce::SpinLock lock;
+    std::shared_ptr<granulum::SampleData> pending, active, retired;
+
+    void push (std::shared_ptr<granulum::SampleData> d)
+    {
+        const juce::SpinLock::ScopedLockType l (lock);
+        pending = std::move (d);
+    }
+    void swapOnAudioThread()
+    {
+        const juce::SpinLock::ScopedTryLockType l (lock);
+        if (l.isLocked() && pending != nullptr && retired == nullptr)
+        {
+            retired = std::move (active);
+            active  = std::move (pending);
+            pending = nullptr;
+        }
+    }
+    void collect()
+    {
+        std::shared_ptr<granulum::SampleData> toFree;
+        const juce::SpinLock::ScopedLockType l (lock);
+        toFree = std::move (retired);
+        retired = nullptr;
+    }
 };
 
 class GranulumProcessor final : public juce::AudioProcessor,
@@ -78,9 +123,12 @@ public:
     // ---- sources (message thread) ----
     bool loadSample (const juce::File& file, juce::String& error);
     juce::String getSampleName() const;
+    bool hasSample() const { return sampleLoaded.load(); }
+    bool showingSample() const;    // waveform view shows the sample (otherwise the additive tone)
     std::shared_ptr<const WaveformPeaks> getPeaks() const;
     double getSampleLengthSeconds() const;
     static bool isSupportedAudioFile (const juce::String& path);
+    granulum::GrainEngine& vizEngine() { return showingSample() ? engineSmp : engineAdd; }
 
     std::array<float, granulum::kNumHarmonics> getHarmonics() const { return harmonics; }
     void setHarmonics (const std::array<float, granulum::kNumHarmonics>&);
@@ -89,8 +137,26 @@ public:
     void randomize();
     void randomizeSection (int section); // 0 grains, 1 bass, 2 filter/space, 3 additive bars
 
+    // ---- modulation ----
+    static const char* modTargetId (int target);
+    static int modIndexOf (const juce::String& paramId);
+    void setModulation (int target, int lfo, float depth);
+    void removeModulation (int target, int lfo);
+    bool hasModulation (int target, int lfo) const;
+    float getModulationDepth (int target, int lfo) const;
+    int countModulations (int lfo) const;
+
+    static float lfoShapeValue (int shape, float phase, float sh, float prev, float next);
+    static double divisionBeats (int index);
+    static const juce::StringArray& divisionNames();
+    static const juce::StringArray& shapeNames();
+
+    std::atomic<uint32_t> modVersion { 1 };
+    std::array<std::atomic<float>, kNumModTargets> modNorm {};
+    std::array<std::atomic<float>, kNumLfos> lfoValueOut {}, lfoPhaseOut {};
+
     juce::AudioProcessorValueTreeState apvts;
-    granulum::GrainEngine engine;
+    granulum::GrainEngine engineAdd, engineSmp;
     juce::MidiKeyboardState keyboardState;
 
     std::atomic<float> outputLevel { 0.0f };
@@ -98,46 +164,55 @@ public:
 private:
     static juce::AudioProcessorValueTreeState::ParameterLayout createLayout();
     void timerCallback() override;
-    void readParams (granulum::Params&) const;
-    void rebuildSource (int source, float mix);
+    void renderRange (int from, int to);
+    void processChunk (int from, int len);
+    void computeModulated (float* values);
+    void advanceLfos (int endSample, int len, const float* values);
+    void noteOn (int note, float velocity);
+    void noteOff (int note);
     static std::shared_ptr<WaveformPeaks> makePeaks (const granulum::SampleData&);
 
     juce::AudioFormatManager formatManager;
 
-    // what the audio thread plays
-    juce::SpinLock sampleLock;
-    std::shared_ptr<granulum::SampleData> pendingSample;
-    std::shared_ptr<granulum::SampleData> retiredSample;
-    std::shared_ptr<granulum::SampleData> activeSample;
-
-    // building blocks (message thread)
-    std::shared_ptr<granulum::SampleData> fileSample;
-    std::shared_ptr<granulum::SampleData> additiveSample;
+    SourceSlot addSlot, smpSlot;
     std::array<float, granulum::kNumHarmonics> harmonics {};
-    bool harmonicsDirty = true, sourceDirty = true;
-    int lastSource = -1;
-    float lastMix = -1.0f;
+    bool harmonicsDirty = true;
+    std::atomic<bool> sampleLoaded { false };
 
     mutable juce::CriticalSection infoLock;
     juce::File samplePath;
-    std::shared_ptr<const WaveformPeaks> peaks;
-    double sampleSeconds = 0.0;
+    std::shared_ptr<const WaveformPeaks> addPeaks, smpPeaks;
+    double addSeconds = 0.0, smpSeconds = 0.0;
 
+    // modulation
+    struct ModSlot
+    {
+        std::atomic<int>   target { -1 };
+        std::atomic<int>   lfo    { 0 };
+        std::atomic<float> depth  { 0.0f };
+    };
+    std::array<ModSlot, kMaxMods> mods;
+    std::array<juce::RangedAudioParameter*, kNumModTargets> modParams {};
+
+    // LFO state (audio thread)
+    std::array<double, kNumLfos> lfoPhase {};
+    std::array<float, kNumLfos>  lfoValue {}, lfoSH {}, lfoPrev {}, lfoNext {};
+    granulum::Random lfoRng { 0xC0FFEEull };
+    int heldNotes = 0;
+    double hostBpm = 120.0, hostPpq = -1.0;
+    bool hostPlaying = false;
+
+    // dsp
     juce::dsp::StateVariableTPTFilter<float> filter;
     juce::dsp::LinkwitzRileyFilter<float> crossover;
     juce::dsp::Reverb reverb;
     juce::SmoothedValue<float> outGain;
-    juce::AudioBuffer<float> work, subBuf;
+    juce::AudioBuffer<float> addBuf, smpBuf, work, subBuf;
+    float lastAddGain = 1.0f, lastSmpGain = 0.0f, blockPeak = 0.0f;
 
-    std::atomic<float>* pAttack {};   std::atomic<float>* pHold {};     std::atomic<float>* pSpacing {};
-    std::atomic<float>* pWave {};     std::atomic<float>* pPosition {}; std::atomic<float>* pRand {};
-    std::atomic<float>* pSmear {};    std::atomic<float>* pPan {};      std::atomic<float>* pLfoDepth {};
-    std::atomic<float>* pLfoRate {};  std::atomic<float>* pTrans {};    std::atomic<float>* pKeySync {};
-    std::atomic<float>* pSub {};      std::atomic<float>* pXover {};    std::atomic<float>* pDrive {};
-    std::atomic<float>* pGlide {};    std::atomic<float>* pPitch {};    std::atomic<float>* pMono {};
-    std::atomic<float>* pCutoff {};   std::atomic<float>* pReso {};     std::atomic<float>* pFtype {};
-    std::atomic<float>* pSpace {};    std::atomic<float>* pRoom {};     std::atomic<float>* pOutput {};
-    std::atomic<float>* pSource {};   std::atomic<float>* pMix {};
+    std::atomic<float>* pTrans {};  std::atomic<float>* pKeySync {}; std::atomic<float>* pMono {};
+    std::atomic<float>* pFtype {};  std::atomic<float>* pSource {};
+    std::array<std::atomic<float>*, kNumLfos> pLfoShape {}, pLfoSync {}, pLfoDiv {}, pLfoMode {};
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (GranulumProcessor)
 };

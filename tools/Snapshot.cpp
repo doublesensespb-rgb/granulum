@@ -52,7 +52,7 @@ int main (int argc, char** argv)
     p.prepareToPlay (44100.0, 512);
 
     std::unique_ptr<AudioProcessorEditor> ed (p.createEditor());
-    ed->setSize (1080, 740);
+    ed->setSize (1080, 800);
 
     auto shot = [&] (const char* name)
     {
@@ -75,6 +75,11 @@ int main (int argc, char** argv)
     p.rebuildNow();
     setP (ParamID::waveSpacing, 0.4f);
     setP (ParamID::smear, 0.2f);
+    setP (ParamID::addSemi, 7.0f);
+    p.setModulation (GranulumProcessor::modIndexOf (ParamID::cutoff), 0, 0.45f);
+    p.setModulation (GranulumProcessor::modIndexOf (ParamID::waveSpacing), 1, -0.3f);
+    p.setModulation (GranulumProcessor::modIndexOf (ParamID::addSemi), 1, 0.25f);
+    setP (ParamID::cutoff, 400.0f);
     p.keyboardState.noteOn (1, 36, 0.9f);
     pump (p, 120, 300);
     shot ("ui-add.png");

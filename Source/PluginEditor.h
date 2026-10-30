@@ -27,6 +27,8 @@ namespace Palette
     const juce::Colour ledOff    { 0xff7d9399 };
     const juce::Colour whiteKey  { 0xffe9f0ee };
     const juce::Colour blackKey  { 0xff5f8d97 };
+
+    inline juce::Colour lfo (int i) { return i == 0 ? juce::Colour (0xffc77dff) : juce::Colour (0xffffc857); }
 }
 
 class GranulumLook final : public juce::LookAndFeel_V4
@@ -46,17 +48,56 @@ public:
     void drawLabel (juce::Graphics&, juce::Label&) override;
 };
 
-class Knob final : public juce::Component
+class Knob;
+
+// Small coloured circle next to a knob: drag up/down = modulation depth, double-click = remove
+class ModChip final : public juce::Component, public juce::SettableTooltipClient
 {
 public:
-    Knob (juce::AudioProcessorValueTreeState&, const juce::String& paramId, const juce::String& title, bool hero = false);
+    ModChip (GranulumProcessor&, Knob& owner, int lfo);
+    void paint (juce::Graphics&) override;
+    void mouseDown (const juce::MouseEvent&) override;
+    void mouseDrag (const juce::MouseEvent&) override;
+    void mouseDoubleClick (const juce::MouseEvent&) override;
+    void updateTooltip();
+
+    const int lfo;
+private:
+    GranulumProcessor& proc;
+    Knob& owner;
+    float startDepth = 0.0f;
+};
+
+class Knob final : public juce::Component, public juce::DragAndDropTarget
+{
+public:
+    enum class Size { Small, Normal, Hero };
+
+    Knob (GranulumProcessor&, const juce::String& paramId, const juce::String& title, Size size = Size::Normal);
     void resized() override;
     void paint (juce::Graphics&) override;
+    void paintOverChildren (juce::Graphics&) override;
+
+    bool isInterestedInDragSource (const SourceDetails&) override;
+    void itemDragEnter (const SourceDetails&) override;
+    void itemDragExit (const SourceDetails&) override;
+    void itemDropped (const SourceDetails&) override;
+
+    void refreshMods();     // after the modulation list changed
+    void tick();            // animate the modulated value
+    bool hasMods() const { return anyMod; }
 
     juce::Slider slider;
+    const int target;       // modulation target index, -1 if not modulatable
 private:
+    struct Dial { juce::Point<float> c; float r = 0, track = 0, start = 0, end = 0; };
+    Dial dial() const;
+
+    GranulumProcessor& proc;
     juce::String title;
-    bool hero = false;
+    Size size;
+    bool dragHover = false, anyMod = false;
+    std::array<std::unique_ptr<ModChip>, kNumLfos> chips;
     std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> attachment;
 };
 
@@ -101,11 +142,40 @@ private:
     std::array<float, granulum::kNumHarmonics> h {};
     int lastBar = -1;
     float lastValue = 0.0f;
-    bool erasing = false;
-    bool editing = false;
+    bool erasing = false, editing = false;
+};
+
+// LFO tab: click = select, drag onto any knob = modulate it
+class LfoTab final : public juce::Component, public juce::SettableTooltipClient
+{
+public:
+    LfoTab (GranulumProcessor&, int index);
+    void paint (juce::Graphics&) override;
+    void mouseDown (const juce::MouseEvent&) override;
+    void mouseDrag (const juce::MouseEvent&) override;
+    void mouseUp (const juce::MouseEvent&) override;
+
+    std::function<void (int)> onSelect;
+    bool selected = false;
+    const int index;
+private:
+    GranulumProcessor& proc;
+    bool dragging = false;
+};
+
+class LfoDisplay final : public juce::Component, private juce::Timer
+{
+public:
+    explicit LfoDisplay (GranulumProcessor&);
+    void paint (juce::Graphics&) override;
+    int lfo = 0;
+private:
+    void timerCallback() override { repaint(); }
+    GranulumProcessor& proc;
 };
 
 class GranulumEditor final : public juce::AudioProcessorEditor,
+                             public juce::DragAndDropContainer,
                              public juce::FileDragAndDropTarget,
                              private juce::Timer
 {
@@ -126,6 +196,7 @@ private:
     void openFile (const juce::File&);
     void launchChooser();
     void setSource (int s);
+    void selectLfo (int i);
     void drawSectionHeader (juce::Graphics&, juce::Rectangle<int> area, const juce::String& title, bool lit);
 
     GranulumProcessor& proc;
@@ -136,24 +207,39 @@ private:
 
     juce::TextButton randomButton { "RANDOM ALL" }, loadButton { "LOAD" };
     juce::TextButton rndGrains { "RANDOM" }, rndBass { "RANDOM" }, rndFx { "RANDOM" }, rndBars { "RANDOM" };
-    juce::TextButton srcAdd { "ADD" }, srcSample { "SAMPLE" }, srcBoth { "BOTH" };
+    juce::TextButton srcAdd { "ADD" }, srcSample { "SAMPLE" }, srcMix { "MIX" };
     juce::TextButton transButton { "TRANSIENTS" }, keySyncButton { "KEY SYNC" }, monoButton { "MONO" };
     std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> transAttachment, keySyncAttachment, monoAttachment;
-    juce::Slider mixSlider;
-    std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> mixAttachment;
     juce::Label sampleName;
     juce::ComboBox filterType;
     std::unique_ptr<juce::AudioProcessorValueTreeState::ComboBoxAttachment> filterTypeAttachment;
     juce::MidiKeyboardComponent keyboard;
     std::unique_ptr<juce::FileChooser> chooser;
-    juce::TooltipWindow tooltips { this, 700 };
+    juce::TooltipWindow tooltips { this, 600 };
 
-    std::vector<std::unique_ptr<Knob>> heroKnobs, motionKnobs, bassKnobs, fxKnobs;
+    std::vector<std::unique_ptr<Knob>> heroKnobs, motionKnobs, bassKnobs, fxKnobs, sourceKnobs;
+    std::vector<Knob*> allKnobs;
 
-    juce::Rectangle<int> titleArea, gemsArea, screenFrame, sourceArea, mixLabelArea, grainArea, bassArea, fxArea, ledArea;
+    // LFO strip
+    struct LfoControls
+    {
+        juce::ComboBox shape, div, mode;
+        juce::TextButton sync { "SYNC" };
+        std::unique_ptr<Knob> rate;
+        std::unique_ptr<juce::AudioProcessorValueTreeState::ComboBoxAttachment> shapeA, divA, modeA;
+        std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> syncA;
+    };
+    std::array<std::unique_ptr<LfoTab>, kNumLfos> lfoTabs;
+    std::array<std::unique_ptr<LfoControls>, kNumLfos> lfoControls;
+    LfoDisplay lfoDisplay;
+    int selectedLfo = 0;
+
+    juce::Rectangle<int> titleArea, gemsArea, screenFrame, sourceArea, grainArea, bassArea, fxArea, ledArea,
+                         lfoFrame, lfoHintArea, lfoShapeLabel, lfoModeLabel, lfoDivLabel;
     float meter = 0.0f;
     float activity = 0.0f;
     int shownSource = -1;
+    uint32_t shownModVersion = 0;
     juce::String statusText;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (GranulumEditor)

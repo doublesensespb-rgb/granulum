@@ -13,7 +13,67 @@ namespace
     }
 
     String fmt (float v, int dec, const char* unit) { return String (v, dec) + unit; }
+
+    constexpr int kChunk = 64;
+
+    const char* const kModTargetIds[kNumModTargets] =
+    {
+        ParamID::attack, ParamID::hold, ParamID::spacing, ParamID::waveSpacing, ParamID::position,
+        ParamID::rand, ParamID::smear, ParamID::pan,
+        ParamID::sub, ParamID::xover, ParamID::drive, ParamID::glide, ParamID::pitch,
+        ParamID::cutoff, ParamID::reso, ParamID::space, ParamID::room, ParamID::output,
+        ParamID::addOct, ParamID::addSemi, ParamID::mix,
+        "lfo1Rate", "lfo2Rate"
+    };
 }
+
+// ---------------------------------------------------------------------------
+// Static helpers
+
+const char* GranulumProcessor::modTargetId (int t) { return (t >= 0 && t < kNumModTargets) ? kModTargetIds[t] : ""; }
+
+int GranulumProcessor::modIndexOf (const String& id)
+{
+    for (int t = 0; t < kNumModTargets; ++t)
+        if (id == kModTargetIds[t]) return t;
+    return -1;
+}
+
+const StringArray& GranulumProcessor::shapeNames()
+{
+    static const StringArray s { "SINE", "TRIANGLE", "SAW UP", "SAW DOWN", "SQUARE", "S&H", "SMOOTH RND" };
+    return s;
+}
+
+const StringArray& GranulumProcessor::divisionNames()
+{
+    static const StringArray s { "4/1", "2/1", "1/1", "1/2", "1/4", "1/8", "1/16", "1/32",
+                                 "1/2T", "1/4T", "1/8T", "1/16T", "1/2D", "1/4D", "1/8D" };
+    return s;
+}
+
+double GranulumProcessor::divisionBeats (int i)
+{
+    static const double b[] = { 16.0, 8.0, 4.0, 2.0, 1.0, 0.5, 0.25, 0.125,
+                                4.0 / 3.0, 2.0 / 3.0, 1.0 / 3.0, 1.0 / 6.0, 3.0, 1.5, 0.75 };
+    return b[jlimit (0, (int) std::size (b) - 1, i)];
+}
+
+float GranulumProcessor::lfoShapeValue (int shape, float ph, float sh, float prev, float next)
+{
+    switch (shape)
+    {
+        case 0:  return 0.5f - 0.5f * std::cos (MathConstants<float>::twoPi * ph);
+        case 1:  return ph < 0.5f ? ph * 2.0f : 2.0f - ph * 2.0f;
+        case 2:  return ph;
+        case 3:  return 1.0f - ph;
+        case 4:  return ph < 0.5f ? 1.0f : 0.0f;
+        case 5:  return sh;
+        default: return prev + (next - prev) * (0.5f - 0.5f * std::cos (MathConstants<float>::pi * ph));
+    }
+}
+
+// ---------------------------------------------------------------------------
 
 AudioProcessorValueTreeState::ParameterLayout GranulumProcessor::createLayout()
 {
@@ -35,9 +95,6 @@ AudioProcessorValueTreeState::ParameterLayout GranulumProcessor::createLayout()
     ps.push_back (std::make_unique<P> (ParameterID { ParamID::rand, 1 },        "Rand",          NormalisableRange<float> (0.0f, 1.0f), 0.0f, pct));
     ps.push_back (std::make_unique<P> (ParameterID { ParamID::smear, 1 },       "Smear",         NormalisableRange<float> (0.0f, 1.0f), 0.0f, pct));
     ps.push_back (std::make_unique<P> (ParameterID { ParamID::pan, 1 },         "Pan",           NormalisableRange<float> (0.0f, 1.0f), 0.5f, pct));
-    ps.push_back (std::make_unique<P> (ParameterID { ParamID::lfoDepth, 1 },    "LFO Depth",     NormalisableRange<float> (0.0f, 1.0f), 0.0f, pct));
-    ps.push_back (std::make_unique<P> (ParameterID { ParamID::lfoRate, 1 },     "LFO Speed",     skewed (0.02f, 20.0f, 1.0f), 0.5f,
-                                       A().withStringFromValueFunction ([] (float v, int) { return fmt (v, v < 1.0f ? 2 : 1, " Hz"); })));
     ps.push_back (std::make_unique<AudioParameterBool> (ParameterID { ParamID::transients, 1 }, "Transients", false));
     ps.push_back (std::make_unique<AudioParameterBool> (ParameterID { ParamID::keySync, 1 },    "Key Sync",   true));
 
@@ -63,9 +120,25 @@ AudioProcessorValueTreeState::ParameterLayout GranulumProcessor::createLayout()
                                        A().withStringFromValueFunction ([] (float v, int) { return fmt (v, 1, " dB"); })));
 
     // ---- source ----
-    ps.push_back (std::make_unique<AudioParameterChoice> (ParameterID { ParamID::source, 1 }, "Source", StringArray { "Additive", "Sample", "Both" }, 0));
+    ps.push_back (std::make_unique<AudioParameterChoice> (ParameterID { ParamID::source, 1 }, "Source", StringArray { "Additive", "Sample", "Mix" }, 0));
     ps.push_back (std::make_unique<P> (ParameterID { ParamID::mix, 1 }, "Mix", NormalisableRange<float> (0.0f, 1.0f), 0.5f,
                                        A().withStringFromValueFunction ([] (float v, int) { return "ADD " + String (roundToInt (v * 100.0f)) + " %"; })));
+    ps.push_back (std::make_unique<P> (ParameterID { ParamID::addOct, 1 },  "Additive Octave", NormalisableRange<float> (-3.0f, 3.0f, 1.0f), 0.0f,
+                                       A().withStringFromValueFunction ([] (float v, int) { const int o = roundToInt (v); return (o > 0 ? "+" : "") + String (o) + " oct"; })));
+    ps.push_back (std::make_unique<P> (ParameterID { ParamID::addSemi, 1 }, "Additive Semi",   NormalisableRange<float> (-12.0f, 12.0f, 1.0f), 0.0f,
+                                       A().withStringFromValueFunction ([] (float v, int) { const int s = roundToInt (v); return (s > 0 ? "+" : "") + String (s) + " st"; })));
+
+    // ---- LFOs ----
+    for (int l = 0; l < kNumLfos; ++l)
+    {
+        const String n = "LFO " + String (l + 1) + " ";
+        ps.push_back (std::make_unique<AudioParameterChoice> (ParameterID { ParamID::lfo (l, "Shape"), 1 }, n + "Shape", shapeNames(), l == 0 ? 0 : 1));
+        ps.push_back (std::make_unique<P> (ParameterID { ParamID::lfo (l, "Rate"), 1 }, n + "Rate", skewed (0.02f, 30.0f, 2.0f), l == 0 ? 1.0f : 0.25f,
+                                           A().withStringFromValueFunction ([] (float v, int) { return fmt (v, v < 1.0f ? 2 : 1, " Hz"); })));
+        ps.push_back (std::make_unique<AudioParameterBool>   (ParameterID { ParamID::lfo (l, "Sync"), 1 }, n + "Sync", true));
+        ps.push_back (std::make_unique<AudioParameterChoice> (ParameterID { ParamID::lfo (l, "Div"), 1 },  n + "Division", divisionNames(), l == 0 ? 4 : 2));
+        ps.push_back (std::make_unique<AudioParameterChoice> (ParameterID { ParamID::lfo (l, "Mode"), 1 }, n + "Mode", StringArray { "FREE", "RETRIG" }, 0));
+    }
 
     return { ps.begin(), ps.end() };
 }
@@ -76,38 +149,31 @@ GranulumProcessor::GranulumProcessor()
 {
     formatManager.registerBasicFormats();
 
-    pAttack   = apvts.getRawParameterValue (ParamID::attack);
-    pHold     = apvts.getRawParameterValue (ParamID::hold);
-    pSpacing  = apvts.getRawParameterValue (ParamID::spacing);
-    pWave     = apvts.getRawParameterValue (ParamID::waveSpacing);
-    pPosition = apvts.getRawParameterValue (ParamID::position);
-    pRand     = apvts.getRawParameterValue (ParamID::rand);
-    pSmear    = apvts.getRawParameterValue (ParamID::smear);
-    pPan      = apvts.getRawParameterValue (ParamID::pan);
-    pLfoDepth = apvts.getRawParameterValue (ParamID::lfoDepth);
-    pLfoRate  = apvts.getRawParameterValue (ParamID::lfoRate);
-    pTrans    = apvts.getRawParameterValue (ParamID::transients);
-    pKeySync  = apvts.getRawParameterValue (ParamID::keySync);
-    pSub      = apvts.getRawParameterValue (ParamID::sub);
-    pXover    = apvts.getRawParameterValue (ParamID::xover);
-    pDrive    = apvts.getRawParameterValue (ParamID::drive);
-    pGlide    = apvts.getRawParameterValue (ParamID::glide);
-    pPitch    = apvts.getRawParameterValue (ParamID::pitch);
-    pMono     = apvts.getRawParameterValue (ParamID::mono);
-    pCutoff   = apvts.getRawParameterValue (ParamID::cutoff);
-    pReso     = apvts.getRawParameterValue (ParamID::reso);
-    pFtype    = apvts.getRawParameterValue (ParamID::ftype);
-    pSpace    = apvts.getRawParameterValue (ParamID::space);
-    pRoom     = apvts.getRawParameterValue (ParamID::room);
-    pOutput   = apvts.getRawParameterValue (ParamID::output);
-    pSource   = apvts.getRawParameterValue (ParamID::source);
-    pMix      = apvts.getRawParameterValue (ParamID::mix);
+    for (int t = 0; t < kNumModTargets; ++t)
+    {
+        modParams[(size_t) t] = apvts.getParameter (kModTargetIds[t]);
+        jassert (modParams[(size_t) t] != nullptr);
+        modNorm[(size_t) t].store (modParams[(size_t) t]->getValue());
+    }
 
-    // starting point: a few low partials so there's sound right away
+    pTrans   = apvts.getRawParameterValue (ParamID::transients);
+    pKeySync = apvts.getRawParameterValue (ParamID::keySync);
+    pMono    = apvts.getRawParameterValue (ParamID::mono);
+    pFtype   = apvts.getRawParameterValue (ParamID::ftype);
+    pSource  = apvts.getRawParameterValue (ParamID::source);
+    for (int l = 0; l < kNumLfos; ++l)
+    {
+        pLfoShape[(size_t) l] = apvts.getRawParameterValue (ParamID::lfo (l, "Shape"));
+        pLfoSync[(size_t) l]  = apvts.getRawParameterValue (ParamID::lfo (l, "Sync"));
+        pLfoDiv[(size_t) l]   = apvts.getRawParameterValue (ParamID::lfo (l, "Div"));
+        pLfoMode[(size_t) l]  = apvts.getRawParameterValue (ParamID::lfo (l, "Mode"));
+        lfoPrev[(size_t) l] = lfoRng.uni(); lfoNext[(size_t) l] = lfoRng.uni(); lfoSH[(size_t) l] = lfoRng.uni();
+    }
+
     const float init[] = { 1.0f, 0.55f, 0.35f, 0.22f, 0.12f, 0.08f };
     for (size_t i = 0; i < std::size (init); ++i) harmonics[i] = init[i];
 
-    timerCallback(); // build the first source immediately
+    timerCallback();
     startTimerHz (30);
 }
 
@@ -123,38 +189,159 @@ bool GranulumProcessor::isBusesLayoutSupported (const BusesLayout& layouts) cons
 
 void GranulumProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
 {
-    engine.prepare (sampleRate);
+    engineAdd.prepare (sampleRate);
+    engineSmp.prepare (sampleRate);
 
-    dsp::ProcessSpec spec { sampleRate, (uint32) jmax (1, samplesPerBlock), 2 };
-    filter.prepare (spec);   filter.reset();
+    dsp::ProcessSpec spec { sampleRate, (uint32) jmax (kChunk, samplesPerBlock), 2 };
+    filter.prepare (spec);    filter.reset();
     crossover.prepare (spec); crossover.reset();
-    reverb.prepare (spec);   reverb.reset();
+    reverb.prepare (spec);    reverb.reset();
 
     outGain.reset (sampleRate, 0.05);
-    outGain.setCurrentAndTargetValue (Decibels::decibelsToGain (pOutput->load()));
+    outGain.setCurrentAndTargetValue (Decibels::decibelsToGain (apvts.getRawParameterValue (ParamID::output)->load()));
 
-    work.setSize (2, jmax (1, samplesPerBlock), false, true, true);
-    subBuf.setSize (1, jmax (1, samplesPerBlock), false, true, true);
+    const int n = jmax (kChunk, samplesPerBlock);
+    addBuf.setSize (2, n, false, true, true);
+    smpBuf.setSize (2, n, false, true, true);
+    work.setSize   (2, n, false, true, true);
+    subBuf.setSize (1, n, false, true, true);
+
+    heldNotes = 0;
+    for (int l = 0; l < kNumLfos; ++l) { lfoPhase[(size_t) l] = 0.0; lfoValue[(size_t) l] = 0.0f; }
 }
 
-void GranulumProcessor::readParams (granulum::Params& p) const
+// ---------------------------------------------------------------------------
+// Modulation
+
+void GranulumProcessor::setModulation (int target, int lfo, float depth)
 {
-    p.attack      = pAttack->load();
-    p.holdMs      = pHold->load();
-    p.spacingMs   = pSpacing->load();
-    p.waveSpacing = pWave->load();
-    p.position    = pPosition->load();
-    p.rand        = pRand->load();
-    p.smear       = pSmear->load();
-    p.pan         = pPan->load();
-    p.lfoDepth    = pLfoDepth->load();
-    p.lfoRate     = pLfoRate->load();
-    p.transients  = pTrans->load() > 0.5f;
-    p.keySync     = pKeySync->load() > 0.5f;
-    p.sub         = pSub->load();
-    p.glideMs     = pGlide->load();
-    p.pitch       = pPitch->load();
-    p.mono        = pMono->load() > 0.5f;
+    if (target < 0 || target >= kNumModTargets || lfo < 0 || lfo >= kNumLfos) return;
+    depth = jlimit (-1.0f, 1.0f, depth);
+    for (auto& m : mods)
+        if (m.target.load() == target && m.lfo.load() == lfo) { m.depth.store (depth); ++modVersion; return; }
+    for (auto& m : mods)
+        if (m.target.load() < 0)
+        {
+            m.lfo.store (lfo);
+            m.depth.store (depth);
+            m.target.store (target, std::memory_order_release);
+            ++modVersion;
+            return;
+        }
+}
+
+void GranulumProcessor::removeModulation (int target, int lfo)
+{
+    for (auto& m : mods)
+        if (m.target.load() == target && m.lfo.load() == lfo) m.target.store (-1);
+    ++modVersion;
+}
+
+bool GranulumProcessor::hasModulation (int target, int lfo) const
+{
+    for (auto& m : mods)
+        if (m.target.load() == target && m.lfo.load() == lfo) return true;
+    return false;
+}
+
+float GranulumProcessor::getModulationDepth (int target, int lfo) const
+{
+    for (auto& m : mods)
+        if (m.target.load() == target && m.lfo.load() == lfo) return m.depth.load();
+    return 0.0f;
+}
+
+int GranulumProcessor::countModulations (int lfo) const
+{
+    int n = 0;
+    for (auto& m : mods)
+        if (m.target.load() >= 0 && m.lfo.load() == lfo) ++n;
+    return n;
+}
+
+void GranulumProcessor::computeModulated (float* v)
+{
+    float off[kNumModTargets] = {};
+    for (auto& m : mods)
+    {
+        const int t = m.target.load (std::memory_order_acquire);
+        if (t < 0 || t >= kNumModTargets) continue;
+        const int l = jlimit (0, kNumLfos - 1, m.lfo.load (std::memory_order_relaxed));
+        off[t] += m.depth.load (std::memory_order_relaxed) * lfoValue[(size_t) l];
+    }
+    for (int t = 0; t < kNumModTargets; ++t)
+    {
+        auto* p = modParams[(size_t) t];
+        const float norm = jlimit (0.0f, 1.0f, p->getValue() + off[t]);
+        v[t] = p->convertFrom0to1 (norm);
+        modNorm[(size_t) t].store (norm, std::memory_order_relaxed);
+    }
+}
+
+void GranulumProcessor::advanceLfos (int endSample, int len, const float* v)
+{
+    const double sr = getSampleRate() > 0 ? getSampleRate() : 44100.0;
+    for (int l = 0; l < kNumLfos; ++l)
+    {
+        const auto L = (size_t) l;
+        const int  shape = (int) pLfoShape[L]->load();
+        const bool sync  = pLfoSync[L]->load() > 0.5f;
+        const bool free  = (int) pLfoMode[L]->load() == 0;
+        const double beats = divisionBeats ((int) pLfoDiv[L]->load());
+
+        const double old = lfoPhase[L];
+        double ph;
+        if (sync && free && hostPlaying && hostPpq >= 0.0)
+        {
+            const double ppqNow = hostPpq + (double) endSample / sr * hostBpm / 60.0;
+            ph = ppqNow / beats;
+            ph -= std::floor (ph);
+        }
+        else
+        {
+            const double rate = sync ? (hostBpm / 60.0) / beats : (double) v[mtLfo1Rate + l];
+            ph = old + rate * (double) len / sr;
+        }
+
+        if (ph >= 1.0 || ph < old)   // new cycle
+        {
+            lfoSH[L] = lfoRng.uni();
+            lfoPrev[L] = lfoNext[L];
+            lfoNext[L] = lfoRng.uni();
+        }
+        ph -= std::floor (ph);
+        lfoPhase[L] = ph;
+        lfoValue[L] = lfoShapeValue (shape, (float) ph, lfoSH[L], lfoPrev[L], lfoNext[L]);
+        lfoValueOut[L].store (lfoValue[L], std::memory_order_relaxed);
+        lfoPhaseOut[L].store ((float) ph, std::memory_order_relaxed);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Audio
+
+void GranulumProcessor::noteOn (int note, float velocity)
+{
+    if (heldNotes == 0)
+        for (int l = 0; l < kNumLfos; ++l)
+            if ((int) pLfoMode[(size_t) l]->load() == 1)
+            {
+                lfoPhase[(size_t) l] = 0.0;
+                lfoValue[(size_t) l] = lfoShapeValue ((int) pLfoShape[(size_t) l]->load(), 0.0f,
+                                                      lfoSH[(size_t) l], lfoPrev[(size_t) l], lfoNext[(size_t) l]);
+            }
+    ++heldNotes;
+    const bool mono = pMono->load() > 0.5f;
+    engineAdd.noteOn (note, velocity, mono);
+    engineSmp.noteOn (note, velocity, mono);
+}
+
+void GranulumProcessor::noteOff (int note)
+{
+    heldNotes = jmax (0, heldNotes - 1);
+    const bool mono = pMono->load() > 0.5f;
+    engineAdd.noteOff (note, mono);
+    engineSmp.noteOff (note, mono);
 }
 
 void GranulumProcessor::processBlock (AudioBuffer<float>& buffer, MidiBuffer& midi)
@@ -162,56 +349,135 @@ void GranulumProcessor::processBlock (AudioBuffer<float>& buffer, MidiBuffer& mi
     ScopedNoDenormals noDenormals;
     const int numSamples = buffer.getNumSamples();
 
-    {
-        const SpinLock::ScopedTryLockType lock (sampleLock);
-        if (lock.isLocked() && pendingSample != nullptr && retiredSample == nullptr)
-        {
-            retiredSample = std::move (activeSample);
-            activeSample  = std::move (pendingSample);
-            pendingSample = nullptr;
-        }
-    }
+    addSlot.swapOnAudioThread();
+    smpSlot.swapOnAudioThread();
 
     keyboardState.processNextMidiBuffer (midi, 0, numSamples, true);
 
-    if (work.getNumSamples() < numSamples)   work.setSize (2, numSamples, false, false, true);
-    if (subBuf.getNumSamples() < numSamples) subBuf.setSize (1, numSamples, false, false, true);
-    work.clear();
-    subBuf.clear();
+    if (work.getNumSamples() < numSamples)
+    {
+        addBuf.setSize (2, numSamples, false, false, true);
+        smpBuf.setSize (2, numSamples, false, false, true);
+        work.setSize   (2, numSamples, false, false, true);
+        subBuf.setSize (1, numSamples, false, false, true);
+    }
+    addBuf.clear(); smpBuf.clear(); work.clear(); subBuf.clear();
 
-    granulum::Params p;
-    readParams (p);
+    hostBpm = 120.0; hostPpq = -1.0; hostPlaying = false;
+    if (auto* ph = getPlayHead())
+        if (auto pos = ph->getPosition())
+        {
+            if (auto b = pos->getBpm())         hostBpm = jlimit (20.0, 999.0, *b);
+            if (auto q = pos->getPpqPosition()) hostPpq = *q;
+            hostPlaying = pos->getIsPlaying();
+        }
 
-    float* L = work.getWritePointer (0);
-    float* R = work.getWritePointer (1);
-    float* S = subBuf.getWritePointer (0);
-    const granulum::SampleData* sample = activeSample.get();
-
+    blockPeak = 0.0f;
     int pos = 0;
     for (const auto meta : midi)
     {
         const int at = jlimit (0, numSamples, meta.samplePosition);
-        if (at > pos)
-        {
-            engine.render (L + pos, R + pos, S + pos, at - pos, p, sample);
-            pos = at;
-        }
+        renderRange (pos, at);
+        pos = jmax (pos, at);
+
         const auto m = meta.getMessage();
-        if (m.isNoteOn())                                engine.noteOn (m.getNoteNumber(), m.getFloatVelocity(), p.mono);
-        else if (m.isNoteOff())                          engine.noteOff (m.getNoteNumber(), p.mono);
-        else if (m.isAllNotesOff() || m.isAllSoundOff()) engine.allNotesOff();
+        if (m.isNoteOn())       noteOn (m.getNoteNumber(), m.getFloatVelocity());
+        else if (m.isNoteOff()) noteOff (m.getNoteNumber());
+        else if (m.isAllNotesOff() || m.isAllSoundOff())
+        {
+            heldNotes = 0;
+            engineAdd.allNotesOff();
+            engineSmp.allNotesOff();
+        }
     }
-    if (pos < numSamples)
-        engine.render (L + pos, R + pos, S + pos, numSamples - pos, p, sample);
+    renderRange (pos, numSamples);
     midi.clear();
 
+    outputLevel.store (jmax (blockPeak, outputLevel.load() * 0.9f));
+
+    for (int ch = 0; ch < buffer.getNumChannels(); ++ch)
+        buffer.copyFrom (ch, 0, work, jmin (ch, 1), 0, numSamples);
+}
+
+void GranulumProcessor::renderRange (int from, int to)
+{
+    while (from < to)
+    {
+        const int len = jmin (kChunk, to - from);
+        processChunk (from, len);
+        from += len;
+    }
+}
+
+void GranulumProcessor::processChunk (int from, int len)
+{
+    float v[kNumModTargets];
+    computeModulated (v);
+
+    granulum::Params p;
+    p.attack      = v[mtAttack];
+    p.holdMs      = v[mtHold];
+    p.spacingMs   = v[mtSpacing];
+    p.waveSpacing = v[mtWave];
+    p.position    = v[mtPosition];
+    p.rand        = v[mtRand];
+    p.smear       = v[mtSmear];
+    p.pan         = v[mtPan];
+    p.lfoDepth    = 0.0f;
+    p.sub         = v[mtSub];
+    p.glideMs     = v[mtGlide];
+    p.pitch       = v[mtPitch];
+    p.transients  = pTrans->load() > 0.5f;
+    p.keySync     = pKeySync->load() > 0.5f;
+    p.mono        = pMono->load() > 0.5f;
+
+    auto pa = p;
+    pa.transpose = (float) roundToInt (v[mtAddOct]) * 12.0f + (float) roundToInt (v[mtAddSemi]);
+    auto ps = p;
+    ps.sub = 0.0f;
+
+    const int source = (int) pSource->load();
+    float addGain = 1.0f, smpGain = 0.0f;
+    if (source == 1) { addGain = 0.0f; smpGain = 1.0f; }
+    else if (source == 2)
+    {
+        const float m = jlimit (0.0f, 1.0f, v[mtMix]);
+        addGain = std::sin (m * MathConstants<float>::halfPi);
+        smpGain = std::cos (m * MathConstants<float>::halfPi);
+    }
+    const bool runAdd = source != 1;
+    const bool runSmp = source != 0;
+
+    float* aL = addBuf.getWritePointer (0) + from;
+    float* aR = addBuf.getWritePointer (1) + from;
+    float* sL = smpBuf.getWritePointer (0) + from;
+    float* sR = smpBuf.getWritePointer (1) + from;
+    float* S  = subBuf.getWritePointer (0) + from;
+    float* L  = work.getWritePointer (0) + from;
+    float* R  = work.getWritePointer (1) + from;
+
+    // the additive engine always runs (it also owns the sub); without a source it only plays the sub
+    engineAdd.render (aL, aR, S, len, pa, runAdd ? addSlot.active.get() : nullptr);
+    engineSmp.render (sL, sR, S, len, ps, runSmp ? smpSlot.active.get() : nullptr);
+
+    for (int i = 0; i < len; ++i)
+    {
+        const float t = (float) (i + 1) / (float) len;
+        const float ga = lastAddGain + (addGain - lastAddGain) * t;
+        const float gs = lastSmpGain + (smpGain - lastSmpGain) * t;
+        L[i] = aL[i] * ga + sL[i] * gs;
+        R[i] = aR[i] * ga + sR[i] * gs;
+    }
+    lastAddGain = addGain;
+    lastSmpGain = smpGain;
+
     // ---- drive (grains only) ----
-    const float drive = pDrive->load();
+    const float drive = v[mtDrive];
     if (drive > 0.001f)
     {
         const float g = 1.0f + 30.0f * drive * drive;
         const float comp = 1.0f / std::pow (g, 0.7f);
-        for (int i = 0; i < numSamples; ++i)
+        for (int i = 0; i < len; ++i)
         {
             L[i] = std::tanh (L[i] * g) * comp;
             R[i] = std::tanh (R[i] * g) * comp;
@@ -223,33 +489,30 @@ void GranulumProcessor::processBlock (AudioBuffer<float>& buffer, MidiBuffer& mi
     filter.setType (ft == 0 ? dsp::StateVariableTPTFilterType::lowpass
                   : ft == 1 ? dsp::StateVariableTPTFilterType::bandpass
                             : dsp::StateVariableTPTFilterType::highpass);
-    filter.setCutoffFrequency (jlimit (20.0f, (float) (getSampleRate() * 0.45), pCutoff->load()));
-    filter.setResonance (pReso->load());
-    auto block = dsp::AudioBlock<float> (work).getSubBlock (0, (size_t) numSamples);
+    filter.setCutoffFrequency (jlimit (20.0f, (float) (getSampleRate() * 0.45), v[mtCutoff]));
+    filter.setResonance (v[mtReso]);
+    auto block = dsp::AudioBlock<float> (work).getSubBlock ((size_t) from, (size_t) len);
     dsp::ProcessContextReplacing<float> ctx (block);
-    if (! (ft == 0 && pCutoff->load() > 19500.0f && pReso->load() < 0.75f))
+    if (! (ft == 0 && v[mtCutoff] > 19500.0f && v[mtReso] < 0.75f))
         filter.process (ctx);
 
-    // ---- crossover: everything below X-Over goes mono, reverb only on the top ----
-    const float xover = pXover->load();
-    const bool split = xover > 21.0f;
-    if (split)
+    // ---- crossover: lows go mono and skip the reverb ----
+    if (v[mtXover] > 21.0f)
     {
-        crossover.setCutoffFrequency (xover);
-        for (int i = 0; i < numSamples; ++i)
+        crossover.setCutoffFrequency (v[mtXover]);
+        for (int i = 0; i < len; ++i)
         {
             float lowL, highL, lowR, highR;
             crossover.processSample (0, L[i], lowL, highL);
             crossover.processSample (1, R[i], lowR, highR);
-            const float lowMono = 0.5f * (lowL + lowR);
             L[i] = highL; R[i] = highR;
-            S[i] += lowMono;               // mono lows ride with the sub
+            S[i] += 0.5f * (lowL + lowR);
         }
     }
 
-    const float space = pSpace->load();
+    const float space = v[mtSpace];
     dsp::Reverb::Parameters rp;
-    rp.roomSize = 0.3f + 0.69f * pRoom->load();
+    rp.roomSize = 0.3f + 0.69f * v[mtRoom];
     rp.damping  = 0.4f;
     rp.wetLevel = space * 0.9f;
     rp.dryLevel = 1.0f - space * 0.5f;
@@ -259,19 +522,16 @@ void GranulumProcessor::processBlock (AudioBuffer<float>& buffer, MidiBuffer& mi
         reverb.process (ctx);
 
     // ---- output ----
-    outGain.setTargetValue (Decibels::decibelsToGain (pOutput->load()));
-    float peak = 0.0f;
-    for (int i = 0; i < numSamples; ++i)
+    outGain.setTargetValue (Decibels::decibelsToGain (v[mtOutput]));
+    for (int i = 0; i < len; ++i)
     {
         const float g = outGain.getNextValue();
         L[i] = std::tanh ((L[i] + S[i]) * g);
         R[i] = std::tanh ((R[i] + S[i]) * g);
-        peak = jmax (peak, std::abs (L[i]), std::abs (R[i]));
+        blockPeak = jmax (blockPeak, std::abs (L[i]), std::abs (R[i]));
     }
-    outputLevel.store (jmax (peak, outputLevel.load() * 0.9f));
 
-    for (int ch = 0; ch < buffer.getNumChannels(); ++ch)
-        buffer.copyFrom (ch, 0, work, jmin (ch, 1), 0, numSamples);
+    advanceLfos (from + len, len, v);
 }
 
 // ---------------------------------------------------------------------------
@@ -338,19 +598,20 @@ bool GranulumProcessor::loadSample (const File& file, String& error)
     }
     data->transients = granulum::detectTransients (*data);
 
-    fileSample = std::move (data);
+    auto pk = makePeaks (*data);
     {
         const ScopedLock sl (infoLock);
         samplePath = file;
+        smpPeaks = std::move (pk);
+        smpSeconds = frames / reader->sampleRate;
     }
+    smpSlot.push (std::move (data));
+    sampleLoaded.store (true);
 
-    // dropping a sample while on ADD switches to SAMPLE
+    // loading a sample while on ADD only switches to SAMPLE
     if ((int) pSource->load() == 0)
         if (auto* src = apvts.getParameter (ParamID::source))
             src->setValueNotifyingHost (src->convertTo0to1 (1.0f));
-
-    sourceDirty = true;
-    timerCallback();
     return true;
 }
 
@@ -360,61 +621,9 @@ void GranulumProcessor::setHarmonics (const std::array<float, granulum::kNumHarm
     harmonicsDirty = true;
 }
 
-void GranulumProcessor::rebuildSource (int source, float mix)
+bool GranulumProcessor::showingSample() const
 {
-    if (harmonicsDirty || additiveSample == nullptr)
-    {
-        additiveSample = std::make_shared<granulum::SampleData> (granulum::renderAdditive (harmonics));
-        harmonicsDirty = false;
-    }
-
-    std::shared_ptr<granulum::SampleData> data;
-    if (source == 0 || fileSample == nullptr)
-        data = additiveSample;
-    else if (source == 1)
-        data = fileSample;
-    else
-    {
-        // both: lay the additive tone (looped) under the sample
-        const auto& f = *fileSample;
-        const auto& a = *additiveSample;
-        auto d = std::make_shared<granulum::SampleData>();
-        d->sampleRate = f.sampleRate;
-        d->transients = f.transients;
-        d->channels = f.channels;
-        const int N  = f.numFrames();
-        const int AN = a.numFrames();
-        const double step = a.sampleRate / f.sampleRate;
-        const float* ad = a.channels[0].data();
-        for (auto& ch : d->channels)
-        {
-            double ap = 0.0;
-            for (int i = 0; i < N; ++i)
-            {
-                const int i0 = (int) ap;
-                const float fr = (float) (ap - i0);
-                const float av = ad[i0] + (ad[(i0 + 1) % AN] - ad[i0]) * fr;
-                ch[(size_t) i] = ch[(size_t) i] * (1.0f - mix) + av * mix;
-                ap += step;
-                if (ap >= AN) ap -= AN;
-            }
-        }
-        float peak = 0.0f;
-        for (auto& ch : d->channels) for (float v : ch) peak = jmax (peak, std::abs (v));
-        if (peak > 1.0e-6f) for (auto& ch : d->channels) for (auto& v : ch) v *= 0.89f / peak;
-        data = std::move (d);
-    }
-
-    auto pk = makePeaks (*data);
-    {
-        const ScopedLock sl (infoLock);
-        peaks = std::move (pk);
-        sampleSeconds = data->numFrames() / data->sampleRate;
-    }
-    {
-        const SpinLock::ScopedLockType lock (sampleLock);
-        pendingSample = std::move (data);
-    }
+    return sampleLoaded.load() && (int) pSource->load() != 0;
 }
 
 String GranulumProcessor::getSampleName() const
@@ -426,36 +635,31 @@ String GranulumProcessor::getSampleName() const
 std::shared_ptr<const WaveformPeaks> GranulumProcessor::getPeaks() const
 {
     const ScopedLock sl (infoLock);
-    return peaks;
+    return showingSample() ? smpPeaks : addPeaks;
 }
 
 double GranulumProcessor::getSampleLengthSeconds() const
 {
     const ScopedLock sl (infoLock);
-    return sampleSeconds;
+    return showingSample() ? smpSeconds : addSeconds;
 }
 
 void GranulumProcessor::timerCallback()
 {
-    // free retired data here, never on the audio thread
-    std::shared_ptr<granulum::SampleData> toFree;
-    {
-        const SpinLock::ScopedLockType lock (sampleLock);
-        toFree = std::move (retiredSample);
-        retiredSample = nullptr;
-    }
+    addSlot.collect();
+    smpSlot.collect();
 
-    const int source = (int) pSource->load();
-    const float mix  = pMix->load();
-    const bool mixChanged = source == 2 && std::abs (mix - lastMix) > 0.002f;
-    const bool needsAdd   = source != 1 || fileSample == nullptr;
-
-    if (sourceDirty || source != lastSource || mixChanged || (harmonicsDirty && needsAdd) || additiveSample == nullptr)
+    if (harmonicsDirty)
     {
-        rebuildSource (source, mix);
-        lastSource = source;
-        lastMix = mix;
-        sourceDirty = false;
+        harmonicsDirty = false;
+        auto data = std::make_shared<granulum::SampleData> (granulum::renderAdditive (harmonics));
+        auto pk = makePeaks (*data);
+        {
+            const ScopedLock sl (infoLock);
+            addPeaks = std::move (pk);
+            addSeconds = data->numFrames() / data->sampleRate;
+        }
+        addSlot.push (std::move (data));
     }
 }
 
@@ -490,8 +694,6 @@ void GranulumProcessor::randomizeSection (int section)
         set (ParamID::rand,        maybe (0.5f, r.nextFloat() * 0.6f));
         set (ParamID::smear,       maybe (0.4f, r.nextFloat() * 0.8f));
         set (ParamID::pan,         0.2f + r.nextFloat() * 0.8f);
-        set (ParamID::lfoDepth,    maybe (0.5f, r.nextFloat() * 0.5f));
-        set (ParamID::lfoRate,     r.nextFloat());
     }
     else if (section == 1)
     {
@@ -538,39 +740,53 @@ void GranulumProcessor::getStateInformation (MemoryBlock& destData)
     for (float h : harmonics) hs.add (String (h, 4));
     state.setProperty ("harmonics", hs.joinIntoString (","), nullptr);
 
+    StringArray ms;
+    for (auto& m : mods)
+        if (const int t = m.target.load(); t >= 0)
+            ms.add (String (kModTargetIds[t]) + ":" + String (m.lfo.load()) + ":" + String (m.depth.load(), 4));
+    state.setProperty ("mods", ms.joinIntoString (";"), nullptr);
+
     if (auto xml = state.createXml())
         copyXmlToBinary (*xml, destData);
 }
 
 void GranulumProcessor::setStateInformation (const void* data, int sizeInBytes)
 {
-    if (auto xml = getXmlFromBinary (data, sizeInBytes))
+    auto xml = getXmlFromBinary (data, sizeInBytes);
+    if (xml == nullptr || ! xml->hasTagName (apvts.state.getType())) return;
+
+    auto state = ValueTree::fromXml (*xml);
+    const String path = state.getProperty ("samplePath").toString();
+    const auto hs = StringArray::fromTokens (state.getProperty ("harmonics").toString(), ",", "");
+    const auto ms = StringArray::fromTokens (state.getProperty ("mods").toString(), ";", "");
+    apvts.replaceState (state);
+
+    if (hs.size() == granulum::kNumHarmonics)
     {
-        if (! xml->hasTagName (apvts.state.getType())) return;
-        auto state = ValueTree::fromXml (*xml);
-        const String path = state.getProperty ("samplePath").toString();
-        const auto hs = StringArray::fromTokens (state.getProperty ("harmonics").toString(), ",", "");
-        apvts.replaceState (state);
-
-        if (hs.size() == granulum::kNumHarmonics)
-        {
-            std::array<float, granulum::kNumHarmonics> h {};
-            for (int i = 0; i < hs.size(); ++i) h[(size_t) i] = jlimit (0.0f, 1.0f, hs[i].getFloatValue());
-            setHarmonics (h);
-        }
-
-        File f (path);
-        String err;
-        const int src = (int) pSource->load();
-        if (path.isNotEmpty() && f.existsAsFile())
-        {
-            loadSample (f, err);
-            if (auto* p = apvts.getParameter (ParamID::source))   // keep the saved source choice
-                p->setValueNotifyingHost (p->convertTo0to1 ((float) src));
-        }
-        sourceDirty = true;
-        timerCallback();
+        std::array<float, granulum::kNumHarmonics> h {};
+        for (int i = 0; i < hs.size(); ++i) h[(size_t) i] = jlimit (0.0f, 1.0f, hs[i].getFloatValue());
+        setHarmonics (h);
     }
+
+    for (auto& m : mods) m.target.store (-1);
+    for (auto& entry : ms)
+    {
+        const auto parts = StringArray::fromTokens (entry, ":", "");
+        if (parts.size() == 3)
+            setModulation (modIndexOf (parts[0]), parts[1].getIntValue(), parts[2].getFloatValue());
+    }
+    ++modVersion;
+
+    const int src = (int) pSource->load();
+    File f (path);
+    String err;
+    if (path.isNotEmpty() && f.existsAsFile())
+    {
+        loadSample (f, err);
+        if (auto* p = apvts.getParameter (ParamID::source))   // keep the saved source choice
+            p->setValueNotifyingHost (p->convertTo0to1 ((float) src));
+    }
+    timerCallback();
 }
 
 AudioProcessorEditor* GranulumProcessor::createEditor()

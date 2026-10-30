@@ -129,7 +129,8 @@ struct Params
     float lfoDepth    = 0.0f;
     float lfoRate     = 0.5f;
 
-    float pitch       = 0.0f;   // semitones
+    float pitch       = 0.0f;   // semitones (global: grains + sub)
+    float transpose   = 0.0f;   // semitones (this layer only: grains + key-sync rate)
     float pitchSpray  = 0.0f;
     float octaveProb  = 0.0f;
     float reverseProb = 0.0f;
@@ -261,6 +262,7 @@ public:
         const double holdBase   = std::max (16.0, p.holdMs * 0.001 * sr * (1.0 + 7.0 * (double) (p.smear * p.smear)));
         const double lfoInc     = 2.0 * kPi * (double) p.lfoRate / sr;
         const double glideCoef  = p.glideMs > 0.5f ? std::exp (-1.0 / (p.glideMs * 0.001 * sr)) : 0.0;
+        const double transposeRatio = std::pow (2.0, (double) p.transpose / 12.0);
 
         for (auto& v : voices)
         {
@@ -286,7 +288,7 @@ public:
 
                 // glide
                 v.curNote = (double) v.targetNote + (v.curNote - (double) v.targetNote) * glideCoef;
-                const double freq = 440.0 * std::pow (2.0, (v.curNote - 69.0) / 12.0);
+                const double freq = 440.0 * std::pow (2.0, (v.curNote + (double) p.pitch - 69.0) / 12.0);
 
                 // sub
                 v.subPhase += 2.0 * kPi * freq / sr;
@@ -299,7 +301,7 @@ public:
                 v.nextGrainIn -= 1.0;
                 if (v.nextGrainIn <= 0.0)
                 {
-                    const double spacing = p.keySync ? sr / freq : std::max (16.0, p.spacingMs * 0.001 * sr);
+                    const double spacing = p.keySync ? sr / (freq * transposeRatio) : std::max (16.0, p.spacingMs * 0.001 * sr);
                     spawnGrain (v, p, *sample, fileRate, holdBase, spacing);
 
                     const double lfo = std::sin (lfoPhase + v.lfoOffset);
@@ -430,7 +432,7 @@ private:
         const int N = s.numFrames();
 
         // grains always follow the played note; key sync additionally locks the grain rate to it
-        float semis = (float) (v.curNote - 60.0) + p.pitch
+        float semis = (float) (v.curNote - 60.0) + p.pitch + p.transpose
                     + p.pitchSpray * rng.bipolar() + p.smear * 0.25f * rng.bipolar();
         if (p.octaveProb > 0.0f && rng.uni() < p.octaveProb)
             semis += (rng.uni() < 0.66f) ? 12.0f : -12.0f;
