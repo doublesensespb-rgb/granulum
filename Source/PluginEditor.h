@@ -14,8 +14,8 @@ namespace Palette
     const juce::Colour screen    { 0xff0a1414 };
     const juce::Colour grid      { 0xff3fbfae };
     const juce::Colour sand      { 0xffc9b48c };
-    const juce::Colour pink      { 0xffd8457f };
-    const juce::Colour pinkInk   { 0xff5e1734 };
+    const juce::Colour pink      { 0xffff7a1a };   // main accent: juicy orange
+    const juce::Colour pinkInk   { 0xff4a1d00 };
 
     const juce::Colour yellow    { 0xffe6c84a };
     const juce::Colour magenta   { 0xffc552c8 };

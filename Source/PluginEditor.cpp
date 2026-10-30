@@ -482,7 +482,7 @@ void WaveformView::paint (Graphics& g)
         const float yN = ((float) (hsh % 1000) / 1000.0f) * 2.0f - 1.0f;
         const float y = mid + yN * halfH * 0.85f;
         const float a = jlimit (0.0f, 1.0f, grainA[i]);
-        const auto col = (i % 4 == 0) ? Palette::pink : Palette::grid;
+        const auto col = (i % 3 == 0) ? Palette::pink : Palette::grid;
         const float rad = 1.5f + a * 3.5f;
         g.setColour (col.withAlpha (0.10f * a)); g.fillEllipse (x - rad * 3.5f, y - rad * 3.5f, rad * 7.0f, rad * 7.0f);
         g.setColour (col.withAlpha (0.30f * a)); g.fillEllipse (x - rad * 1.6f, y - rad * 1.6f, rad * 3.2f, rad * 3.2f);
@@ -607,28 +607,28 @@ GranulumEditor::GranulumEditor (GranulumProcessor& p)
         addAndMakeVisible (*group.back());
     };
 
-    add (grainKnobs, ParamID::position,   "Position",    Palette::aqua);
-    add (grainKnobs, ParamID::spray,      "Spray",       Palette::aqua);
-    add (grainKnobs, ParamID::scan,       "Scan",        Palette::aqua);
-    add (grainKnobs, ParamID::size,       "Size",        Palette::aqua);
-    add (grainKnobs, ParamID::density,    "Density",     Palette::aqua);
-    add (grainKnobs, ParamID::chaos,      "Chaos",       Palette::aqua);
+    add (grainKnobs, ParamID::position,   "Position",    Palette::pink);
+    add (grainKnobs, ParamID::spray,      "Spray",       Palette::pink);
+    add (grainKnobs, ParamID::scan,       "Scan",        Palette::pink);
+    add (grainKnobs, ParamID::size,       "Size",        Palette::pink);
+    add (grainKnobs, ParamID::density,    "Density",     Palette::pink);
+    add (grainKnobs, ParamID::chaos,      "Chaos",       Palette::pink);
 
-    add (pitchKnobs, ParamID::pitch,      "Pitch",       Palette::yellow);
-    add (pitchKnobs, ParamID::pitchSpray, "Pitch Spray", Palette::yellow);
-    add (pitchKnobs, ParamID::octave,     "Octaves",     Palette::yellow);
-    add (pitchKnobs, ParamID::reverse,    "Reverse",     Palette::yellow);
+    add (pitchKnobs, ParamID::pitch,      "Pitch",       Palette::pink);
+    add (pitchKnobs, ParamID::pitchSpray, "Pitch Spray", Palette::pink);
+    add (pitchKnobs, ParamID::octave,     "Octaves",     Palette::pink);
+    add (pitchKnobs, ParamID::reverse,    "Reverse",     Palette::pink);
 
-    add (shapeKnobs, ParamID::shape,      "Window",      Palette::magenta);
-    add (shapeKnobs, ParamID::spread,     "Stereo",      Palette::magenta);
-    add (shapeKnobs, ParamID::attack,     "Attack",      Palette::magenta);
-    add (shapeKnobs, ParamID::release,    "Release",     Palette::magenta);
+    add (shapeKnobs, ParamID::shape,      "Window",      Palette::pink);
+    add (shapeKnobs, ParamID::spread,     "Stereo",      Palette::pink);
+    add (shapeKnobs, ParamID::attack,     "Attack",      Palette::pink);
+    add (shapeKnobs, ParamID::release,    "Release",     Palette::pink);
 
-    add (fxKnobs,    ParamID::cutoff,     "Cutoff",      Palette::green);
-    add (fxKnobs,    ParamID::reso,       "Reso",        Palette::green);
-    add (fxKnobs,    ParamID::space,      "Space",       Palette::blue);
-    add (fxKnobs,    ParamID::room,       "Room",        Palette::blue);
-    add (fxKnobs,    ParamID::output,     "Output",      Palette::red);
+    add (fxKnobs,    ParamID::cutoff,     "Cutoff",      Palette::pink);
+    add (fxKnobs,    ParamID::reso,       "Reso",        Palette::pink);
+    add (fxKnobs,    ParamID::space,      "Space",       Palette::pink);
+    add (fxKnobs,    ParamID::room,       "Room",        Palette::pink);
+    add (fxKnobs,    ParamID::output,     "Output",      Palette::pink);
 
     filterType.addItemList ({ "LOW PASS", "BAND PASS", "HIGH PASS" }, 1);
     addAndMakeVisible (filterType);
@@ -782,10 +782,10 @@ void GranulumEditor::rebuildBackground()
     drawFrame (g, screenFrame.toFloat(), "Grain Field", Colours::transparentBlack);
     drawRecess (g, waveform.getBounds().toFloat(), 10.0f);
 
-    drawFrame (g, grainArea.toFloat(), "Grains", Palette::aqua);
-    drawFrame (g, pitchArea.toFloat(), "Pitch",  Palette::yellow);
-    drawFrame (g, shapeArea.toFloat(), "Shape",  Palette::magenta);
-    drawFrame (g, fxArea.toFloat(),    "Filter / Space", Palette::green);
+    drawFrame (g, grainArea.toFloat(), "Grains", Palette::pink);
+    drawFrame (g, pitchArea.toFloat(), "Pitch", Palette::pink);
+    drawFrame (g, shapeArea.toFloat(), "Shape", Palette::pink);
+    drawFrame (g, fxArea.toFloat(),    "Filter / Space", Palette::pink);
 
     drawRecess (g, keyboard.getBounds().toFloat().expanded (2.0f), 6.0f);
 
@@ -873,8 +873,8 @@ void GranulumEditor::paint (Graphics& g)
         g.fillAll (Palette::panel);
 
     // indicator gems (top right): light up with output level, like a meter
-    const Colour gemCols[6] = { Palette::yellow, Palette::magenta, Palette::green,
-                                Palette::red, Palette::blue, Palette::aqua };
+    const Colour gemCols[6] = { Palette::pink, Palette::pink, Palette::pink,
+                                Palette::pink, Palette::pink, Palette::pink };
     const float db = Decibels::gainToDecibels (meter, -60.0f);
     const float thresholds[6] = { -48.0f, -36.0f, -24.0f, -12.0f, -6.0f, -2.0f };
     const float gw = (float) gemsArea.getWidth() / 3.0f;
@@ -891,9 +891,9 @@ void GranulumEditor::paint (Graphics& g)
     // two status LEDs above the sample block: grain activity + clip
     const float ls = (float) ledArea.getHeight();
     GranulumLook::drawGem (g, { (float) ledArea.getRight() - ls * 2.4f, (float) ledArea.getY(), ls, ls },
-                           Palette::green, jlimit (0.0f, 1.0f, activity));
+                           Palette::pink, jlimit (0.0f, 1.0f, activity));
     GranulumLook::drawGem (g, { (float) ledArea.getRight() - ls, (float) ledArea.getY(), ls, ls },
-                           Palette::magenta, meter > 0.89f ? 1.0f : 0.0f);
+                           Palette::pink, meter > 0.89f ? 1.0f : 0.0f);
 }
 
 void GranulumEditor::paintOverChildren (Graphics& g)
