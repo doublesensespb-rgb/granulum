@@ -62,20 +62,22 @@ static bool run (const char* name, Params p, int note, double seconds, double re
 {
     GrainEngine e;
     e.prepare (44100.0);
-    e.noteOn (note, 0.9f);
+    e.noteOn (note, 0.9f, p.mono);
 
     const int block = 256;
     const int total = (int) (seconds * 44100);
-    std::vector<float> L (block), R (block), allL, allR;
+    std::vector<float> L (block), R (block), S (block), allL, allR;
     double peak = 0, sumSq = 0;
     long count = 0;
     bool released = false;
     for (int pos = 0; pos < total; pos += block)
     {
-        if (! released && pos >= releaseAt * 44100) { e.noteOff (note); released = true; }
+        if (! released && pos >= releaseAt * 44100) { e.noteOff (note, p.mono); released = true; }
         std::fill (L.begin(), L.end(), 0.0f);
         std::fill (R.begin(), R.end(), 0.0f);
-        e.render (L.data(), R.data(), block, p, &s);
+        std::fill (S.begin(), S.end(), 0.0f);
+        e.render (L.data(), R.data(), S.data(), block, p, &s);
+        for (int i = 0; i < block; ++i) { L[(size_t) i] += S[(size_t) i]; R[(size_t) i] += S[(size_t) i]; }
         for (int i = 0; i < block; ++i)
         {
             if (! std::isfinite (L[(size_t) i]) || ! std::isfinite (R[(size_t) i])) { printf ("%s: NaN!\n", name); return false; }
@@ -121,8 +123,17 @@ int main (int argc, char** argv)
     Params dense = p; dense.holdMs = 1000; dense.spacingMs = 1; dense.attack = 1.0f;
     ok &= run ("dense", dense, 72, 3.0, 2.0, s, wavDir);
 
+    // additive source + key sync bass on A1 (note 33): output should be pitched at 55 Hz
+    std::array<float, kNumHarmonics> h {}; h[0] = 1; h[1] = 0.6f; h[2] = 0.4f; h[4] = 0.3f;
+    const auto add = renderAdditive (h);
+    printf ("additive frames=%d sr=%.1f\n", add.numFrames(), add.sampleRate);
+    Params bass = p; bass.keySync = true; bass.mono = true; bass.sub = 0.5f; bass.holdMs = 60; bass.attack = 0.3f;
+    ok &= run ("keysync_A1", bass, 33, 3.0, 2.5, add, wavDir);
+    Params vox = bass; vox.sub = 0.0f; vox.pitch = 7.0f; vox.waveSpacing = 0.3f;
+    ok &= run ("keysync_drum", vox, 33, 3.0, 2.5, s, wavDir);
+
     GrainEngine e; e.prepare (48000);
-    for (int n = 0; n < 9; ++n) e.noteOn (48 + n, 1.0f);
+    for (int n = 0; n < 9; ++n) e.noteOn (48 + n, 1.0f, false);
     printf ("steal: voices=%d\n", e.activeVoiceCount());
 
     printf (ok ? "ALL OK\n" : "FAILED\n");

@@ -9,63 +9,23 @@ namespace
         return Font { FontOptions (size, bold ? Font::bold : Font::plain).withKerningFactor (kerning) };
     }
 
-    // soft glow text: a few blurred-ish passes then the crisp text
-    void glowText (Graphics& g, const String& s, Rectangle<int> r, Justification j, Colour c, float glow)
+    void drawLed (Graphics& g, Rectangle<float> c, Colour on, Colour off, float level)
     {
-        if (glow > 0.0f)
+        level = jlimit (0.0f, 1.0f, level);
+        const auto ctr = c.getCentre();
+        const float r = c.getWidth() * 0.5f;
+        if (level > 0.02f)
         {
-            g.setColour (c.withAlpha (0.10f * glow));
-            static const int offs[6][2] = { { -1, 0 }, { 1, 0 }, { 0, -1 }, { 0, 1 }, { -2, 0 }, { 2, 0 } };
-            for (auto& o : offs)
-                g.drawText (s, r.translated (o[0], o[1]), j, false);
+            g.setGradientFill (ColourGradient (on.withAlpha (0.45f * level), ctr.x, ctr.y,
+                                               on.withAlpha (0.0f), ctr.x + r * 2.6f, ctr.y, true));
+            g.fillEllipse (c.expanded (r * 1.6f));
         }
-        g.setColour (c);
-        g.drawText (s, r, j, false);
-    }
-
-    void drawScrew (Graphics& g, Point<float> c, float r, float angle)
-    {
-        g.setColour (Colours::black.withAlpha (0.55f));
-        g.fillEllipse (c.x - r + 1.0f, c.y - r + 2.0f, r * 2, r * 2);
-        ColourGradient cg (Colour (0xff8d8c88), c.x - r * 0.6f, c.y - r * 0.6f, Colour (0xff2b2b2a), c.x + r, c.y + r, true);
-        g.setGradientFill (cg);
-        g.fillEllipse (c.x - r, c.y - r, r * 2, r * 2);
-        g.setColour (Colour (0xff141414));
-        const auto d = Point<float> (std::cos (angle), std::sin (angle)) * (r * 0.75f);
-        g.drawLine (Line<float> (c - d, c + d), 2.2f);
-        g.setColour (Colours::white.withAlpha (0.12f));
-        g.drawLine (Line<float> (c - d + Point<float> (0, 1.2f), c + d + Point<float> (0, 1.2f)), 0.8f);
-    }
-
-    void drawFrame (Graphics& g, Rectangle<float> r, const String& label, Colour led)
-    {
-        g.setColour (Palette::teal.withAlpha (0.08f));
-        g.drawRoundedRectangle (r.expanded (1.5f), 14.0f, 3.0f);
-        g.setColour (Palette::teal.withAlpha (0.55f));
-        g.drawRoundedRectangle (r, 13.0f, 1.3f);
-
-        if (label.isNotEmpty())
-        {
-            g.setFont (uiFont (14.0f, false, 0.06f));
-            auto lr = r.toNearestInt().withTrimmedLeft (18).withTrimmedTop (10).withHeight (20);
-            if (led != Colours::transparentBlack)
-            {
-                GranulumLook::drawGem (g, Rectangle<float> ((float) lr.getX(), (float) lr.getY() + 4.0f, 12.0f, 12.0f), led, 0.4f);
-                lr.removeFromLeft (20);
-            }
-            g.setColour (Palette::teal.withAlpha (0.9f));
-            g.drawText (label.toUpperCase(), lr, Justification::centredLeft, false);
-        }
-    }
-
-    void drawRecess (Graphics& g, Rectangle<float> r, float radius)
-    {
-        g.setColour (Colours::black.withAlpha (0.6f));
-        g.fillRoundedRectangle (r.expanded (3.0f), radius + 3.0f);
-        g.setColour (Colours::white.withAlpha (0.06f));
-        g.drawRoundedRectangle (r.expanded (3.0f).translated (0, 1.0f), radius + 3.0f, 1.0f);
-        g.setColour (Colour (0xff050606));
-        g.fillRoundedRectangle (r, radius);
+        g.setColour (Colours::black.withAlpha (0.25f));
+        g.fillEllipse (c.expanded (1.5f));
+        g.setColour (off.interpolatedWith (on, level));
+        g.fillEllipse (c);
+        g.setColour (Colours::white.withAlpha (0.10f + 0.25f * level));
+        g.fillEllipse (ctr.x - r * 0.5f, ctr.y - r * 0.65f, r, r * 0.6f);
     }
 }
 
@@ -74,211 +34,161 @@ namespace
 
 GranulumLook::GranulumLook()
 {
-    setColour (Slider::textBoxTextColourId, Palette::teal);
+    setColour (Slider::textBoxTextColourId, Palette::text);
     setColour (Slider::textBoxOutlineColourId, Colours::transparentBlack);
-    setColour (Slider::textBoxBackgroundColourId, Colours::transparentBlack);
-    setColour (Slider::textBoxHighlightColourId, Palette::teal.withAlpha (0.35f));
-    setColour (Label::textColourId, Palette::cream);
-    setColour (TextButton::textColourOffId, Palette::teal);
-    setColour (TextButton::textColourOnId, Palette::cream);
-    setColour (ComboBox::textColourId, Palette::teal);
-    setColour (ComboBox::arrowColourId, Palette::teal);
-    setColour (PopupMenu::backgroundColourId, Colour (0xff141617));
-    setColour (PopupMenu::textColourId, Palette::cream);
-    setColour (PopupMenu::highlightedBackgroundColourId, Palette::tealDim);
-    setColour (PopupMenu::highlightedTextColourId, Palette::cream);
-    setColour (TextEditor::backgroundColourId, Colour (0xff0a0b0c));
-    setColour (TextEditor::textColourId, Palette::teal);
-    setColour (TextEditor::outlineColourId, Palette::tealDim);
-    setColour (TextEditor::focusedOutlineColourId, Palette::teal);
-    setColour (TooltipWindow::backgroundColourId, Colour (0xff141617));
-    setColour (TooltipWindow::textColourId, Palette::cream);
-}
-
-const Image& GranulumLook::speckle()
-{
-    static const Image img = []
-    {
-        Image im (Image::ARGB, 192, 192, true);
-        Graphics g (im);
-        Random r (1234);
-        for (int i = 0; i < 1500; ++i)
-        {
-            const float x = r.nextFloat() * 192.0f, y = r.nextFloat() * 192.0f;
-            const float s = 1.0f + r.nextFloat() * r.nextFloat() * 4.5f;
-            const bool light = r.nextFloat() < 0.5f;
-            g.setColour ((light ? Colours::white : Colours::black).withAlpha (0.10f + r.nextFloat() * (light ? 0.35f : 0.45f)));
-            g.fillEllipse (x, y, s, s * (0.6f + r.nextFloat() * 0.8f));
-        }
-        return im;
-    }();
-    return img;
-}
-
-void GranulumLook::drawGem (Graphics& g, Rectangle<float> c, Colour base, float glow)
-{
-    const float r = c.getWidth() * 0.5f;
-    const auto ctr = c.getCentre();
-
-    if (glow > 0.01f)
-    {
-        g.setGradientFill (ColourGradient (base.withAlpha (0.45f * glow), ctr.x, ctr.y,
-                                           base.withAlpha (0.0f), ctr.x + r * 2.4f, ctr.y, true));
-        g.fillEllipse (c.expanded (r * 1.4f));
-    }
-
-    g.setColour (Colours::black.withAlpha (0.55f));
-    g.fillEllipse (c.translated (0.0f, r * 0.12f).expanded (r * 0.06f));
-
-    const auto lit = base.interpolatedWith (Colours::white, 0.12f + 0.25f * glow);
-    ColourGradient cg (lit.brighter (0.25f), ctr.x - r * 0.45f, ctr.y - r * 0.55f,
-                       base.darker (0.75f), ctr.x + r * 0.9f, ctr.y + r, true);
-    g.setGradientFill (cg);
-    g.fillEllipse (c);
-
-    {
-        Graphics::ScopedSaveState ss (g);
-        Path clip; clip.addEllipse (c);
-        g.reduceClipRegion (clip);
-        g.setOpacity (0.75f);
-        g.drawImage (speckle(), c.expanded (r * 0.3f), RectanglePlacement::fillDestination);
-    }
-
-    g.setColour (Colours::white.withAlpha (0.22f));
-    g.fillEllipse (ctr.x - r * 0.55f, ctr.y - r * 0.7f, r * 0.8f, r * 0.5f);
-    g.setColour (Colours::black.withAlpha (0.35f));
-    g.drawEllipse (c, 0.8f);
+    setColour (Slider::textBoxBackgroundColourId, Palette::field);
+    setColour (Slider::textBoxHighlightColourId, Palette::accent.withAlpha (0.35f));
+    setColour (Label::textColourId, Palette::text);
+    setColour (ComboBox::textColourId, Palette::text);
+    setColour (ComboBox::arrowColourId, Palette::textDim);
+    setColour (PopupMenu::backgroundColourId, Palette::panel);
+    setColour (PopupMenu::textColourId, Palette::text);
+    setColour (PopupMenu::highlightedBackgroundColourId, Palette::button);
+    setColour (PopupMenu::highlightedTextColourId, Colours::white);
+    setColour (TextEditor::backgroundColourId, Palette::field);
+    setColour (TextEditor::textColourId, Palette::text);
+    setColour (TextEditor::outlineColourId, Colours::transparentBlack);
+    setColour (TextEditor::focusedOutlineColourId, Palette::accent);
+    setColour (TooltipWindow::backgroundColourId, Palette::panel);
+    setColour (TooltipWindow::textColourId, Palette::text);
 }
 
 void GranulumLook::drawRotarySlider (Graphics& g, int x, int y, int w, int h, float pos,
                                      float start, float end, Slider& s)
 {
-    const auto accent = s.findColour (Slider::rotarySliderFillColourId);
-    auto b = Rectangle<int> (x, y, w, h).toFloat().reduced (5.0f);
+    auto b = Rectangle<int> (x, y, w, h).toFloat().reduced (4.0f);
     const float r = jmin (b.getWidth(), b.getHeight()) * 0.5f;
     const auto c = b.getCentre();
     const float angle = start + pos * (end - start);
-    const float track = jmax (3.0f, r * 0.12f);
+    const float track = jmax (2.5f, r * 0.09f);
     const float ar = r - track * 0.5f;
 
-    // recessed track
     Path bgArc;
     bgArc.addCentredArc (c.x, c.y, ar, ar, 0.0f, start, end, true);
-    g.setColour (Colour (0xff070808));
-    g.strokePath (bgArc, PathStrokeType (track + 2.0f, PathStrokeType::curved, PathStrokeType::rounded));
-    g.setColour (Colour (0xff1d2021));
-    g.strokePath (bgArc, PathStrokeType (track - 1.0f, PathStrokeType::curved, PathStrokeType::rounded));
+    g.setColour (Palette::track);
+    g.strokePath (bgArc, PathStrokeType (track, PathStrokeType::curved, PathStrokeType::rounded));
 
-    // tick dots
-    for (int i = 0; i <= 10; ++i)
-    {
-        const float a = start + (end - start) * (float) i / 10.0f;
-        const auto p = c.getPointOnCircumference (r + 3.0f, a);
-        g.setColour (Palette::cream.withAlpha (i == 0 || i == 10 ? 0.35f : 0.15f));
-        g.fillEllipse (p.x - 1.0f, p.y - 1.0f, 2.0f, 2.0f);
-    }
-
-    // glowing value arc (bipolar params start from the centre)
     const bool bipolar = s.getMinimum() < 0.0 && s.getMaximum() > 0.0;
     const float from = bipolar ? (start + end) * 0.5f : start;
     if (std::abs (angle - from) > 0.001f)
     {
         Path valArc;
         valArc.addCentredArc (c.x, c.y, ar, ar, 0.0f, jmin (from, angle), jmax (from, angle), true);
-        g.setColour (accent.withAlpha (0.12f));
-        g.strokePath (valArc, PathStrokeType (track * 3.2f, PathStrokeType::curved, PathStrokeType::rounded));
-        g.setColour (accent.withAlpha (0.25f));
-        g.strokePath (valArc, PathStrokeType (track * 1.8f, PathStrokeType::curved, PathStrokeType::rounded));
-        g.setColour (accent.interpolatedWith (Colours::white, 0.15f));
-        g.strokePath (valArc, PathStrokeType (track * 0.7f, PathStrokeType::curved, PathStrokeType::rounded));
+        g.setColour (Palette::accent.withAlpha (0.18f));
+        g.strokePath (valArc, PathStrokeType (track * 2.6f, PathStrokeType::curved, PathStrokeType::rounded));
+        g.setColour (Palette::accentSoft.interpolatedWith (Palette::accent, s.isMouseOverOrDragging() ? 0.9f : 0.4f));
+        g.strokePath (valArc, PathStrokeType (track, PathStrokeType::curved, PathStrokeType::rounded));
     }
 
-    // gem body
-    const float br = r - track * 2.2f;
+    const float br = r - track * 2.4f;
     auto body = Rectangle<float> (c.x - br, c.y - br, br * 2, br * 2);
-    drawGem (g, body, accent, s.isMouseOverOrDragging() ? 0.35f : 0.0f);
+    g.setColour (Colours::black.withAlpha (0.28f));
+    g.fillEllipse (body.translated (0.0f, br * 0.10f).expanded (br * 0.04f));
+    g.setGradientFill (ColourGradient (Palette::knob.brighter (0.12f), c.x, body.getY(),
+                                       Palette::knobDark, c.x, body.getBottom(), false));
+    g.fillEllipse (body);
+    g.setColour (Colours::white.withAlpha (0.18f));
+    g.drawEllipse (body.reduced (0.6f), 0.8f);
 
-    // engraved pointer
-    const auto p1 = c.getPointOnCircumference (br * 0.25f, angle);
-    const auto p2 = c.getPointOnCircumference (br * 0.82f, angle);
-    g.setColour (Colours::black.withAlpha (0.65f));
-    g.drawLine ({ p1, p2 }, 3.2f);
-    g.setColour (Palette::cream.withAlpha (0.9f));
-    g.fillEllipse (p2.x - 2.2f, p2.y - 2.2f, 4.4f, 4.4f);
+    const auto p1 = c.getPointOnCircumference (br * 0.15f, angle);
+    const auto p2 = c.getPointOnCircumference (br * 0.85f, angle);
+    g.setColour (Palette::track);
+    g.drawLine ({ p1, p2 }, jmax (2.0f, br * 0.09f));
+}
+
+void GranulumLook::drawLinearSlider (Graphics& g, int x, int y, int w, int h, float pos, float, float,
+                                     Slider::SliderStyle, Slider& s)
+{
+    auto r = Rectangle<float> ((float) x, (float) y, (float) w, (float) h);
+    auto tr = r.withSizeKeepingCentre (r.getWidth(), 6.0f);
+    g.setColour (Palette::track);
+    g.fillRoundedRectangle (tr, 3.0f);
+    auto fill = tr.withRight (pos);
+    g.setColour (Palette::accent.withAlpha (s.isEnabled() ? 0.9f : 0.3f));
+    g.fillRoundedRectangle (fill, 3.0f);
+    const float tw = 12.0f;
+    g.setColour (s.isEnabled() ? Palette::knob : Palette::knobDark.withAlpha (0.5f));
+    g.fillEllipse (pos - tw * 0.5f, r.getCentreY() - tw * 0.5f, tw, tw);
 }
 
 void GranulumLook::drawButtonBackground (Graphics& g, Button& b, const Colour&, bool over, bool down)
 {
-    auto r = b.getLocalBounds().toFloat().reduced (3.0f);
-    drawRecess (g, r, 7.0f);
+    auto r = b.getLocalBounds().toFloat().reduced (1.5f);
+    const float rad = 6.0f;
     if (b.getToggleState())
     {
-        g.setColour (Palette::pink.withAlpha (0.18f));
-        g.fillRoundedRectangle (r.expanded (3.0f), 9.0f);
-        g.setGradientFill (ColourGradient (Palette::pink.brighter (0.2f), r.getX(), r.getY(),
-                                           Palette::pink.darker (0.3f), r.getX(), r.getBottom(), false));
-        g.fillRoundedRectangle (r, 7.0f);
-        g.setColour (Palette::pink.brighter (0.5f));
-        g.drawRoundedRectangle (r, 7.0f, 1.2f);
+        g.setColour (Palette::accent.withAlpha (0.22f));
+        g.fillRoundedRectangle (r.expanded (2.0f), rad + 2.0f);
+        g.setColour (Palette::accent.interpolatedWith (Colours::white, over ? 0.2f : 0.0f));
+        g.fillRoundedRectangle (r, rad);
         return;
     }
-    g.setColour (Palette::teal.withAlpha (down ? 0.30f : over ? 0.16f : 0.05f));
-    g.fillRoundedRectangle (r, 7.0f);
-    g.setColour (Palette::teal.withAlpha (over ? 0.9f : 0.5f));
-    g.drawRoundedRectangle (r, 7.0f, 1.2f);
+    g.setColour (down ? Palette::button.darker (0.2f) : over ? Palette::buttonHi : Palette::button);
+    g.fillRoundedRectangle (r, rad);
+    g.setColour (Colours::white.withAlpha (0.06f));
+    g.drawRoundedRectangle (r.reduced (0.5f), rad, 1.0f);
 }
 
 void GranulumLook::drawButtonText (Graphics& g, TextButton& b, bool over, bool)
 {
-    g.setFont (uiFont (b.getHeight() < 30 ? 11.5f : (b.getButtonText().length() > 7 ? 12.5f : 14.0f), true, 0.1f));
-    if (b.getToggleState())
-    {
-        g.setColour (Palette::pinkInk);
-        g.drawText (b.getButtonText(), b.getLocalBounds(), Justification::centred, false);
-        return;
-    }
-    glowText (g, b.getButtonText(), b.getLocalBounds(), Justification::centred,
-              over ? Palette::cream : Palette::teal, over ? 1.0f : 0.5f);
+    g.setFont (uiFont (b.getHeight() < 30 ? 11.5f : 13.5f, false, 0.08f));
+    g.setColour (b.getToggleState() ? Palette::screen : (over ? Colours::white : Palette::text));
+    g.drawText (b.getButtonText(), b.getLocalBounds(), Justification::centred, false);
 }
 
 void GranulumLook::drawComboBox (Graphics& g, int w, int h, bool, int, int, int, int, ComboBox&)
 {
-    auto r = Rectangle<float> (0, 0, (float) w, (float) h).reduced (3.0f);
-    drawRecess (g, r, 6.0f);
-    g.setColour (Palette::teal.withAlpha (0.5f));
-    g.drawRoundedRectangle (r, 6.0f, 1.0f);
+    auto r = Rectangle<float> (0, 0, (float) w, (float) h).reduced (1.5f);
+    g.setColour (Palette::field);
+    g.fillRoundedRectangle (r, 6.0f);
+    g.setColour (Colours::white.withAlpha (0.10f));
+    g.drawRoundedRectangle (r.reduced (0.5f), 6.0f, 1.0f);
     Path arrow;
-    const float ax = r.getRight() - 14.0f, ay = r.getCentreY();
+    const float ax = r.getRight() - 13.0f, ay = r.getCentreY();
     arrow.addTriangle (ax - 4.0f, ay - 2.0f, ax + 4.0f, ay - 2.0f, ax, ay + 3.0f);
-    g.setColour (Palette::teal);
+    g.setColour (Palette::textDim);
     g.fillPath (arrow);
 }
 
-Font GranulumLook::getComboBoxFont (ComboBox&) { return uiFont (12.0f, true, 0.02f); }
+Font GranulumLook::getComboBoxFont (ComboBox&) { return uiFont (12.0f, false, 0.05f); }
+Font GranulumLook::getPopupMenuFont()          { return uiFont (14.0f); }
 
 Label* GranulumLook::createSliderTextBox (Slider& s)
 {
     auto* l = LookAndFeel_V4::createSliderTextBox (s);
-    l->setFont (uiFont (12.5f, false, 0.04f));
+    l->setFont (uiFont (12.5f, false, 0.03f));
     l->setJustificationType (Justification::centred);
     l->setColour (Label::outlineColourId, Colours::transparentBlack);
     l->setColour (Label::backgroundColourId, Colours::transparentBlack);
-    l->setColour (Label::outlineWhenEditingColourId, Palette::teal);
+    l->setColour (Label::outlineWhenEditingColourId, Palette::accent);
     return l;
+}
+
+void GranulumLook::drawLabel (Graphics& g, Label& l)
+{
+    if (dynamic_cast<Slider*> (l.getParentComponent()) != nullptr && ! l.isBeingEdited())
+    {
+        const auto text = l.getText();
+        g.setFont (getLabelFont (l));
+        const float tw = (float) GlyphArrangement::getStringWidthInt (g.getCurrentFont(), text) + 16.0f;
+        auto r = l.getLocalBounds().toFloat().withSizeKeepingCentre (jmin ((float) l.getWidth(), jmax (54.0f, tw)), (float) l.getHeight() - 1.0f);
+        g.setColour (Palette::field);
+        g.fillRoundedRectangle (r, 4.0f);
+        g.setColour (Palette::text);
+        g.drawText (text, r, Justification::centred, false);
+        return;
+    }
+    LookAndFeel_V4::drawLabel (g, l);
 }
 
 // ============================================================================
 // Knob
 
-Knob::Knob (AudioProcessorValueTreeState& state, const String& paramId, const String& t, Colour accent, bool isHero)
+Knob::Knob (AudioProcessorValueTreeState& state, const String& paramId, const String& t, bool isHero)
     : title (t), hero (isHero)
 {
     slider.setSliderStyle (Slider::RotaryHorizontalVerticalDrag);
     slider.setTextBoxStyle (Slider::TextBoxBelow, false, 84, 18);
-    slider.setColour (Slider::rotarySliderFillColourId, accent);
-    slider.setColour (Slider::textBoxOutlineColourId, Colours::transparentBlack);
-    slider.setColour (Slider::textBoxBackgroundColourId, Colours::transparentBlack);
-    slider.setColour (Slider::textBoxTextColourId, Palette::teal);
     slider.setRotaryParameters (MathConstants<float>::pi * 1.25f, MathConstants<float>::pi * 2.75f, true);
     auto* param = state.getParameter (paramId);
     slider.setDoubleClickReturnValue (true, param->convertFrom0to1 (param->getDefaultValue()));
@@ -289,75 +199,25 @@ Knob::Knob (AudioProcessorValueTreeState& state, const String& paramId, const St
 void Knob::resized()
 {
     auto r = getLocalBounds();
-    r.removeFromTop (hero ? 20 : 17);
-    slider.setTextBoxStyle (Slider::TextBoxBelow, false, jmin (getWidth(), 96), hero ? 20 : 18);
+    r.removeFromTop (hero ? 20 : 16);
+    slider.setTextBoxStyle (Slider::TextBoxBelow, false, jmin (getWidth() - 4, 90), hero ? 20 : 18);
     slider.setBounds (r);
 }
 
 void Knob::paint (Graphics& g)
 {
-    g.setColour (Palette::cream.withAlpha (hero ? 0.95f : 0.7f));
-    g.setFont (uiFont (hero ? 13.5f : 11.0f, true, 0.1f));
-    g.drawText (title.toUpperCase(), getLocalBounds().removeFromTop (hero ? 20 : 17), Justification::centred);
+    g.setColour (hero ? Palette::text : Palette::label);
+    g.setFont (uiFont (hero ? 13.5f : 11.0f, hero, 0.08f));
+    g.drawText (title.toUpperCase(), getLocalBounds().removeFromTop (hero ? 20 : 16), Justification::centred);
 }
 
 // ============================================================================
-// Screen (waveform + grains)
+// Screen (ribbon waveform + grains)
 
 WaveformView::WaveformView (GranulumProcessor& p) : proc (p)
 {
     setMouseCursor (MouseCursor::PointingHandCursor);
-    setOpaque (false);
     startTimerHz (40);
-}
-
-void WaveformView::resized()
-{
-    const int w = jmax (1, getWidth()), h = jmax (1, getHeight());
-    glass = Image (Image::ARGB, w, h, true);
-    Graphics g (glass);
-    auto r = Rectangle<float> (0, 0, (float) w, (float) h);
-
-    // grid
-    const int cols = 12, rows = 6;
-    for (int i = 1; i < cols; ++i)
-    {
-        const float x = r.getWidth() * (float) i / (float) cols;
-        g.setColour (Palette::grid.withAlpha (0.06f)); g.fillRect (x - 2.0f, 0.0f, 4.0f, r.getHeight());
-        g.setColour (Palette::grid.withAlpha (0.38f)); g.fillRect (x - 0.5f, 0.0f, 1.0f, r.getHeight());
-    }
-    for (int i = 1; i < rows; ++i)
-    {
-        const float y = r.getHeight() * (float) i / (float) rows;
-        g.setColour (Palette::grid.withAlpha (0.06f)); g.fillRect (0.0f, y - 2.0f, r.getWidth(), 4.0f);
-        g.setColour (Palette::grid.withAlpha (0.38f)); g.fillRect (0.0f, y - 0.5f, r.getWidth(), 1.0f);
-    }
-
-    // scanlines
-    g.setColour (Colours::black.withAlpha (0.16f));
-    for (int y = 0; y < h; y += 3)
-        g.fillRect (0, y, w, 1);
-
-    // dust on the glass
-    Random rnd (77);
-    for (int i = 0; i < w * h / 900; ++i)
-    {
-        g.setColour (Palette::cream.withAlpha (0.05f + rnd.nextFloat() * 0.12f));
-        const float s = 0.8f + rnd.nextFloat() * 1.4f;
-        g.fillEllipse (rnd.nextFloat() * (float) w, rnd.nextFloat() * (float) h, s, s);
-    }
-
-    // vignette + inner shadow (CRT curvature feel)
-    ColourGradient vg (Colours::transparentBlack, r.getCentreX(), r.getCentreY(),
-                       Colours::black.withAlpha (0.75f), 0.0f, 0.0f, true);
-    vg.addColour (0.55, Colours::transparentBlack);
-    g.setGradientFill (vg);
-    g.fillRect (r);
-
-    // glass reflection
-    ColourGradient rg (Colours::white.withAlpha (0.05f), 0, 0, Colours::transparentWhite, 0, r.getHeight() * 0.45f, false);
-    g.setGradientFill (rg);
-    g.fillRoundedRectangle (r.reduced (6.0f).withHeight (r.getHeight() * 0.42f), 10.0f);
 }
 
 void WaveformView::timerCallback()
@@ -369,15 +229,16 @@ void WaveformView::timerCallback()
     grainHit.resize ((size_t) n);
     for (int i = 0; i < n; ++i)
     {
+        grainX[(size_t) i]   = e.vizPos[(size_t) i].load (std::memory_order_relaxed);
+        grainA[(size_t) i]   = e.vizAmp[(size_t) i].load (std::memory_order_relaxed);
         grainHit[(size_t) i] = e.vizHit[(size_t) i].load (std::memory_order_relaxed);
-        grainX[(size_t) i] = e.vizPos[(size_t) i].load (std::memory_order_relaxed);
-        grainA[(size_t) i] = e.vizAmp[(size_t) i].load (std::memory_order_relaxed);
     }
     const int h = e.vizHeadCount.load (std::memory_order_acquire);
     heads.resize ((size_t) h);
     for (int i = 0; i < h; ++i)
         heads[(size_t) i] = e.vizHead[(size_t) i].load (std::memory_order_relaxed);
 
+    phase += 0.035f;
     repaint();
 }
 
@@ -389,25 +250,28 @@ void WaveformView::paint (Graphics& g)
         g.reduceClipRegion (clip);
     }
 
-    // phosphor background
-    g.setGradientFill (ColourGradient (Colour (0xff0f2321), r.getCentreX(), r.getCentreY(),
-                                       Palette::screen, r.getX(), r.getY(), true));
+    g.setGradientFill (ColourGradient (Palette::screen.brighter (0.12f), r.getCentreX(), r.getCentreY(),
+                                       Palette::screen.darker (0.25f), r.getX(), r.getY(), true));
     g.fillRect (r);
 
-    auto inner = r.reduced (14.0f, 16.0f);
+    auto inner = r.reduced (14.0f, 14.0f);
     const float mid = inner.getCentreY();
     const float halfH = inner.getHeight() * 0.5f;
 
     auto peaks = proc.getPeaks();
     if (peaks == nullptr || peaks->maxs.empty())
     {
-        g.setFont (uiFont (17.0f, false, 0.08f));
-        glowText (g, String::fromUTF8 ("ПЕРЕТАЩИ СЮДА СЭМПЛ"), getLocalBounds().withTrimmedBottom (24),
-                  Justification::centred, dragHover ? Palette::cream : Palette::teal, 1.0f);
-        g.setFont (uiFont (12.0f, false, 0.08f));
-        g.setColour (Palette::tealDim);
+        g.setFont (uiFont (18.0f, false, 0.1f));
+        g.setColour (dragHover ? Colours::white : Palette::accentSoft);
+        g.drawText (String::fromUTF8 ("ПЕРЕТАЩИ СЮДА СЭМПЛ"), getLocalBounds().withTrimmedBottom (24), Justification::centred);
+        g.setFont (uiFont (12.0f, false, 0.1f));
+        g.setColour (Palette::textDim.withAlpha (0.6f));
         g.drawText ("WAV  /  AIFF  /  FLAC  /  MP3", getLocalBounds().withTrimmedTop (34), Justification::centred);
-        g.drawImageAt (glass, 0, 0);
+        if (dragHover)
+        {
+            g.setColour (Palette::accent.withAlpha (0.7f));
+            g.drawRoundedRectangle (r.reduced (2.0f), 10.0f, 2.0f);
+        }
         return;
     }
 
@@ -415,92 +279,101 @@ void WaveformView::paint (Graphics& g)
     const bool transOn   = proc.apvts.getRawParameterValue (ParamID::transients)->load() > 0.5f;
     auto xOf = [&] (float norm) { return inner.getX() + norm * inner.getWidth(); };
 
-    // transient markers
-    if (transOn)
-        for (float t : peaks->transients)
-        {
-            const float x = xOf (t);
-            g.setColour (Palette::pink.withAlpha (0.10f)); g.fillRect (x - 3.0f, r.getY(), 6.0f, r.getHeight());
-            g.setColour (Palette::pink.withAlpha (0.55f)); g.fillRect (x - 0.5f, r.getY(), 1.0f, r.getHeight());
-            Path tri; tri.addTriangle (x - 4.0f, r.getBottom() - 2.0f, x + 4.0f, r.getBottom() - 2.0f, x, r.getBottom() - 8.0f);
-            g.setColour (Palette::pink.withAlpha (0.8f)); g.fillPath (tri);
-        }
-
-    // waveform
+    const int bins = (int) peaks->maxs.size();
+    const int cols = jmax (2, (int) inner.getWidth() / 2);
+    std::vector<float> env ((size_t) cols), up ((size_t) cols), dn ((size_t) cols);
+    for (int x = 0; x < cols; ++x)
     {
-        const int bins = (int) peaks->maxs.size();
-        const int cols = jmax (2, (int) inner.getWidth());
-        Path fill, top;
-        std::vector<float> tops ((size_t) cols), bots ((size_t) cols);
-        for (int x = 0; x < cols; ++x)
+        const int b0 = x * bins / cols;
+        const int b1 = jmax (b0 + 1, (x + 1) * bins / cols);
+        float lo = 0, hi = 0;
+        for (int b = b0; b < b1 && b < bins; ++b)
         {
-            const int b0 = x * bins / cols;
-            const int b1 = jmax (b0 + 1, (x + 1) * bins / cols);
-            float lo = 0, hi = 0;
-            for (int b = b0; b < b1 && b < bins; ++b)
-            {
-                lo = jmin (lo, peaks->mins[(size_t) b]);
-                hi = jmax (hi, peaks->maxs[(size_t) b]);
-            }
-            tops[(size_t) x] = mid - hi * halfH;
-            bots[(size_t) x] = mid - lo * halfH;
+            lo = jmin (lo, peaks->mins[(size_t) b]);
+            hi = jmax (hi, peaks->maxs[(size_t) b]);
         }
-        fill.startNewSubPath (inner.getX(), tops[0]);
-        top.startNewSubPath (inner.getX(), tops[0]);
-        for (int x = 1; x < cols; ++x)
+        up[(size_t) x] = hi; dn[(size_t) x] = lo;
+        env[(size_t) x] = jmax (hi, -lo);
+    }
+    std::vector<float> sm ((size_t) cols);
+    for (int x = 0; x < cols; ++x)
+    {
+        float acc = 0, wsum = 0;
+        for (int k = -4; k <= 4; ++k)
         {
-            fill.lineTo (inner.getX() + (float) x, tops[(size_t) x]);
-            top.lineTo (inner.getX() + (float) x, tops[(size_t) x]);
+            const int xi = jlimit (0, cols - 1, x + k);
+            const float w = 1.0f - std::abs ((float) k) / 5.0f;
+            acc += env[(size_t) xi] * w; wsum += w;
         }
-        Path bottom;
-        bottom.startNewSubPath (inner.getX() + (float) (cols - 1), bots[(size_t) cols - 1]);
-        for (int x = cols - 1; x >= 0; --x)
-        {
-            fill.lineTo (inner.getX() + (float) x, bots[(size_t) x]);
-            bottom.lineTo (inner.getX() + (float) x, bots[(size_t) x]);
-        }
-        fill.closeSubPath();
-
-        g.setColour (Palette::grid.withAlpha (0.16f));
-        g.fillPath (fill);
-        for (auto* p : { &top, &bottom })
-        {
-            g.setColour (Palette::grid.withAlpha (0.12f));
-            g.strokePath (*p, PathStrokeType (4.0f));
-            g.setColour (Palette::grid.withAlpha (0.85f));
-            g.strokePath (*p, PathStrokeType (1.1f));
-        }
+        sm[(size_t) x] = acc / wsum;
     }
 
-    // voice playheads
+    {
+        Path raw;
+        raw.startNewSubPath (inner.getX(), mid - up[0] * halfH);
+        for (int x = 1; x < cols; ++x) raw.lineTo (xOf ((float) x / (float) (cols - 1)), mid - up[(size_t) x] * halfH);
+        for (int x = cols - 1; x >= 0; --x) raw.lineTo (xOf ((float) x / (float) (cols - 1)), mid - dn[(size_t) x] * halfH);
+        raw.closeSubPath();
+        g.setColour (Palette::accent.withAlpha (0.07f));
+        g.fillPath (raw);
+    }
+
+    const int strands = 22;
+    for (int k = 0; k < strands; ++k)
+    {
+        const float t = (float) k / (float) (strands - 1);
+        const float base = std::cos (t * MathConstants<float>::pi);
+        const float edge = std::abs (base);
+        Path p;
+        for (int x = 0; x < cols; ++x)
+        {
+            const float xn = (float) x / (float) (cols - 1);
+            const float wob = 0.10f * std::sin (xn * 23.0f + (float) k * 0.7f + phase);
+            const float y = mid - sm[(size_t) x] * halfH * 0.95f * (base + wob * (1.0f - edge));
+            if (x == 0) p.startNewSubPath (xOf (xn), y); else p.lineTo (xOf (xn), y);
+        }
+        g.setColour (Palette::accent.withAlpha (0.05f));
+        g.strokePath (p, PathStrokeType (3.5f));
+        g.setColour (Palette::accent.interpolatedWith (Colours::white, 0.15f * edge).withAlpha (0.18f + 0.45f * edge));
+        g.strokePath (p, PathStrokeType (0.9f));
+    }
+
+    if (transOn)
+        for (float tpos : peaks->transients)
+        {
+            const float x = xOf (tpos);
+            g.setColour (Palette::hit.withAlpha (0.10f)); g.fillRect (x - 3.0f, r.getY(), 6.0f, r.getHeight());
+            g.setColour (Palette::hit.withAlpha (0.55f)); g.fillRect (x - 0.5f, r.getY(), 1.0f, r.getHeight());
+            Path tri; tri.addTriangle (x - 4.0f, r.getBottom() - 2.0f, x + 4.0f, r.getBottom() - 2.0f, x, r.getBottom() - 8.0f);
+            g.setColour (Palette::hit.withAlpha (0.85f)); g.fillPath (tri);
+        }
+
     for (float h : heads)
     {
         float hp = position + h;
         hp -= std::floor (hp);
         const float x = xOf (hp);
-        g.setColour (Palette::aqua.withAlpha (0.15f)); g.fillRect (x - 3.0f, r.getY(), 6.0f, r.getHeight());
-        g.setColour (Palette::aqua.withAlpha (0.6f));  g.fillRect (x - 0.5f, r.getY(), 1.0f, r.getHeight());
+        g.setColour (Colours::white.withAlpha (0.10f)); g.fillRect (x - 3.0f, r.getY(), 6.0f, r.getHeight());
+        g.setColour (Colours::white.withAlpha (0.45f)); g.fillRect (x - 0.5f, r.getY(), 1.0f, r.getHeight());
     }
 
-    // position marker
     {
         const float x = xOf (position);
-        g.setColour (Palette::pink.withAlpha (0.18f)); g.fillRect (x - 4.0f, r.getY(), 8.0f, r.getHeight());
-        g.setColour (Palette::pink.interpolatedWith (Colours::white, 0.2f)); g.fillRect (x - 1.0f, r.getY(), 2.0f, r.getHeight());
+        g.setColour (Palette::purple.withAlpha (0.20f)); g.fillRect (x - 4.0f, r.getY(), 8.0f, r.getHeight());
+        g.setColour (Palette::purple.brighter (0.4f)); g.fillRect (x - 1.0f, r.getY(), 2.0f, r.getHeight());
         Path tri; tri.addTriangle (x - 6.0f, r.getY() + 2.0f, x + 6.0f, r.getY() + 2.0f, x, r.getY() + 10.0f);
         g.fillPath (tri);
     }
 
-    // grains: glowing phosphor dots
     for (size_t i = 0; i < grainX.size(); ++i)
     {
-        const bool isHit = i < grainHit.size() && grainHit[i] != 0;
+        const bool isHit = grainHit[i] != 0;
         const float x = xOf (grainX[i]);
         const uint32 hsh = (uint32) (i * 2654435761u);
         const float yN = ((float) (hsh % 1000) / 1000.0f) * 2.0f - 1.0f;
-        const float y = mid + yN * halfH * 0.85f;
+        const float y = mid + yN * halfH * 0.8f;
         const float a = jlimit (0.0f, 1.0f, grainA[i]);
-        const auto col = (isHit || i % 3 == 0) ? Palette::pink : Palette::grid;
+        const auto col = isHit ? Palette::hit : (i % 4 == 0 ? Palette::purple.brighter (0.5f) : Palette::accent);
         const float rad = (isHit ? 3.0f : 1.5f) + a * 3.5f;
         g.setColour (col.withAlpha (0.10f * a)); g.fillEllipse (x - rad * 3.5f, y - rad * 3.5f, rad * 7.0f, rad * 7.0f);
         g.setColour (col.withAlpha (0.30f * a)); g.fillEllipse (x - rad * 1.6f, y - rad * 1.6f, rad * 3.2f, rad * 3.2f);
@@ -508,18 +381,16 @@ void WaveformView::paint (Graphics& g)
         g.fillEllipse (x - rad * 0.5f, y - rad * 0.5f, rad, rad);
     }
 
-    g.drawImageAt (glass, 0, 0);
-
     if (dragHover)
     {
-        g.setColour (Palette::cream.withAlpha (0.7f));
+        g.setColour (Palette::accent.withAlpha (0.7f));
         g.drawRoundedRectangle (r.reduced (2.0f), 10.0f, 2.0f);
     }
 }
 
 void WaveformView::setPositionFromMouse (const MouseEvent& e)
 {
-    auto inner = getLocalBounds().toFloat().reduced (14.0f, 16.0f);
+    auto inner = getLocalBounds().toFloat().reduced (14.0f, 14.0f);
     const float norm = jlimit (0.0f, 1.0f, (e.position.x - inner.getX()) / inner.getWidth());
     if (auto* p = proc.apvts.getParameter (ParamID::position))
         p->setValueNotifyingHost (norm);
@@ -539,152 +410,231 @@ void WaveformView::mouseUp (const MouseEvent&)
 }
 
 // ============================================================================
-// Pink sample block
+// Harmonic sticks
 
-SampleBlock::SampleBlock()
+HarmonicEditor::HarmonicEditor (GranulumProcessor& p) : proc (p)
 {
-    setMouseCursor (MouseCursor::PointingHandCursor);
-    setTooltip (String::fromUTF8 ("Нажми, чтобы загрузить сэмпл"));
+    h = proc.getHarmonics();
+    setMouseCursor (MouseCursor::CrosshairCursor);
+    setTooltip (String::fromUTF8 ("Рисуй гармоники мышкой. Правая кнопка стирает."));
+    startTimerHz (20);
 }
 
-void SampleBlock::setText (const String& top, const String& main)
+void HarmonicEditor::timerCallback()
 {
-    if (top != topText || main != mainText)
-    {
-        topText = top; mainText = main;
-        repaint();
-    }
+    if (editing) return;
+    const auto now = proc.getHarmonics();
+    if (now != h) { h = now; repaint(); }
+    else repaint(); // keep the dimmed/active state fresh
 }
 
-void SampleBlock::paint (Graphics& g)
+Rectangle<float> HarmonicEditor::barArea() const
 {
-    auto outer = getLocalBounds().toFloat();
+    return getLocalBounds().toFloat().reduced (8.0f, 8.0f).withTrimmedBottom (10.0f);
+}
 
-    // translucent plastic housing
-    g.setColour (Colours::black.withAlpha (0.5f));
-    g.fillRoundedRectangle (outer.translated (0, 3.0f), 12.0f);
-    g.setColour (Colour (0xff6d6262).withAlpha (0.55f));
-    g.fillRoundedRectangle (outer, 12.0f);
-    g.setColour (Colours::white.withAlpha (0.18f));
-    g.drawRoundedRectangle (outer.reduced (0.5f), 12.0f, 1.0f);
+int HarmonicEditor::barAt (float x) const
+{
+    auto a = barArea();
+    return jlimit (0, granulum::kNumHarmonics - 1, (int) ((x - a.getX()) / a.getWidth() * granulum::kNumHarmonics));
+}
 
-    auto block = outer.reduced (12.0f);
-    auto base = hover ? Palette::pink.brighter (0.12f) : Palette::pink;
+void HarmonicEditor::applyMouse (const MouseEvent& e, bool first)
+{
+    auto a = barArea();
+    const int bar = barAt (e.position.x);
+    const float value = erasing ? 0.0f : jlimit (0.0f, 1.0f, (a.getBottom() - e.position.y) / a.getHeight());
 
-    g.setColour (Colours::black.withAlpha (0.45f));
-    g.fillRoundedRectangle (block.translated (0, 3.0f), 8.0f);
-    g.setGradientFill (ColourGradient (base.brighter (0.15f), block.getX(), block.getY(),
-                                       base.darker (0.35f), block.getRight(), block.getBottom(), false));
-    g.fillRoundedRectangle (block, 8.0f);
-
+    if (first || lastBar < 0)
+        h[(size_t) bar] = value;
+    else
     {
-        Graphics::ScopedSaveState ss (g);
-        Path clip; clip.addRoundedRectangle (block, 8.0f);
-        g.reduceClipRegion (clip);
-        g.setOpacity (0.9f);
-        const auto& sp = GranulumLook::speckle();
-        for (float y = block.getY(); y < block.getBottom(); y += 120.0f)
-            for (float x = block.getX(); x < block.getRight(); x += 120.0f)
-                g.drawImage (sp, Rectangle<float> (x, y, 120.0f, 120.0f));
+        // fill the bars we skipped over while dragging fast
+        const int from = lastBar, to = bar;
+        const int steps = std::abs (to - from);
+        for (int i = 0; i <= steps; ++i)
+        {
+            const int b = from + (to > from ? i : -i);
+            const float t = steps == 0 ? 1.0f : (float) i / (float) steps;
+            h[(size_t) b] = lastValue + (value - lastValue) * t;
+        }
+    }
+    lastBar = bar;
+    lastValue = value;
+    proc.setHarmonics (h);
+    repaint();
+}
+
+void HarmonicEditor::mouseDown (const MouseEvent& e)
+{
+    if ((int) proc.apvts.getRawParameterValue (ParamID::source)->load() == 1) return;
+    editing = true;
+    erasing = e.mods.isRightButtonDown();
+    lastBar = -1;
+    applyMouse (e, true);
+}
+
+void HarmonicEditor::mouseDrag (const MouseEvent& e) { if (editing) applyMouse (e, false); }
+void HarmonicEditor::mouseUp (const MouseEvent&)     { editing = false; lastBar = -1; }
+
+void HarmonicEditor::paint (Graphics& g)
+{
+    auto r = getLocalBounds().toFloat();
+    g.setColour (Palette::screen);
+    g.fillRoundedRectangle (r, 10.0f);
+
+    const bool active = (int) proc.apvts.getRawParameterValue (ParamID::source)->load() != 1;
+    auto a = barArea();
+
+    // one cycle of the resulting wave, drawn behind the sticks
+    {
+        Path wave;
+        const int pts = 160;
+        std::vector<float> ys ((size_t) pts);
+        float peak = 0.0f;
+        for (int i = 0; i < pts; ++i)
+        {
+            const float ph = MathConstants<float>::twoPi * (float) i / (float) (pts - 1);
+            float v = 0.0f;
+            for (int k = 0; k < granulum::kNumHarmonics; ++k)
+                v += h[(size_t) k] * std::sin (ph * (float) (k + 1));
+            ys[(size_t) i] = v;
+            peak = jmax (peak, std::abs (v));
+        }
+        const float sc = peak > 1.0e-4f ? 1.0f / peak : 0.0f;
+        for (int i = 0; i < pts; ++i)
+        {
+            const float x = a.getX() + a.getWidth() * (float) i / (float) (pts - 1);
+            const float y = a.getCentreY() - ys[(size_t) i] * sc * a.getHeight() * 0.42f;
+            if (i == 0) wave.startNewSubPath (x, y); else wave.lineTo (x, y);
+        }
+        g.setColour (Palette::purple.withAlpha (active ? 0.45f : 0.15f));
+        g.strokePath (wave, PathStrokeType (1.4f));
     }
 
-    // bevel
-    g.setColour (Colours::white.withAlpha (0.25f));
-    g.drawLine (block.getX() + 8, block.getY() + 1, block.getRight() - 8, block.getY() + 1, 1.2f);
-    g.setColour (Colours::black.withAlpha (0.35f));
-    g.drawLine (block.getX() + 8, block.getBottom() - 1, block.getRight() - 8, block.getBottom() - 1, 1.5f);
-
-    // engraved text
-    auto tr = block.toNearestInt().reduced (14, 12);
-    auto topR = tr.removeFromTop (20);
-    auto engrave = [&] (const String& s, Rectangle<int> rr, Font f, int lines)
+    const float bw = a.getWidth() / (float) granulum::kNumHarmonics;
+    for (int k = 0; k < granulum::kNumHarmonics; ++k)
     {
-        g.setFont (f);
-        g.setColour (base.brighter (0.4f).withAlpha (0.6f));
-        g.drawFittedText (s, rr.translated (0, 1), Justification::centred, lines, 0.8f);
-        g.setColour (Palette::pinkInk);
-        g.drawFittedText (s, rr, Justification::centred, lines, 0.8f);
-    };
-    engrave (topText, topR, uiFont (13.0f, false, 0.08f), 1);
-    engrave (mainText, tr, uiFont (22.0f, true, 0.06f), 2);
+        auto slot = Rectangle<float> (a.getX() + bw * (float) k, a.getY(), bw, a.getHeight()).reduced (bw * 0.18f, 0.0f);
+        g.setColour (Palette::track.withAlpha (0.8f));
+        g.fillRoundedRectangle (slot, 2.0f);
+        const float v = h[(size_t) k];
+        if (v > 0.001f)
+        {
+            auto bar = slot.withTop (slot.getBottom() - slot.getHeight() * v);
+            const auto col = active ? Palette::accent : Palette::accentSoft.withAlpha (0.35f);
+            g.setColour (col.withAlpha (active ? 0.18f : 0.08f));
+            g.fillRoundedRectangle (bar.expanded (1.5f, 1.5f), 2.5f);
+            g.setColour (col);
+            g.fillRoundedRectangle (bar, 2.0f);
+        }
+    }
+
+    // harmonic numbers under 1, 8, 16, 24, 32
+    g.setColour (Palette::textDim.withAlpha (0.55f));
+    g.setFont (uiFont (9.5f));
+    for (int k : { 1, 8, 16, 24, 32 })
+        g.drawText (String (k), Rectangle<float> (a.getX() + bw * (float) (k - 1), a.getBottom() + 1.0f, bw, 10.0f), Justification::centred, false);
 }
 
 // ============================================================================
 // Editor
 
 GranulumEditor::GranulumEditor (GranulumProcessor& p)
-    : AudioProcessorEditor (&p), proc (p), waveform (p),
+    : AudioProcessorEditor (&p), proc (p), waveform (p), harmonics (p),
       keyboard (p.keyboardState, MidiKeyboardComponent::horizontalKeyboard)
 {
     setLookAndFeel (&look);
 
     auto& s = proc.apvts;
-    auto add = [&] (std::vector<std::unique_ptr<Knob>>& group, const char* id, const char* name, Colour c, bool hero = false)
+    auto add = [&] (std::vector<std::unique_ptr<Knob>>& group, const char* id, const char* name, bool hero = false)
     {
-        group.push_back (std::make_unique<Knob> (s, id, name, c, hero));
+        group.push_back (std::make_unique<Knob> (s, id, name, hero));
         addAndMakeVisible (*group.back());
     };
 
-    add (heroKnobs,   ParamID::attack,      "Attack",        Palette::pink, true);
-    add (heroKnobs,   ParamID::hold,        "Hold",          Palette::pink, true);
-    add (heroKnobs,   ParamID::spacing,     "Gr. Spacing",   Palette::pink, true);
-    add (heroKnobs,   ParamID::waveSpacing, "Wave Spacing",  Palette::pink, true);
+    add (heroKnobs,   ParamID::attack,      "Attack",       true);
+    add (heroKnobs,   ParamID::hold,        "Hold",         true);
+    add (heroKnobs,   ParamID::spacing,     "Gr. Spacing",  true);
+    add (heroKnobs,   ParamID::waveSpacing, "Wave Spacing", true);
 
-    add (motionKnobs, ParamID::position,    "Start",         Palette::pink);
-    add (motionKnobs, ParamID::rand,        "Rand",          Palette::pink);
-    add (motionKnobs, ParamID::smear,       "Smear",         Palette::pink);
-    add (motionKnobs, ParamID::pan,         "Pan",           Palette::pink);
-    add (motionKnobs, ParamID::lfoDepth,    "LFO Depth",     Palette::pink);
-    add (motionKnobs, ParamID::lfoRate,     "LFO Speed",     Palette::pink);
+    add (motionKnobs, ParamID::position,    "Start");
+    add (motionKnobs, ParamID::rand,        "Rand");
+    add (motionKnobs, ParamID::smear,       "Smear");
+    add (motionKnobs, ParamID::pan,         "Pan");
+    add (motionKnobs, ParamID::lfoDepth,    "LFO Depth");
+    add (motionKnobs, ParamID::lfoRate,     "LFO Speed");
 
-    add (pitchKnobs,  ParamID::pitch,       "Pitch",         Palette::pink);
-    add (pitchKnobs,  ParamID::pitchSpray,  "Pitch Spray",   Palette::pink);
-    add (pitchKnobs,  ParamID::octave,      "Octaves",       Palette::pink);
-    add (pitchKnobs,  ParamID::reverse,     "Reverse",       Palette::pink);
+    add (bassKnobs,   ParamID::sub,         "Sub");
+    add (bassKnobs,   ParamID::drive,       "Drive");
+    add (bassKnobs,   ParamID::xover,       "X-Over");
+    add (bassKnobs,   ParamID::glide,       "Glide");
+    add (bassKnobs,   ParamID::pitch,       "Pitch");
 
-    add (fxKnobs,     ParamID::cutoff,      "Cutoff",        Palette::pink);
-    add (fxKnobs,     ParamID::reso,        "Reso",          Palette::pink);
-    add (fxKnobs,     ParamID::space,       "Space",         Palette::pink);
-    add (fxKnobs,     ParamID::room,        "Room",          Palette::pink);
-    add (fxKnobs,     ParamID::output,      "Output",        Palette::pink);
+    add (fxKnobs,     ParamID::cutoff,      "Cutoff");
+    add (fxKnobs,     ParamID::reso,        "Reso");
+    add (fxKnobs,     ParamID::space,       "Space");
+    add (fxKnobs,     ParamID::room,        "Room");
+    add (fxKnobs,     ParamID::output,      "Output");
 
-    transButton.setClickingTogglesState (true);
-    addAndMakeVisible (transButton);
-    transAttachment = std::make_unique<AudioProcessorValueTreeState::ButtonAttachment> (s, ParamID::transients, transButton);
+    for (auto* b : { &transButton, &keySyncButton, &monoButton })
+    {
+        b->setClickingTogglesState (true);
+        addAndMakeVisible (*b);
+    }
+    transAttachment   = std::make_unique<AudioProcessorValueTreeState::ButtonAttachment> (s, ParamID::transients, transButton);
+    keySyncAttachment = std::make_unique<AudioProcessorValueTreeState::ButtonAttachment> (s, ParamID::keySync, keySyncButton);
+    monoAttachment    = std::make_unique<AudioProcessorValueTreeState::ButtonAttachment> (s, ParamID::mono, monoButton);
+    keySyncButton.setTooltip (String::fromUTF8 ("Гранулы режутся в частоту нажатой ноты: любой источник превращается в тональный бас"));
+    transButton.setTooltip (String::fromUTF8 ("Сохраняет удары: гранулы начинаются ровно на транзиентах"));
 
     filterType.addItemList ({ "LOW PASS", "BAND PASS", "HIGH PASS" }, 1);
     addAndMakeVisible (filterType);
     filterTypeAttachment = std::make_unique<AudioProcessorValueTreeState::ComboBoxAttachment> (s, ParamID::ftype, filterType);
 
     addAndMakeVisible (waveform);
+    addAndMakeVisible (harmonics);
 
-    for (auto* b : { &rndGrains, &rndPitch, &rndFx }) addAndMakeVisible (*b);
-    rndGrains.onClick = [this] { proc.randomizeSection (0); };
-    rndPitch.onClick  = [this] { proc.randomizeSection (1); };
-    rndFx.onClick     = [this] { proc.randomizeSection (2); };
+    // source selector
+    int idx = 0;
+    for (auto* b : { &srcAdd, &srcSample, &srcBoth })
+    {
+        const int i = idx++;
+        b->setClickingTogglesState (false);
+        b->onClick = [this, i] { setSource (i); };
+        addAndMakeVisible (*b);
+    }
+    mixSlider.setSliderStyle (Slider::LinearHorizontal);
+    mixSlider.setTextBoxStyle (Slider::NoTextBox, false, 0, 0);
+    mixSlider.setTooltip (String::fromUTF8 ("Баланс: сэмпл ← → палочки"));
+    addAndMakeVisible (mixSlider);
+    mixAttachment = std::make_unique<AudioProcessorValueTreeState::SliderAttachment> (s, ParamID::mix, mixSlider);
 
-    sampleName.setFont (uiFont (14.0f, false, 0.06f));
-    sampleName.setColour (Label::textColourId, Palette::cream.withAlpha (0.8f));
+    for (auto* b : { &rndGrains, &rndBass, &rndFx, &rndBars, &randomButton, &loadButton }) addAndMakeVisible (*b);
+    rndGrains.onClick    = [this] { proc.randomizeSection (0); };
+    rndBass.onClick      = [this] { proc.randomizeSection (1); };
+    rndFx.onClick        = [this] { proc.randomizeSection (2); };
+    rndBars.onClick      = [this] { proc.randomizeSection (3); };
+    randomButton.onClick = [this] { proc.randomize(); };
+    loadButton.onClick   = [this] { launchChooser(); };
+
+    sampleName.setFont (uiFont (14.0f, false, 0.05f));
+    sampleName.setColour (Label::textColourId, Palette::text);
     sampleName.setJustificationType (Justification::centredLeft);
     sampleName.setInterceptsMouseClicks (false, false);
     addAndMakeVisible (sampleName);
 
-    addAndMakeVisible (randomButton);
-    addAndMakeVisible (loadButton);
-    randomButton.onClick = [this] { proc.randomize(); };
-    loadButton.onClick   = [this] { launchChooser(); };
-
-    keyboard.setColour (MidiKeyboardComponent::whiteNoteColourId, Colour (0xffcfc6ba));
-    keyboard.setColour (MidiKeyboardComponent::blackNoteColourId, Colour (0xff141516));
-    keyboard.setColour (MidiKeyboardComponent::keySeparatorLineColourId, Colour (0xff6f6a63));
-    keyboard.setColour (MidiKeyboardComponent::keyDownOverlayColourId, Palette::teal.withAlpha (0.85f));
-    keyboard.setColour (MidiKeyboardComponent::mouseOverKeyOverlayColourId, Palette::pink.withAlpha (0.35f));
-    keyboard.setColour (MidiKeyboardComponent::shadowColourId, Colours::black.withAlpha (0.4f));
-    keyboard.setColour (MidiKeyboardComponent::upDownButtonBackgroundColourId, Colour (0xff141516));
-    keyboard.setColour (MidiKeyboardComponent::upDownButtonArrowColourId, Palette::teal);
-    keyboard.setAvailableRange (36, 96);
-    keyboard.setKeyWidth (18.0f);
-    keyboard.setLowestVisibleKey (36);
+    keyboard.setColour (MidiKeyboardComponent::whiteNoteColourId, Palette::whiteKey);
+    keyboard.setColour (MidiKeyboardComponent::blackNoteColourId, Palette::blackKey);
+    keyboard.setColour (MidiKeyboardComponent::keySeparatorLineColourId, Palette::blackKey.withAlpha (0.6f));
+    keyboard.setColour (MidiKeyboardComponent::keyDownOverlayColourId, Palette::accent.withAlpha (0.85f));
+    keyboard.setColour (MidiKeyboardComponent::mouseOverKeyOverlayColourId, Palette::accent.withAlpha (0.25f));
+    keyboard.setColour (MidiKeyboardComponent::shadowColourId, Colours::transparentBlack);
+    keyboard.setColour (MidiKeyboardComponent::textLabelColourId, Palette::blackKey);
+    keyboard.setColour (MidiKeyboardComponent::upDownButtonBackgroundColourId, Palette::panel);
+    keyboard.setColour (MidiKeyboardComponent::upDownButtonArrowColourId, Palette::text);
+    keyboard.setAvailableRange (24, 84);   // bass-friendly range
+    keyboard.setLowestVisibleKey (24);
     keyboard.setWantsKeyboardFocus (false);
     addAndMakeVisible (keyboard);
 
@@ -693,11 +643,24 @@ GranulumEditor::GranulumEditor (GranulumProcessor& p)
     setResizeLimits (860, 589, 1620, 1110);
     setSize (1080, 740);
     startTimerHz (20);
+    timerCallback();
 }
 
 GranulumEditor::~GranulumEditor()
 {
     setLookAndFeel (nullptr);
+}
+
+void GranulumEditor::setSource (int sIdx)
+{
+    if (auto* p = proc.apvts.getParameter (ParamID::source))
+    {
+        p->beginChangeGesture();
+        p->setValueNotifyingHost (p->convertTo0to1 ((float) sIdx));
+        p->endChangeGesture();
+    }
+    if (sIdx != 0 && proc.getSampleName().isEmpty())
+        launchChooser();
 }
 
 void GranulumEditor::launchChooser()
@@ -720,219 +683,116 @@ void GranulumEditor::openFile (const File& f)
 
 void GranulumEditor::timerCallback()
 {
+    const int src = (int) proc.apvts.getRawParameterValue (ParamID::source)->load();
+    if (src != shownSource)
+    {
+        shownSource = src;
+        srcAdd.setToggleState    (src == 0, dontSendNotification);
+        srcSample.setToggleState (src == 1, dontSendNotification);
+        srcBoth.setToggleState   (src == 2, dontSendNotification);
+        mixSlider.setEnabled (src == 2);
+        rndBars.setEnabled (src != 1);
+        repaint (sourceArea.expanded (4));
+    }
+
     const auto name = proc.getSampleName();
+    const auto stem = File::createFileWithoutCheckingPath (name).getFileNameWithoutExtension().toUpperCase();
     const String text = statusText.isNotEmpty() ? "ERROR: " + statusText
-                      : name.isEmpty() ? String()
-                      : String::fromUTF8 ("\xe2\x80\x94  ") + File::createFileWithoutCheckingPath (name).getFileNameWithoutExtension()
-                        + "   " + String (proc.getSampleLengthSeconds(), 2) + " s";
+                      : src == 0 ? String ("ADDITIVE")
+                      : name.isEmpty() ? String::fromUTF8 ("НЕТ СЭМПЛА — НАЖМИ LOAD")
+                      : (src == 2 ? "ADDITIVE + " : "") + stem + "    " + String (proc.getSampleLengthSeconds(), 2) + " s";
     if (sampleName.getText() != text) sampleName.setText (text, dontSendNotification);
 
     meter    = jmax (proc.outputLevel.load(), meter * 0.85f);
     activity = jmax ((float) proc.engine.vizCount.load() / 20.0f, activity * 0.8f);
-    repaint (gemsArea.expanded (20));
+    repaint (gemsArea.expanded (24));
     repaint (ledArea.expanded (16));
 }
 
-// ----------------------------------------------------------------------------
-
-void GranulumEditor::rebuildBackground()
+void GranulumEditor::drawSectionHeader (Graphics& g, Rectangle<int> area, const String& title, bool lit)
 {
-    const int w = jmax (1, getWidth()), h = jmax (1, getHeight());
-    const float sc = (float) w / 1080.0f;
-
-    background = Image (Image::RGB, w, h, false);
-    {
-        // per-pixel grain noise on charcoal
-        Image::BitmapData bd (background, Image::BitmapData::writeOnly);
-        Random rnd (4242);
-        for (int y = 0; y < h; ++y)
-            for (int x = 0; x < w; ++x)
-            {
-                const int n = rnd.nextInt (19) - 9;
-                const int v = jlimit (0, 255, 30 + n);
-                bd.setPixelColour (x, y, Colour ((uint8) v, (uint8) (v + 1), (uint8) (v + 3)));
-            }
-    }
-
-    Graphics g (background);
-    Random rnd (99);
-
-    // mottled blotches
-    for (int i = 0; i < 60; ++i)
-    {
-        const float x = rnd.nextFloat() * (float) w, y = rnd.nextFloat() * (float) h;
-        const float rr = (40.0f + rnd.nextFloat() * 160.0f) * sc;
-        const bool light = rnd.nextBool();
-        g.setGradientFill (ColourGradient ((light ? Colours::white : Colours::black).withAlpha (light ? 0.025f : 0.08f), x, y,
-                                           Colours::transparentBlack, x + rr, y, true));
-        g.fillEllipse (x - rr, y - rr, rr * 2, rr * 2);
-    }
-
-    // scratches
-    for (int i = 0; i < 70; ++i)
-    {
-        const float x = rnd.nextFloat() * (float) w, y = rnd.nextFloat() * (float) h;
-        const float a = rnd.nextFloat() * MathConstants<float>::twoPi, l = (6.0f + rnd.nextFloat() * 30.0f) * sc;
-        g.setColour (Colours::white.withAlpha (0.03f + rnd.nextFloat() * 0.04f));
-        g.drawLine (x, y, x + std::cos (a) * l, y + std::sin (a) * l, 0.7f);
-    }
-
-    // panel vignette + bevel
-    auto full = Rectangle<float> (0, 0, (float) w, (float) h);
-    ColourGradient vg (Colours::transparentBlack, full.getCentreX(), full.getCentreY() * 0.8f,
-                       Colours::black.withAlpha (0.55f), 0.0f, 0.0f, true);
-    vg.addColour (0.6, Colours::transparentBlack);
-    g.setGradientFill (vg);
-    g.fillRect (full);
-    g.setColour (Colours::white.withAlpha (0.07f));
-    g.drawRoundedRectangle (full.reduced (3.0f), 18.0f, 1.5f);
-    g.setColour (Colours::black.withAlpha (0.6f));
-    g.drawRoundedRectangle (full.reduced (1.0f), 20.0f, 2.0f);
-
-    // screws
-    const float m = 20.0f * sc;
-    drawScrew (g, { m, m }, 9.0f * sc, 0.7f);
-    drawScrew (g, { (float) w - m, m }, 9.0f * sc, 2.1f);
-    drawScrew (g, { m, (float) h - m }, 9.0f * sc, 1.3f);
-    drawScrew (g, { (float) w - m, (float) h - m }, 9.0f * sc, 0.2f);
-
-    // title
-    g.setFont (uiFont (54.0f * sc, false, 0.01f));
-    g.setColour (Colours::black.withAlpha (0.5f));
-    g.drawText ("Granulum", titleArea.withHeight ((int) (60 * sc)).translated (0, 2), Justification::centredLeft);
-    g.setColour (Palette::cream);
-    g.drawText ("Granulum", titleArea.withHeight ((int) (60 * sc)), Justification::centredLeft);
-    g.setFont (uiFont (21.0f * sc, false, 0.07f));
-    g.setColour (Palette::teal);
-    g.drawText ("GRANULAR SAMPLER", titleArea.withTrimmedTop ((int) (58 * sc)), Justification::topLeft);
-
-    // main frame with screen + sample block
-    drawFrame (g, screenFrame.toFloat(), "Grain Field", Colours::transparentBlack);
-    drawRecess (g, waveform.getBounds().toFloat(), 10.0f);
-
-    drawFrame (g, grainArea.toFloat(), "Grains", Palette::pink);
-    drawFrame (g, pitchArea.toFloat(), "Pitch",  Palette::pink);
-    drawFrame (g, fxArea.toFloat(),    "Filter / Space", Palette::pink);
-    if (! heroKnobs.empty())
-    {
-        // thin divider between the hero row and the motion row
-        auto hr = heroKnobs.front()->getBounds();
-        g.setColour (Palette::teal.withAlpha (0.18f));
-        g.drawHorizontalLine (hr.getBottom() + 4, (float) grainArea.getX() + 18.0f, (float) grainArea.getRight() - 18.0f);
-    }
-
-    drawRecess (g, keyboard.getBounds().toFloat().expanded (2.0f), 6.0f);
-
-    // ---------------- sand overlay ----------------
-    sandOverlay = Image (Image::ARGB, w, h, true);
-    Graphics sg (sandOverlay);
-    Random sr (2024);
-
-    auto noSand = [&] (float x, float y)
-    {
-        auto p = Point<int> ((int) x, (int) y);
-        if (waveform.getBounds().reduced (6).contains (p)) return true;
-        if (keyboard.getBounds().reduced (2).contains (p)) return true;
-        for (auto* grp : { &heroKnobs, &motionKnobs, &pitchKnobs, &fxKnobs })
-            for (auto& k : *grp)
-                if (k->getBounds().reduced (6).contains (p)) return true;
-        if (filterType.getBounds().contains (p) || randomButton.getBounds().contains (p) || loadButton.getBounds().contains (p) || transButton.getBounds().contains (p)
-            || rndGrains.getBounds().contains (p) || rndPitch.getBounds().contains (p) || rndFx.getBounds().contains (p)) return true;
-        return false;
-    };
-
-    auto grain = [&] (float x, float y, float alphaScale)
-    {
-        if (noSand (x, y)) return;
-        const float s = (0.7f + sr.nextFloat() * sr.nextFloat() * 2.6f) * jmax (0.8f, sc);
-        const float t = sr.nextFloat();
-        const auto c = t < 0.33f ? Palette::sand : t < 0.66f ? Palette::sand.darker (0.35f) : Palette::sand.brighter (0.25f);
-        sg.setColour (c.withAlpha ((0.35f + sr.nextFloat() * 0.6f) * alphaScale));
-        sg.fillEllipse (x, y, s, s * (0.7f + sr.nextFloat() * 0.6f));
-    };
-
-    // light dusting everywhere
-    for (int i = 0; i < w * h / 260; ++i)
-        grain (sr.nextFloat() * (float) w, sr.nextFloat() * (float) h, 0.45f);
-
-    // heavier at the bottom edge and corners
-    for (int i = 0; i < w * 3; ++i)
-    {
-        const float y = (float) h - std::pow (sr.nextFloat(), 2.2f) * 60.0f * sc;
-        grain (sr.nextFloat() * (float) w, y, 1.0f);
-    }
-    for (auto corner : { Point<float> (0, 0), Point<float> ((float) w, 0), Point<float> (0, (float) h), Point<float> ((float) w, (float) h) })
-        for (int i = 0; i < 700; ++i)
-        {
-            const float a = sr.nextFloat() * MathConstants<float>::twoPi;
-            const float d = std::pow (sr.nextFloat(), 1.8f) * 110.0f * sc;
-            grain (corner.x + std::cos (a) * d, corner.y + std::sin (a) * d, 0.9f);
-        }
-
-    // sand settled on ledges (top edges of frames, bottom edges of recesses)
-    auto ledge = [&] (Rectangle<int> r, bool top, int count)
-    {
-        for (int i = 0; i < count; ++i)
-        {
-            const float x = (float) r.getX() + 10.0f + sr.nextFloat() * (float) (r.getWidth() - 20);
-            const float off = std::pow (sr.nextFloat(), 2.0f) * 7.0f * sc;
-            const float y = top ? (float) r.getY() - 1.0f - off : (float) r.getBottom() + 1.0f + off;
-            grain (x, y, 1.0f);
-        }
-    };
-    for (auto r : { screenFrame, grainArea, pitchArea, fxArea })
-    {
-        ledge (r, true, r.getWidth() / 2);
-        ledge (r, false, r.getWidth() / 3);
-    }
-    ledge (waveform.getBounds().expanded (4), false, waveform.getWidth());
-    ledge (keyboard.getBounds().expanded (3), true, keyboard.getWidth() / 2);
-
-    // a few clumps
-    for (int c = 0; c < 18; ++c)
-    {
-        const float cx = sr.nextFloat() * (float) w;
-        const float cy = sr.nextFloat() < 0.6f ? (float) h - sr.nextFloat() * 40.0f * sc : sr.nextFloat() * (float) h;
-        for (int i = 0; i < 70; ++i)
-            grain (cx + sr.nextFloat() * 18.0f * sc - 9.0f * sc, cy + sr.nextFloat() * 8.0f * sc - 4.0f * sc, 1.0f);
-    }
+    auto hr = area.withHeight (26);
+    drawLed (g, Rectangle<float> ((float) hr.getX() + 2.0f, (float) hr.getCentreY() - 6.0f, 12.0f, 12.0f),
+             Palette::accent, Palette::ledOff, lit ? 1.0f : 0.0f);
+    g.setColour (Palette::text);
+    g.setFont (uiFont (14.5f, false, 0.08f));
+    g.drawText (title.toUpperCase(), hr.withTrimmedLeft (24), Justification::centredLeft, false);
 }
 
 void GranulumEditor::paint (Graphics& g)
 {
-    if (background.isValid())
-        g.drawImageAt (background, 0, 0);
-    else
-        g.fillAll (Palette::panel);
+    const auto full = getLocalBounds().toFloat();
+    const float sc = full.getWidth() / 1080.0f;
 
-    // indicator gems (top right): light up with output level, like a meter
-    const Colour gemCols[6] = { Palette::pink, Palette::pink, Palette::pink,
-                                Palette::pink, Palette::pink, Palette::pink };
+    g.setGradientFill (ColourGradient (Palette::bgTop, 0, 0, Palette::bgBottom, 0, full.getHeight(), false));
+    g.fillAll();
+    g.setColour (Colours::white.withAlpha (0.05f));
+    g.drawRoundedRectangle (full.reduced (1.0f), 14.0f, 1.0f);
+
+    // title
+    g.setColour (Palette::text);
+    g.setFont (uiFont (44.0f * sc, false, 0.04f));
+    g.drawText ("GRANULUM", titleArea.withHeight ((int) (52 * sc)), Justification::bottomLeft);
+    g.setColour (Palette::textDim);
+    g.setFont (uiFont (17.0f * sc, false, 0.08f));
+    g.drawText ("BASS GRANULIZER", titleArea.withTrimmedTop ((int) (55 * sc)), Justification::topLeft);
+
+    // output meter: six purple gems
     const float db = Decibels::gainToDecibels (meter, -60.0f);
     const float thresholds[6] = { -48.0f, -36.0f, -24.0f, -12.0f, -6.0f, -2.0f };
     const float gw = (float) gemsArea.getWidth() / 3.0f;
     const float gh = (float) gemsArea.getHeight() / 2.0f;
-    const float gs = jmin (gw, gh) * 0.72f;
+    const float gs = jmin (gw, gh) * 0.70f;
     for (int i = 0; i < 6; ++i)
     {
         const float cx = (float) gemsArea.getX() + gw * ((float) (i % 3) + 0.5f);
         const float cy = (float) gemsArea.getY() + gh * ((float) (i / 3) + 0.5f);
-        const float glow = jlimit (0.0f, 1.0f, (db - thresholds[i]) / 6.0f + 0.5f);
-        GranulumLook::drawGem (g, { cx - gs * 0.5f, cy - gs * 0.5f, gs, gs }, gemCols[i], glow);
+        const float lvl = jlimit (0.0f, 1.0f, (db - thresholds[i]) / 6.0f + 0.5f);
+        auto c = Rectangle<float> (cx - gs * 0.5f, cy - gs * 0.5f, gs, gs);
+        g.setColour (Colour (0xff10303b));
+        g.fillEllipse (c.expanded (gs * 0.14f));
+        drawLed (g, c, Palette::purple, Palette::purpleOff, lvl);
     }
 
-    // two status LEDs above the sample block: grain activity + clip
-    const float ls = (float) ledArea.getHeight();
-    GranulumLook::drawGem (g, { (float) ledArea.getRight() - ls * 2.4f, (float) ledArea.getY(), ls, ls },
-                           Palette::pink, jlimit (0.0f, 1.0f, activity));
-    GranulumLook::drawGem (g, { (float) ledArea.getRight() - ls, (float) ledArea.getY(), ls, ls },
-                           Palette::pink, meter > 0.89f ? 1.0f : 0.0f);
-}
+    // screen frame
+    g.setColour (Colours::black.withAlpha (0.12f));
+    g.fillRoundedRectangle (screenFrame.toFloat().translated (0, 2.0f), 14.0f);
+    g.setColour (Palette::panel);
+    g.fillRoundedRectangle (screenFrame.toFloat(), 14.0f);
+    g.setColour (Palette::label);
+    g.setFont (uiFont (13.0f, false, 0.08f));
+    g.drawText ("GRAIN FIELD", screenFrame.getX() + 18, screenFrame.getY() + 10, 140, 26, Justification::centredLeft);
 
-void GranulumEditor::paintOverChildren (Graphics& g)
-{
-    if (sandOverlay.isValid())
-        g.drawImageAt (sandOverlay, 0, 0);
+    // source panel labels
+    g.setColour (Palette::label);
+    g.setFont (uiFont (11.0f, false, 0.08f));
+    g.drawText ("MIX", mixLabelArea, Justification::centredLeft, false);
+    g.setColour (Palette::textDim.withAlpha (shownSource == 2 ? 0.9f : 0.35f));
+    g.setFont (uiFont (10.0f, false, 0.05f));
+    g.drawText ("SMP", mixSlider.getBounds().withY (mixSlider.getBottom() - 2).withHeight (12), Justification::centredLeft, false);
+    g.drawText ("ADD", mixSlider.getBounds().withY (mixSlider.getBottom() - 2).withHeight (12), Justification::centredRight, false);
+
+    const float ls = (float) ledArea.getHeight();
+    drawLed (g, { (float) ledArea.getRight() - ls * 2.4f, (float) ledArea.getY(), ls, ls }, Palette::accent, Palette::ledOff, activity);
+    drawLed (g, { (float) ledArea.getRight() - ls,        (float) ledArea.getY(), ls, ls }, Palette::purple, Palette::ledOff, meter > 0.89f ? 1.0f : 0.0f);
+
+    // sections
+    drawSectionHeader (g, grainArea, "Grains", true);
+    drawSectionHeader (g, bassArea,  "Bass", true);
+    drawSectionHeader (g, fxArea,    "Filter / Space", true);
+
+    if (! heroKnobs.empty())
+    {
+        auto hr = heroKnobs.front()->getBounds();
+        g.setColour (Colours::white.withAlpha (0.07f));
+        g.drawHorizontalLine (hr.getBottom() + 4, (float) grainArea.getX(), (float) grainArea.getRight());
+    }
+    g.setColour (Colours::white.withAlpha (0.06f));
+    for (auto x : { bassArea.getX() - 9, fxArea.getX() - 9 })
+        g.drawVerticalLine (x, (float) grainArea.getY() + 4.0f, (float) grainArea.getBottom() - 4.0f);
+
+    g.setColour (Colours::black.withAlpha (0.25f));
+    g.fillRoundedRectangle (keyboard.getBounds().toFloat().expanded (3.0f), 6.0f);
 }
 
 void GranulumEditor::resized()
@@ -940,45 +800,75 @@ void GranulumEditor::resized()
     const float sc = (float) getWidth() / 1080.0f;
     auto S = [sc] (float v) { return (int) std::round (v * sc); };
 
-    auto r = getLocalBounds().reduced (S (40), S (26));
+    auto r = getLocalBounds().reduced (S (34), S (22));
 
-    // header
-    auto header = r.removeFromTop (S (92));
-    gemsArea  = header.removeFromRight (S (130)).withSizeKeepingCentre (S (130), S (78));
-    titleArea = header.withTrimmedLeft (S (6));
-    r.removeFromTop (S (10));
+    auto header = r.removeFromTop (S (84));
+    gemsArea  = header.removeFromRight (S (124)).withSizeKeepingCentre (S (124), S (74));
+    titleArea = header.withTrimmedLeft (S (4));
+    r.removeFromTop (S (8));
 
-    // keyboard
-    keysFrame = r.removeFromBottom (S (62));
-    keyboard.setBounds (keysFrame.reduced (S (4), S (4)));
+    keyboard.setBounds (r.removeFromBottom (S (58)).reduced (S (2), S (2)));
     keyboard.setKeyWidth ((float) keyboard.getWidth() / 36.0f);
-    keyboard.setLowestVisibleKey (36);
+    keyboard.setLowestVisibleKey (24);
     r.removeFromBottom (S (16));
 
-    // knobs row
-    auto knobs = r.removeFromBottom (S (238));
-    r.removeFromBottom (S (16));
+    auto knobs = r.removeFromBottom (S (250));
+    r.removeFromBottom (S (14));
 
-    // main frame
+    // ---- screen frame: grain field (left) + source panel (right) ----
     screenFrame = r;
     auto inside = r.reduced (S (16), S (10));
     auto top = inside.removeFromTop (S (34));
-    randomButton.setBounds (top.removeFromRight (S (128)));
-    top.removeFromRight (S (6));
-    loadButton.setBounds (top.removeFromRight (S (90)));
-    top.removeFromRight (S (10));
-    ledArea = top.removeFromRight (S (44)).withSizeKeepingCentre (S (44), S (16));
+    randomButton.setBounds (top.removeFromRight (S (124)).reduced (0, S (2)));
+    top.removeFromRight (S (8));
+    loadButton.setBounds (top.removeFromRight (S (80)).reduced (0, S (2)));
+    top.removeFromRight (S (12));
+    ledArea = top.removeFromRight (S (40)).withSizeKeepingCentre (S (40), S (14));
     top.removeFromLeft (S (120));
     sampleName.setBounds (top);
     inside.removeFromTop (S (6));
+
+    sourceArea = inside.removeFromRight (S (300));
+    inside.removeFromRight (S (12));
     waveform.setBounds (inside);
 
-    // 10 columns: grains 5, pitch 2, fx 3
-    const int gap = S (14);
+    {
+        auto sa = sourceArea;
+        auto btns = sa.removeFromTop (S (26));
+        const int bw = btns.getWidth() / 3;
+        srcAdd.setBounds    (btns.removeFromLeft (bw).reduced (S (2), 0));
+        srcSample.setBounds (btns.removeFromLeft (bw).reduced (S (2), 0));
+        srcBoth.setBounds   (btns.reduced (S (2), 0));
+        sa.removeFromTop (S (6));
+        auto bottom = sa.removeFromBottom (S (30));
+        sa.removeFromBottom (S (6));
+        harmonics.setBounds (sa);
+        rndBars.setBounds (bottom.removeFromLeft (S (80)).reduced (S (2), S (2)));
+        bottom.removeFromLeft (S (10));
+        mixLabelArea = bottom.removeFromLeft (S (30));
+        mixSlider.setBounds (bottom.withTrimmedRight (S (4)).withTrimmedBottom (S (8)));
+    }
+
+    // ---- sections: grains 5, bass 2, fx 3 ----
+    const int gap = S (18);
     const float colW = (float) (knobs.getWidth() - gap * 2) / 10.0f;
     grainArea = knobs.removeFromLeft ((int) (colW * 5)); knobs.removeFromLeft (gap);
-    pitchArea = knobs.removeFromLeft ((int) (colW * 2)); knobs.removeFromLeft (gap);
+    bassArea  = knobs.removeFromLeft ((int) (colW * 2)); knobs.removeFromLeft (gap);
     fxArea    = knobs;
+
+    auto headerButtons = [&] (Rectangle<int> area, std::initializer_list<std::pair<Button*, int>> bs)
+    {
+        int x = area.getRight();
+        for (auto [b, w] : bs)
+        {
+            x -= S ((float) w);
+            b->setBounds (x, area.getY(), S ((float) w), S (26));
+            x -= S (6);
+        }
+    };
+    headerButtons (grainArea, { { &rndGrains, 76 }, { &transButton, 104 }, { &keySyncButton, 92 } });
+    headerButtons (bassArea,  { { &rndBass, 72 }, { &monoButton, 58 } });
+    headerButtons (fxArea,    { { &rndFx, 76 } });
 
     auto layoutRow = [] (std::vector<std::unique_ptr<Knob>>& ks, Rectangle<int> row)
     {
@@ -988,9 +878,7 @@ void GranulumEditor::resized()
     };
 
     {
-        auto g = grainArea.withTrimmedTop (S (30)).reduced (S (10), S (6));
-        transButton.setBounds (grainArea.getRight() - S (132), grainArea.getY() + S (8), S (118), S (28));
-        rndGrains.setBounds (transButton.getX() - S (92), grainArea.getY() + S (8), S (86), S (28));
+        auto g = grainArea.withTrimmedTop (S (34));
         auto hero = g.removeFromTop ((int) (g.getHeight() * 0.58f));
         g.removeFromTop (S (8));
         layoutRow (heroKnobs, hero);
@@ -999,7 +887,7 @@ void GranulumEditor::resized()
 
     auto layoutGrid = [&] (std::vector<std::unique_ptr<Knob>>& ks, Rectangle<int> area, int cols, int extraSlots = 0)
     {
-        area = area.withTrimmedTop (S (34)).reduced (S (8), S (6));
+        area = area.withTrimmedTop (S (34));
         const int total = (int) ks.size() + extraSlots;
         const int rows = (total + cols - 1) / cols;
         const int cw = area.getWidth() / cols;
@@ -1009,13 +897,22 @@ void GranulumEditor::resized()
         return Rectangle<int> (area.getX() + (total - 1) % cols * cw, area.getY() + (total - 1) / cols * rh, cw, rh);
     };
 
-    rndPitch.setBounds (pitchArea.getRight() - S (96), pitchArea.getY() + S (8), S (86), S (28));
-    rndFx.setBounds    (fxArea.getRight()    - S (96), fxArea.getY()    + S (8), S (86), S (28));
-    layoutGrid (pitchKnobs, pitchArea, 2);
-    auto comboSlot = layoutGrid (fxKnobs, fxArea, 3, 1);
-    filterType.setBounds (comboSlot.withSizeKeepingCentre (comboSlot.getWidth() - S (4), S (32)));
+    // bass: sub + drive big on top, x-over / glide / pitch below
+    {
+        auto b = bassArea.withTrimmedTop (S (34));
+        auto row1 = b.removeFromTop ((int) (b.getHeight() * 0.58f));
+        b.removeFromTop (S (8));
+        const int w1 = row1.getWidth() / 2;
+        bassKnobs[0]->setBounds (row1.removeFromLeft (w1));
+        bassKnobs[1]->setBounds (row1);
+        const int w2 = b.getWidth() / 3;
+        bassKnobs[2]->setBounds (b.removeFromLeft (w2));
+        bassKnobs[3]->setBounds (b.removeFromLeft (w2));
+        bassKnobs[4]->setBounds (b);
+    }
 
-    rebuildBackground();
+    auto comboSlot = layoutGrid (fxKnobs, fxArea, 3, 1);
+    filterType.setBounds (comboSlot.withSizeKeepingCentre (comboSlot.getWidth() - S (8), S (30)));
 }
 
 // ----------------------------------------------------------------------------

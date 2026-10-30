@@ -3,26 +3,30 @@
 #include <juce_audio_utils/juce_audio_utils.h>
 #include "PluginProcessor.h"
 
-// "Dusty synthwave hardware" theme
+// "Deep petrol" flat theme
 namespace Palette
 {
-    const juce::Colour panel     { 0xff1c1d1f };   // charcoal metal
-    const juce::Colour panelDark { 0xff121315 };
-    const juce::Colour cream     { 0xffe9ddd0 };
-    const juce::Colour teal      { 0xff6cc4ad };
-    const juce::Colour tealDim   { 0xff3f7f72 };
-    const juce::Colour screen    { 0xff0a1414 };
-    const juce::Colour grid      { 0xff3fbfae };
-    const juce::Colour sand      { 0xffc9b48c };
-    const juce::Colour pink      { 0xffff7a1a };   // main accent: juicy orange
-    const juce::Colour pinkInk   { 0xff4a1d00 };
-
-    const juce::Colour yellow    { 0xffe6c84a };
-    const juce::Colour magenta   { 0xffc552c8 };
-    const juce::Colour green     { 0xff79c76f };
-    const juce::Colour red       { 0xffd8544f };
-    const juce::Colour blue      { 0xff5f84d8 };
-    const juce::Colour aqua      { 0xff63c7b4 };
+    const juce::Colour bgTop     { 0xff1f5160 };
+    const juce::Colour bgBottom  { 0xff1a4654 };
+    const juce::Colour panel     { 0xff163e4b };
+    const juce::Colour screen    { 0xff0f2d37 };
+    const juce::Colour field     { 0xff15394a };
+    const juce::Colour button    { 0xff3a6a78 };
+    const juce::Colour buttonHi  { 0xff4a7d8b };
+    const juce::Colour text      { 0xffdce8ea };
+    const juce::Colour textDim   { 0xff9fbcc2 };
+    const juce::Colour label     { 0xffc5d6da };
+    const juce::Colour knob      { 0xffa3b1b5 };
+    const juce::Colour knobDark  { 0xff7f9095 };
+    const juce::Colour track     { 0xff13323d };
+    const juce::Colour accent    { 0xff4fd6d9 };
+    const juce::Colour accentSoft{ 0xff83c8cc };
+    const juce::Colour hit       { 0xffffc857 };
+    const juce::Colour purple    { 0xffb04fd8 };
+    const juce::Colour purpleOff { 0xff4a2357 };
+    const juce::Colour ledOff    { 0xff7d9399 };
+    const juce::Colour whiteKey  { 0xffe9f0ee };
+    const juce::Colour blackKey  { 0xff5f8d97 };
 }
 
 class GranulumLook final : public juce::LookAndFeel_V4
@@ -31,21 +35,21 @@ public:
     GranulumLook();
     void drawRotarySlider (juce::Graphics&, int x, int y, int w, int h, float pos,
                            float start, float end, juce::Slider&) override;
+    void drawLinearSlider (juce::Graphics&, int x, int y, int w, int h, float pos, float minPos, float maxPos,
+                           juce::Slider::SliderStyle, juce::Slider&) override;
     void drawButtonBackground (juce::Graphics&, juce::Button&, const juce::Colour&, bool over, bool down) override;
     void drawButtonText (juce::Graphics&, juce::TextButton&, bool over, bool down) override;
     void drawComboBox (juce::Graphics&, int w, int h, bool down, int bx, int by, int bw, int bh, juce::ComboBox&) override;
     juce::Font getComboBoxFont (juce::ComboBox&) override;
+    juce::Font getPopupMenuFont() override;
     juce::Label* createSliderTextBox (juce::Slider&) override;
-
-    // granite / speckle overlay used for gem knobs and the pink block
-    static const juce::Image& speckle();
-    static void drawGem (juce::Graphics&, juce::Rectangle<float> circle, juce::Colour base, float glow);
+    void drawLabel (juce::Graphics&, juce::Label&) override;
 };
 
 class Knob final : public juce::Component
 {
 public:
-    Knob (juce::AudioProcessorValueTreeState&, const juce::String& paramId, const juce::String& title, juce::Colour accent, bool hero = false);
+    Knob (juce::AudioProcessorValueTreeState&, const juce::String& paramId, const juce::String& title, bool hero = false);
     void resized() override;
     void paint (juce::Graphics&) override;
 
@@ -61,7 +65,6 @@ class WaveformView final : public juce::Component, private juce::Timer
 public:
     explicit WaveformView (GranulumProcessor&);
     void paint (juce::Graphics&) override;
-    void resized() override;
     void mouseDown (const juce::MouseEvent&) override;
     void mouseDrag (const juce::MouseEvent&) override;
     void mouseUp (const juce::MouseEvent&) override;
@@ -75,24 +78,31 @@ private:
     std::vector<float> grainX, grainA;
     std::vector<int> grainHit;
     std::vector<float> heads;
-    juce::Image glass; // grid + scanlines + vignette, cached
+    float phase = 0.0f;
 };
 
-// Big pink "active sample" block — click to load a sample
-class SampleBlock final : public juce::Component, public juce::SettableTooltipClient
+// Additive "sticks": draw the harmonic amplitudes with the mouse
+class HarmonicEditor final : public juce::Component, public juce::SettableTooltipClient, private juce::Timer
 {
 public:
-    SampleBlock();
+    explicit HarmonicEditor (GranulumProcessor&);
     void paint (juce::Graphics&) override;
-    void mouseEnter (const juce::MouseEvent&) override { hover = true;  repaint(); }
-    void mouseExit  (const juce::MouseEvent&) override { hover = false; repaint(); }
-    void mouseDown  (const juce::MouseEvent&) override { if (onClick) onClick(); }
+    void mouseDown (const juce::MouseEvent&) override;
+    void mouseDrag (const juce::MouseEvent&) override;
+    void mouseUp (const juce::MouseEvent&) override;
 
-    void setText (const juce::String& top, const juce::String& main);
-    std::function<void()> onClick;
 private:
-    juce::String topText, mainText;
-    bool hover = false;
+    void timerCallback() override;
+    juce::Rectangle<float> barArea() const;
+    int barAt (float x) const;
+    void applyMouse (const juce::MouseEvent&, bool first);
+
+    GranulumProcessor& proc;
+    std::array<float, granulum::kNumHarmonics> h {};
+    int lastBar = -1;
+    float lastValue = 0.0f;
+    bool erasing = false;
+    bool editing = false;
 };
 
 class GranulumEditor final : public juce::AudioProcessorEditor,
@@ -104,7 +114,6 @@ public:
     ~GranulumEditor() override;
 
     void paint (juce::Graphics&) override;
-    void paintOverChildren (juce::Graphics&) override;
     void resized() override;
 
     bool isInterestedInFileDrag (const juce::StringArray& files) override;
@@ -116,30 +125,35 @@ private:
     void timerCallback() override;
     void openFile (const juce::File&);
     void launchChooser();
-    void rebuildBackground();
+    void setSource (int s);
+    void drawSectionHeader (juce::Graphics&, juce::Rectangle<int> area, const juce::String& title, bool lit);
 
     GranulumProcessor& proc;
     GranulumLook look;
 
     WaveformView waveform;
-    SampleBlock sampleBlock;
+    HarmonicEditor harmonics;
+
     juce::TextButton randomButton { "RANDOM ALL" }, loadButton { "LOAD" };
-    juce::TextButton rndGrains { "RANDOM" }, rndPitch { "RANDOM" }, rndFx { "RANDOM" };
+    juce::TextButton rndGrains { "RANDOM" }, rndBass { "RANDOM" }, rndFx { "RANDOM" }, rndBars { "RANDOM" };
+    juce::TextButton srcAdd { "ADD" }, srcSample { "SAMPLE" }, srcBoth { "BOTH" };
+    juce::TextButton transButton { "TRANSIENTS" }, keySyncButton { "KEY SYNC" }, monoButton { "MONO" };
+    std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> transAttachment, keySyncAttachment, monoAttachment;
+    juce::Slider mixSlider;
+    std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> mixAttachment;
     juce::Label sampleName;
     juce::ComboBox filterType;
     std::unique_ptr<juce::AudioProcessorValueTreeState::ComboBoxAttachment> filterTypeAttachment;
     juce::MidiKeyboardComponent keyboard;
     std::unique_ptr<juce::FileChooser> chooser;
+    juce::TooltipWindow tooltips { this, 700 };
 
-    std::vector<std::unique_ptr<Knob>> heroKnobs, motionKnobs, pitchKnobs, fxKnobs;
-    juce::TextButton transButton { "TRANSIENTS" };
-    std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> transAttachment;
+    std::vector<std::unique_ptr<Knob>> heroKnobs, motionKnobs, bassKnobs, fxKnobs;
 
-    juce::Rectangle<int> titleArea, gemsArea, screenFrame, grainArea, pitchArea, fxArea, keysFrame, ledArea;
-    juce::Image background;       // cached textured panel
-    juce::Image sandOverlay;      // dust drawn over everything (cached)
+    juce::Rectangle<int> titleArea, gemsArea, screenFrame, sourceArea, mixLabelArea, grainArea, bassArea, fxArea, ledArea;
     float meter = 0.0f;
     float activity = 0.0f;
+    int shownSource = -1;
     juce::String statusText;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (GranulumEditor)

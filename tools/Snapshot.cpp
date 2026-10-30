@@ -65,24 +65,36 @@ int main (int argc, char** argv)
         std::cout << "wrote " << f.getFullPathName() << std::endl;
     };
 
-    pump (p, 2, 200);
-    shot ("ui-empty.png");
+    auto setP = [&p] (const char* id, float v) { if (auto* x = p.apvts.getParameter (id)) x->setValueNotifyingHost (x->convertTo0to1 (v)); };
 
+    // 1) additive source, playing a bass note
+    std::array<float, granulum::kNumHarmonics> h {};
+    const float bars[] = { 1.0f, 0.7f, 0.15f, 0.55f, 0.1f, 0.4f, 0.0f, 0.3f, 0.05f, 0.22f, 0.0f, 0.15f, 0.0f, 0.1f };
+    for (size_t i = 0; i < std::size (bars); ++i) h[i] = bars[i];
+    p.setHarmonics (h);
+    p.rebuildNow();
+    setP (ParamID::waveSpacing, 0.4f);
+    setP (ParamID::smear, 0.2f);
+    p.keyboardState.noteOn (1, 36, 0.9f);
+    pump (p, 120, 300);
+    shot ("ui-add.png");
+    p.keyboardState.noteOff (1, 36, 0.0f);
+    pump (p, 40, 100);
+
+    // 2) sample + additive together
     String err;
     p.loadSample (makeTestSample(), err);
-    pump (p, 2, 100);
-
-    // play a chord so grains appear on the screen
-    p.keyboardState.noteOn (1, 60, 0.9f);
-    p.keyboardState.noteOn (1, 67, 0.8f);
-    auto setP = [&p] (const char* id, float v) { if (auto* x = p.apvts.getParameter (id)) x->setValueNotifyingHost (x->convertTo0to1 (v)); };
+    setP (ParamID::source, 2.0f);
+    p.rebuildNow();
+    pump (p, 4, 100);
+    p.keyboardState.noteOn (1, 40, 0.9f);
     setP (ParamID::transients, 1.0f);
+    setP (ParamID::keySync, 0.0f);
     setP (ParamID::hold, 150.0f);
     setP (ParamID::spacing, 40.0f);
     setP (ParamID::waveSpacing, 0.6f);
     setP (ParamID::rand, 0.25f);
     setP (ParamID::position, 0.15f);
-    setP (ParamID::octave, 0.3f);
     pump (p, 120, 300);
     shot ("ui-playing.png");
 
