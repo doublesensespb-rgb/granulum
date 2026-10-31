@@ -1,134 +1,104 @@
-// Offline tests for the v2 engine: pitch accuracy, grain transparency, formant keeps pitch,
-// sampler auto-tune + 100 Hz high-pass, motion width, no NaN, fast onset.
-#include "../Source/Engine.h"
+// Offline tests: pitch, chords, macros don't explode, voices end, evolve ramps in.
+#include "../Source/GrainEngine.h"
 #include <cstdio>
 #include <cmath>
-#include <string>
 
 using namespace granulum;
 
-struct Out { std::vector<float> sub, aL, aR, sL, sR; bool finite = true; int left = 0; };
+struct R { std::vector<float> L, Rr; bool finite = true; int left = 0; };
 
-static Out run (Params p, std::vector<std::pair<double, int>> ev, double seconds, const SampleData* smp, bool modulateAddPitch = false)
+static R run (Params p, std::vector<std::pair<double, int>> ev, double seconds, const SampleData& s)
 {
-    Engine e; e.prepare (44100.0);
-    Out o;
-    const int block = 32, total = (int) (seconds * 44100);
-    std::vector<float> s (block), al (block), ar (block), sl (block), sr (block);
+    GrainEngine e; e.prepare (44100.0);
+    R r;
+    const int block = 64, total = (int) (seconds * 44100);
+    std::vector<float> L (block), Rb (block);
     size_t k = 0;
     for (int pos = 0; pos < total; pos += block)
     {
         while (k < ev.size() && ev[k].first * 44100 <= pos)
         {
-            if (ev[k].second > 0) e.noteOn (ev[k].second, 1.0f, p, smp); else e.noteOff (-ev[k].second, p);
+            if (ev[k].second > 0) e.noteOn (ev[k].second, 1.0f, p); else e.noteOff (-ev[k].second, p);
             ++k;
         }
-        if (modulateAddPitch) p.add.pitch = (float) (12.0 * std::sin (pos / 44100.0 * 6.0));
-        for (auto* b : { &s, &al, &ar, &sl, &sr }) std::fill (b->begin(), b->end(), 0.0f);
-        e.render (s.data(), al.data(), ar.data(), sl.data(), sr.data(), block, p, smp);
+        std::fill (L.begin(), L.end(), 0.0f); std::fill (Rb.begin(), Rb.end(), 0.0f);
+        e.render (L.data(), Rb.data(), block, p, &s);
         for (int i = 0; i < block; ++i)
         {
-            for (float v : { s[(size_t) i], al[(size_t) i], ar[(size_t) i], sl[(size_t) i], sr[(size_t) i] })
-                if (! std::isfinite (v)) o.finite = false;
-            o.sub.push_back (s[(size_t) i]); o.aL.push_back (al[(size_t) i]); o.aR.push_back (ar[(size_t) i]);
-            o.sL.push_back (sl[(size_t) i]); o.sR.push_back (sr[(size_t) i]);
+            if (! std::isfinite (L[(size_t) i]) || ! std::isfinite (Rb[(size_t) i])) r.finite = false;
+            r.L.push_back (L[(size_t) i]); r.Rr.push_back (Rb[(size_t) i]);
         }
     }
-    o.left = e.activeVoiceCount();
-    return o;
+    r.left = e.activeVoiceCount();
+    return r;
 }
 
-static std::vector<float> slice (const std::vector<float>& x, double t0, double t1)
+static double rms (const std::vector<float>& x, double t0, double t1)
 {
-    return std::vector<float> (x.begin() + (long) (t0 * 44100), x.begin() + (long) (t1 * 44100));
+    double s = 0; int n = 0;
+    for (int i = (int) (t0 * 44100); i < (int) (t1 * 44100) && i < (int) x.size(); ++i) { s += x[(size_t) i] * x[(size_t) i]; ++n; }
+    return std::sqrt (s / std::max (1, n));
 }
-static double rms (const std::vector<float>& x) { double s = 0; for (float v : x) s += v * v; return std::sqrt (s / std::max<size_t> (1, x.size())); }
-static double pitchOf (const std::vector<float>& x, double t0, double t1) { return detectPitchHz (slice (x, t0, t1), 44100.0); }
+static double freqAt (const std::vector<float>& x, double t0, double t1)
+{
+    int c = 0;
+    for (int i = (int) (t0 * 44100) + 1; i < (int) (t1 * 44100); ++i) if (x[(size_t) i - 1] <= 0 && x[(size_t) i] > 0) ++c;
+    return c / (t1 - t0);
+}
+static double dftMag (const std::vector<float>& x, double f, double t0, double t1)
+{
+    double re = 0, im = 0;
+    for (int i = (int) (t0 * 44100); i < (int) (t1 * 44100); ++i) { const double ph = 2 * kPi * f * i / 44100.0; re += x[(size_t) i] * std::cos (ph); im += x[(size_t) i] * std::sin (ph); }
+    return std::sqrt (re * re + im * im);
+}
 
 int main()
 {
     bool ok = true;
-    auto check = [&ok] (bool c, const char* what) { printf ("%s %s\n", c ? "  ok " : "FAIL ", what); ok &= c; };
+    auto check = [&ok] (bool c, const char* w) { printf ("%s %s\n", c ? "  ok " : "FAIL ", w); ok &= c; };
 
-    Params base;
-    base.harmonics[0] = 1.0f; base.harmonics[1] = 0.5f; base.harmonics[2] = 0.3f;
-    base.sub.run = false; base.smp.run = false;
+    std::array<float, kNumHarmonics> h {}; h[0] = 1.0f;
+    const auto sine = renderAdditive (h);
 
-    // 1) ADD clean: A1 = 55 Hz
-    Params clean = base; clean.add.grain = false;
-    auto o1 = run (clean, { { 0, 33 }, { 1.0, -33 } }, 1.4, nullptr);
-    const double f1 = pitchOf (o1.aL, 0.3, 0.8);
-    printf ("clean ADD A1: %.2f Hz\n", f1);
-    check (std::abs (f1 - 55.0) < 0.5 && o1.finite && o1.left == 0, "clean ADD pitch 55 Hz, voice ends");
+    Params clean; clean.grainOn = false;
+    auto a = run (clean, { { 0, 33 }, { 1.0, -33 } }, 1.5, sine);
+    printf ("clean A1 %.1f Hz\n", freqAt (a.L, 0.2, 0.9));
+    check (std::abs (freqAt (a.L, 0.2, 0.9) - 55) < 1.5 && a.left == 0, "clean pitch + release");
 
-    // 2) grains at TONE 0 are transparent (level + pitch)
-    Params g0 = base; g0.texture = 0.0f; g0.tone = 0.0f; g0.amount = 1.0f;
-    auto o2 = run (g0, { { 0, 33 }, { 1.0, -33 } }, 1.4, nullptr);
-    const double r1 = rms (slice (o1.aL, 0.3, 0.8)), r2 = rms (slice (o2.aL, 0.3, 0.8));
-    printf ("grain tone0: pitch %.2f Hz, level ratio %.2f\n", pitchOf (o2.aL, 0.3, 0.8), r2 / r1);
-    check (std::abs (pitchOf (o2.aL, 0.3, 0.8) - 55.0) < 0.5 && r2 / r1 > 0.7 && r2 / r1 < 1.4, "grain at TONE 0 keeps pitch + level");
+    // chord MAJ on A2: energy at 110, 138.6 (C#3), 164.8 (E3)
+    Params ch = clean; ch.chord = { 0, 4, 7, 0, 0 }; ch.chordSize = 3; ch.mono = false;
+    auto c = run (ch, { { 0, 45 }, { 1.0, -45 } }, 1.5, sine);
+    const double m1 = dftMag (c.L, 110.0, 0.2, 0.9), m3 = dftMag (c.L, 138.59, 0.2, 0.9), m5 = dftMag (c.L, 164.81, 0.2, 0.9), off = dftMag (c.L, 123.47, 0.2, 0.9);
+    printf ("chord bins: root %.0f third %.0f fifth %.0f off %.0f\n", m1, m3, m5, off);
+    check (m3 > off * 10 && m5 > off * 10 && m1 > off * 10 && c.left == 0, "major chord in poly");
 
-    // 3) TONE +12 changes timbre but keeps the 55 Hz pitch
-    Params gt = g0; gt.tone = 12.0f; gt.texture = 0.3f;
-    auto o3 = run (gt, { { 0, 33 }, { 1.0, -33 } }, 1.4, nullptr);
-    const double f3 = pitchOf (o3.aL, 0.3, 0.8);
-    printf ("TONE +12: pitch %.2f Hz\n", f3);
-    check (std::abs (f3 - 55.0) < 1.0, "TONE moves formant, pitch stays");
+    Params chm = ch; chm.mono = true;
+    auto cm = run (chm, { { 0, 45 }, { 0.5, 50 }, { 1.0, -50 }, { 1.0, -45 } }, 1.5, sine);
+    check (dftMag (cm.L, 146.83, 0.6, 0.95) > dftMag (cm.L, 110.0, 0.6, 0.95) * 3 && cm.left == 0, "chord in mono follows legato note");
 
-    // 4) fast onset: sound within 10 ms of note-on even with TONE +12
-    check (rms (slice (o3.aL, 0.0, 0.01)) > 0.01, "onset < 10 ms");
+    // grains with every macro high: finite, sane level, stereo, ends
+    Params g; g.grainOn = true; g.bloom = 1; g.smear = 1; g.scatter = 1; g.shimmer = 1; g.drift = 1; g.density = 1; g.size = 1; g.speed = -1.5f; g.mix = 1;
+    auto gm = run (g, { { 0, 40 }, { 0, 47 }, { 2.0, -40 }, { 2.0, -47 } }, 2.6, sine);
+    double pk = 0, diff = 0;
+    for (size_t i = 0; i < gm.L.size(); ++i) { pk = std::max (pk, (double) std::abs (gm.L[i])); diff += std::abs (gm.L[i] - gm.Rr[i]); }
+    printf ("all macros max: peak %.2f, L/R diff %.0f, left %d\n", pk, diff, gm.left);
+    check (gm.finite && pk < 4.0 && diff > 100 && gm.left == 0, "macros stable + stereo");
 
-    // 5) MOTION creates stereo, no NaN
-    Params gm = gt; gm.motion = 1.0f;
-    auto o5 = run (gm, { { 0, 33 }, { 1.0, -33 } }, 1.4, nullptr);
-    double diff = 0; for (size_t i = 13000; i < 35000; ++i) diff += std::abs (o5.aL[i] - o5.aR[i]);
-    printf ("MOTION 1: L/R diff %.1f\n", diff);
-    check (o5.finite && diff > 10.0, "MOTION adds width");
+    // grains at defaults keep roughly the clean level
+    Params gd; gd.grainOn = true;
+    auto d = run (gd, { { 0, 45 }, { 1.0, -45 } }, 1.4, sine);
+    const double ratio = rms (d.L, 0.3, 0.9) / rms (a.L, 0.3, 0.9);
+    printf ("grain default level vs clean: %.2f\n", ratio);
+    check (ratio > 0.4 && ratio < 2.5, "grain default level");
 
-    // 6) smooth pitch modulation on ADD: no NaN, still sounding
-    auto o6 = run (g0, { { 0, 33 }, { 1.5, -33 } }, 1.8, nullptr, true);
-    check (o6.finite && rms (slice (o6.aL, 0.2, 1.4)) > 0.05, "smooth pitch modulation");
-
-    // 7) sampler: 220 Hz sine sample -> detected root A3 (57), playing A2 (45) gives 110 Hz
-    SampleData s; s.sampleRate = 48000.0;
-    for (int i = 0; i < 48000 * 2; ++i) s.data.push_back ((float) (0.7 * std::sin (2 * kPi * 220.0 * i / 48000.0)));
-    const double hz = detectPitchHz (s.data, s.sampleRate);
-    s.detectedRoot = 69.0 + 12.0 * std::log2 (hz / 440.0);
-    printf ("detected %.2f Hz -> root %.2f\n", hz, s.detectedRoot);
-    check (std::abs (s.detectedRoot - 57.0) < 0.1, "auto-tune root detection");
-
-    Params ps = base; ps.add.run = false; ps.smp.run = true; ps.smp.grain = false; ps.smpRoot = (float) s.detectedRoot;
-    auto o7 = run (ps, { { 0, 45 }, { 1.0, -45 } }, 1.3, &s);
-    const double f7 = pitchOf (o7.sL, 0.3, 0.8);
-    printf ("sampler on A2: %.2f Hz\n", f7);
-    check (std::abs (f7 - 110.0) < 1.0, "sampler plays in tune");
-
-    // 8) sampler high-pass: 55 Hz note is strongly cut vs 220 Hz
-    auto o8a = run (ps, { { 0, 33 }, { 1.0, -33 } }, 1.2, &s);
-    auto o8b = run (ps, { { 0, 57 }, { 1.0, -57 } }, 1.2, &s);
-    const double cutDb = 20.0 * std::log10 (rms (slice (o8a.sL, 0.4, 0.9)) / rms (slice (o8b.sL, 0.4, 0.9)));
-    printf ("sampler 55 Hz vs 220 Hz: %.1f dB\n", cutDb);
-    check (cutDb < -15.0, "sampler cut below 100 Hz");
-
-    // 9) SUB: pure 55 Hz, mono
-    Params pb = base; pb.add.run = false; pb.sub.run = true;
-    auto o9 = run (pb, { { 0, 33 }, { 1.0, -33 } }, 1.2, nullptr);
-    check (std::abs (pitchOf (o9.sub, 0.3, 0.8) - 55.0) < 0.5, "SUB 55 Hz");
-
-    // 10) mono legato glide A1 -> A2
-    Params gl = clean; gl.mono = true; gl.glideMs = 150.0f;
-    auto o10 = run (gl, { { 0, 33 }, { 0.6, 45 }, { 1.5, -45 }, { 1.5, -33 } }, 1.9, nullptr);
-    const double fa = pitchOf (o10.aL, 0.3, 0.55), fb = pitchOf (o10.aL, 0.9, 1.4);
-    printf ("glide: %.1f -> %.1f Hz\n", fa, fb);
-    check (std::abs (fa - 55) < 1 && std::abs (fb - 110) < 1.5, "legato glide");
-
-    // 11) heavy settings + polyphony stress
-    Params hv = g0; hv.texture = 1.0f; hv.tone = -12.0f; hv.motion = 0.8f; hv.mono = false; hv.smp.run = true;
-    auto o11 = run (hv, { { 0, 24 }, { 0, 31 }, { 0, 36 }, { 0.05, 40 }, { 0.05, 43 }, { 0.1, 48 }, { 0.1, 52 }, { 0.1, 55 }, { 0.1, 60 },
-                          { 1.0, -24 }, { 1.0, -31 }, { 1.0, -36 }, { 1.0, -40 }, { 1.0, -43 }, { 1.0, -48 }, { 1.0, -52 }, { 1.0, -55 }, { 1.0, -60 } }, 1.5, &s);
-    double pk = 0; for (float v : o11.aL) pk = std::max (pk, (double) std::abs (v));
-    printf ("stress: peak %.2f, left %d\n", pk, o11.left);
-    check (o11.finite && pk < 20 && o11.left == 0, "stress test");
+    // EVOLVE: starts clean, ends grainy
+    Params evp; evp.grainOn = true; evp.evolve = 2.0f; evp.bloom = 1; evp.scatter = 1;
+    auto ev = run (evp, { { 0, 45 }, { 3.0, -45 } }, 3.4, sine);
+    double dStart = 0, dEnd = 0;
+    for (int i = (int) (0.05 * 44100); i < (int) (0.3 * 44100); ++i) dStart += std::abs (ev.L[(size_t) i] - ev.Rr[(size_t) i]);
+    for (int i = (int) (2.4 * 44100); i < (int) (2.65 * 44100); ++i) dEnd += std::abs (ev.L[(size_t) i] - ev.Rr[(size_t) i]);
+    printf ("evolve width start %.1f end %.1f\n", dStart, dEnd);
+    check (dEnd > dStart * 5, "EVOLVE blooms over time");
 
     printf (ok ? "ALL OK\n" : "FAILED\n");
     return ok ? 0 : 1;

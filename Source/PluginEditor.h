@@ -3,41 +3,33 @@
 #include <juce_audio_utils/juce_audio_utils.h>
 #include "PluginProcessor.h"
 
-// "Deep petrol" theme
+// "Deep petrol" flat theme — teal family only, lighter and darker
 namespace Palette
 {
     const juce::Colour bgTop     { 0xff1f5160 };
-    const juce::Colour bgBottom  { 0xff183f4c };
+    const juce::Colour bgBottom  { 0xff1a4654 };
     const juce::Colour panel     { 0xff163e4b };
-    const juce::Colour card      { 0xff1a4655 };
-    const juce::Colour screen    { 0xff0b232c };
-    const juce::Colour field     { 0xff123542 };
-    const juce::Colour button    { 0xff35626f };
-    const juce::Colour buttonHi  { 0xff467785 };
+    const juce::Colour screen    { 0xff0f2d37 };
+    const juce::Colour deep      { 0xff081c23 };
+    const juce::Colour field     { 0xff15394a };
+    const juce::Colour button    { 0xff3a6a78 };
+    const juce::Colour buttonHi  { 0xff4a7d8b };
     const juce::Colour text      { 0xffdce8ea };
     const juce::Colour textDim   { 0xff9fbcc2 };
     const juce::Colour label     { 0xffc5d6da };
     const juce::Colour knob      { 0xffa3b1b5 };
     const juce::Colour knobDark  { 0xff7f9095 };
-    const juce::Colour track     { 0xff11303a };
+    const juce::Colour track     { 0xff13323d };
     const juce::Colour accent    { 0xff4fd6d9 };
     const juce::Colour accentSoft{ 0xff83c8cc };
-    const juce::Colour violet    { 0xffb65cff };
-    const juce::Colour violetHi  { 0xffd9a6ff };
-    const juce::Colour violetDeep{ 0xff6f34e0 };
-    const juce::Colour hot       { 0xffffc857 };
-    const juce::Colour subBlue   { 0xff5f84ff };
-    const juce::Colour purpleOff { 0xff3e2257 };
-    const juce::Colour ledOff    { 0xff6d868c };
+    const juce::Colour ice       { 0xffd8fbff };
+    const juce::Colour hit       { 0xffffc857 };
+    const juce::Colour ledOff    { 0xff7d9399 };
     const juce::Colour whiteKey  { 0xffe9f0ee };
     const juce::Colour blackKey  { 0xff5f8d97 };
 
-    inline juce::Colour lfo (int i)   { return i == 0 ? juce::Colour (0xffc77dff) : juce::Colour (0xffffc857); }
-    inline juce::Colour stem (int s)  { return s == 0 ? subBlue : s == 1 ? accent : violetHi; }
+    inline juce::Colour lfo (int i) { return i == 0 ? juce::Colour (0xffffc857) : juce::Colour (0xffbff3ff); }
 }
-
-juce::Font uiFont (float size, bool bold = false, float kerning = 0.0f);
-void drawLed (juce::Graphics&, juce::Rectangle<float>, juce::Colour on, juce::Colour off, float level);
 
 class GranulumLook final : public juce::LookAndFeel_V4
 {
@@ -52,10 +44,13 @@ public:
     juce::Font getPopupMenuFont() override;
     juce::Label* createSliderTextBox (juce::Slider&) override;
     void drawLabel (juce::Graphics&, juce::Label&) override;
+    void drawCallOutBoxBackground (juce::CallOutBox&, juce::Graphics&, const juce::Path&, juce::Image&) override;
+    int getCallOutBoxBorderSize (const juce::CallOutBox&) override { return 16; }
 };
 
 class Knob;
 
+// Small coloured circle next to a knob: drag up/down = modulation depth, double-click = remove
 class ModChip final : public juce::Component, public juce::SettableTooltipClient
 {
 public:
@@ -65,6 +60,7 @@ public:
     void mouseDrag (const juce::MouseEvent&) override;
     void mouseDoubleClick (const juce::MouseEvent&) override;
     void updateTooltip();
+
     const int lfo;
 private:
     GranulumProcessor& proc;
@@ -76,6 +72,7 @@ class Knob final : public juce::Component, public juce::DragAndDropTarget
 {
 public:
     enum class Size { Small, Normal, Hero };
+
     Knob (GranulumProcessor&, const juce::String& paramId, const juce::String& title, Size size = Size::Normal);
     void resized() override;
     void paint (juce::Graphics&) override;
@@ -90,11 +87,11 @@ public:
     void tick();
 
     juce::Slider slider;
-    const int target;
-    const juce::String paramId;
+    const int target;       // modulation target index, -1 if not modulatable
 private:
     struct Dial { juce::Point<float> c; float r = 0, track = 0, start = 0, end = 0; };
     Dial dial() const;
+
     GranulumProcessor& proc;
     juce::String title;
     Size size;
@@ -103,19 +100,87 @@ private:
     std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> attachment;
 };
 
-// Bright violet "dice" button that begs to be pressed
-class DiceButton final : public juce::Button, private juce::Timer
+// The central screen: glowing waveform + crystalline shards born from every grain
+class GrainField final : public juce::Component, private juce::Timer
 {
 public:
-    explicit DiceButton (const juce::String& text = {});
-    void paintButton (juce::Graphics&, bool over, bool down) override;
-    void clicked() override;
+    explicit GrainField (GranulumProcessor&);
+    void paint (juce::Graphics&) override;
+    void resized() override;
+    void mouseDown (const juce::MouseEvent&) override;
+    void mouseDrag (const juce::MouseEvent&) override;
+    void mouseUp (const juce::MouseEvent&) override;
+
+    bool dragHover = false;
+    void simulate (float dt);   // public so the snapshot tool can advance time
+
 private:
     void timerCallback() override;
-    juce::String label;
-    float phase = 0.0f, flash = 0.0f, spin = 0.0f;
+    void setPositionFromMouse (const juce::MouseEvent&);
+    juce::Rectangle<float> inner() const;
+
+    struct Shard
+    {
+        float x = 0, y = 0, vx = 0, vy = 0;   // x 0..1, y -1..1
+        float age = 0, life = 1, len = 0.03f, width = 0.006f, spin = 0, angle = 0, tint = 0, size = 1;
+        uint8_t kind = 0;
+        std::array<juce::Point<float>, 7> trail {};
+        int trailN = 0;
+    };
+    struct Mote { float x, y, vx, vy, phase, size; };
+
+    GranulumProcessor& proc;
+    std::vector<Shard> shards;
+    std::vector<Mote> motes;
+    std::vector<float> heat;              // per column glow where grains are read
+    std::vector<float> env;               // smoothed waveform envelope per column
+    std::shared_ptr<const WaveformPeaks> lastPeaks;
+    std::vector<float> heads;
+    uint32_t lastEvent[2] { 0, 0 };
+    juce::Random rng;
+    float time = 0.0f, pulse = 0.0f;
+    double lastTick = 0.0;
 };
 
+// Additive bars: draw the 16 harmonic amplitudes with the mouse
+class HarmonicEditor final : public juce::Component, public juce::SettableTooltipClient, private juce::Timer
+{
+public:
+    explicit HarmonicEditor (GranulumProcessor&);
+    void paint (juce::Graphics&) override;
+    void mouseDown (const juce::MouseEvent&) override;
+    void mouseDrag (const juce::MouseEvent&) override;
+    void mouseUp (const juce::MouseEvent&) override;
+
+private:
+    void timerCallback() override;
+    juce::Rectangle<float> barArea() const;
+    int barAt (float x) const;
+    void applyMouse (const juce::MouseEvent&, bool first);
+
+    GranulumProcessor& proc;
+    std::array<float, granulum::kNumHarmonics> h {};
+    int lastBar = -1;
+    float lastValue = 0.0f;
+    bool erasing = false, editing = false;
+};
+
+// Chord / interval picker that pops out of the OSC 1 header
+class ChordPicker final : public juce::Component
+{
+public:
+    explicit ChordPicker (GranulumProcessor&);
+    void paint (juce::Graphics&) override;
+    void resized() override;
+private:
+    void choose (int index);
+    void refresh();
+    GranulumProcessor& proc;
+    juce::OwnedArray<juce::TextButton> buttons;
+    juce::Rectangle<int> chordLabel, intervalLabel, keysArea, captionArea;
+};
+
+// LFO tab: click = select, drag onto any knob = modulate it
 class LfoTab final : public juce::Component, public juce::SettableTooltipClient
 {
 public:
@@ -124,6 +189,7 @@ public:
     void mouseDown (const juce::MouseEvent&) override;
     void mouseDrag (const juce::MouseEvent&) override;
     void mouseUp (const juce::MouseEvent&) override;
+
     std::function<void (int)> onSelect;
     bool selected = false;
     const int index;
@@ -132,8 +198,45 @@ private:
     bool dragging = false;
 };
 
-class Organism;
-class LfoEditor;
+// 4-point drawable LFO envelope: drag points, drag the round handles on each segment to bend it
+class LfoEditor final : public juce::Component, public juce::SettableTooltipClient, private juce::Timer
+{
+public:
+    explicit LfoEditor (GranulumProcessor&);
+    void paint (juce::Graphics&) override;
+    void mouseMove (const juce::MouseEvent&) override;
+    void mouseDown (const juce::MouseEvent&) override;
+    void mouseDrag (const juce::MouseEvent&) override;
+    void mouseUp (const juce::MouseEvent&) override;
+    void mouseDoubleClick (const juce::MouseEvent&) override;
+    void mouseExit (const juce::MouseEvent&) override;
+    void setLfo (int l);
+    int lfo = 0;
+private:
+    void timerCallback() override;
+    juce::Rectangle<float> area() const;
+    juce::Point<float> toScreen (float x, float y) const;
+    juce::Point<float> handlePos (int seg) const;
+    int hitTest (juce::Point<float>, bool& isHandle) const;
+
+    GranulumProcessor& proc;
+    std::array<LfoPoint, kLfoPoints> pts {};
+    int dragIndex = -1, hoverIndex = -1;
+    bool dragHandle = false, hoverHandle = false;
+    float dragStartCurve = 0.0f;
+    juce::Point<float> dragStart;
+};
+
+// Block on/off: LED + title, click toggles
+class Lamp final : public juce::Button
+{
+public:
+    explicit Lamp (const juce::String& name, const juce::String& subtitle = {})
+        : juce::Button (name), sub (subtitle) { setClickingTogglesState (true); }
+    void paintButton (juce::Graphics&, bool over, bool down) override;
+    juce::String sub;
+    float fontSize = 14.5f;
+};
 
 class GranulumEditor final : public juce::AudioProcessorEditor,
                              public juce::DragAndDropContainer,
@@ -152,74 +255,64 @@ public:
     void fileDragExit (const juce::StringArray&) override;
     void filesDropped (const juce::StringArray& files, int, int) override;
 
-    void randomizeSection (int section);   // 0 bars, 1 grain, 2 filter, 3 dirt, 4 space
-    void randomizeAll();
+    GrainField& grainField() { return field; }
+    GranulumLook& lookAndFeel() { return look; }
 
 private:
     void timerCallback() override;
     void openFile (const juce::File&);
     void launchChooser();
     void selectLfo (int i);
-    void drawCard (juce::Graphics&, juce::Rectangle<int>, const juce::String& title, juce::Colour tag);
+    void showChordPicker();
 
     GranulumProcessor& proc;
     GranulumLook look;
 
-    std::unique_ptr<Organism> organism;
-    std::unique_ptr<LfoEditor> lfoEditor;
+    GrainField field;
+    HarmonicEditor harmonics;
 
     using ButtonAtt = juce::AudioProcessorValueTreeState::ButtonAttachment;
     using ComboAtt  = juce::AudioProcessorValueTreeState::ComboBoxAttachment;
 
-    DiceButton diceAll { "RANDOM ALL" }, diceBars, diceGrain, diceFilter, diceDirt, diceSpace;
+    Lamp osc1Lamp { "OSC 1", "ADD" }, osc2Lamp { "OSC 2", "SAMPLE" };
+    Lamp grainLamp { "GRANULAR" }, filterLamp { "FILTER" }, distLamp { "DISTORTION" }, revLamp { "REVERB" };
+    std::unique_ptr<ButtonAtt> osc1LampA, osc2LampA, grainLampA, filterLampA, distLampA, revLampA;
 
-    // source toggles per block
-    juce::TextButton grainAddT { "ADD" }, grainSmpT { "SMP" };
-    juce::TextButton filterT[3] { juce::TextButton ("SUB"), juce::TextButton ("ADD"), juce::TextButton ("SMP") };
-    juce::TextButton dirtT[3]   { juce::TextButton ("SUB"), juce::TextButton ("ADD"), juce::TextButton ("SMP") };
-    juce::TextButton spaceT[3]  { juce::TextButton ("SUB"), juce::TextButton ("ADD"), juce::TextButton ("SMP") };
-    std::vector<std::unique_ptr<ButtonAtt>> toggleAtts;
-
-    juce::TextButton loadButton { "LOAD" }, rootDown { "<" }, rootUp { ">" };
+    juce::TextButton initButton { "INIT" }, randomButton { "RANDOM ALL" }, loadButton { "LOAD" }, chordButton { "CHORD: OFF" };
+    juce::TextButton rndGrains { "RANDOM" }, rndFilter { "RANDOM" }, rndFx { "RANDOM" }, rndBars { "RANDOM" };
+    juce::TextButton osc1Grain { "GRAIN" }, osc2Grain { "GRAIN" };
     juce::TextButton polyButton { "POLY" }, monoButton { "MONO" };
-    juce::Label sampleName, rootLabel;
-    juce::ComboBox filterType, dirtType;
-    std::unique_ptr<ComboAtt> filterTypeA, dirtTypeA;
+    std::unique_ptr<ButtonAtt> osc1GrainA, osc2GrainA;
+    juce::ComboBox filterType, distType;
+    std::unique_ptr<ComboAtt> filterTypeA, distTypeA;
     juce::MidiKeyboardComponent keyboard;
     std::unique_ptr<juce::FileChooser> chooser;
     juce::TooltipWindow tooltips { this, 600 };
 
-    std::vector<std::unique_ptr<Knob>> subKnobs, addKnobs, smpKnobs, grainKnobs, filterKnobs, dirtKnobs, spaceKnobs, voiceKnobs;
-    std::unique_ptr<Knob> outputKnob;
+    std::vector<std::unique_ptr<Knob>> heroKnobs, smallKnobs, osc1Knobs, osc2Knobs, filterKnobs, distKnobs, revKnobs, globalKnobs;
     std::vector<Knob*> allKnobs;
 
-    // LFO strip
     struct LfoControls
     {
-        juce::ComboBox div, mode;
+        juce::ComboBox preset, div, mode;
         juce::TextButton sync { "SYNC" };
-        std::unique_ptr<Knob> rate;
+        std::unique_ptr<Knob> rate, rise;
         std::unique_ptr<ComboAtt> divA, modeA;
         std::unique_ptr<ButtonAtt> syncA;
     };
     std::array<std::unique_ptr<LfoTab>, kNumLfos> lfoTabs;
     std::array<std::unique_ptr<LfoControls>, kNumLfos> lfoControls;
-    juce::ComboBox lfoPreset, lfoGrid;
+    LfoEditor lfoEditor;
     int selectedLfo = 0;
 
-    // random glides
-    struct Glide { juce::RangedAudioParameter* param; float from, to; };
-    std::vector<Glide> glides;
-    std::array<float, granulum::kNumHarmonics> barsFrom {}, barsTo {};
-    bool barsGliding = false;
-    float glideT = 1.0f;
-
-    juce::Rectangle<int> titleArea, gemsArea, screenArea, subCard, addCard, smpCard,
-                         grainCard, filterCard, dirtCard, spaceCard, lfoCard, voiceCard;
-    juce::Rectangle<int> filterTypeLabel, dirtTypeLabel, lfoPresetLabel, lfoGridLabel, lfoDivLabel, lfoModeLabel, rootTitle;
+    juce::Rectangle<int> titleArea, gemsArea, screenFrame, osc1Area, osc2Area, osc1Bars, dropZone,
+                         grainArea, filterArea, fxArea, ledArea, lfoFrame, voiceArea,
+                         lfoPresetLabel, lfoModeLabel, lfoDivLabel, distTypeLabel, fxLabel;
     float meter = 0.0f;
+    float activity = 0.0f;
     uint32_t shownModVersion = 0;
     juce::String statusText;
+    bool fileHover = false;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (GranulumEditor)
 };
