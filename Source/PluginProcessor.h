@@ -74,7 +74,7 @@ namespace ParamID
     inline juce::String route (const char* block, int osc) { return juce::String (block) + "R" + juce::String (osc + 1); }
 }
 
-static constexpr int kNumLfos = 2;
+static constexpr int kNumLfos = 3;
 static constexpr int kMaxMods = 48;
 static constexpr int kLfoTable = 512;
 static constexpr int kLfoPoints = 4;
@@ -88,7 +88,7 @@ enum ModTarget
     mtCutoff, mtReso,
     mtDistDrive, mtDistTone, mtDistMix, mtDelayTime, mtDelayFb, mtDelayTone, mtDelayMix, mtRevMix, mtRevSize,
     mtPorta, mtOutput,
-    mtLfo1Rate, mtLfo2Rate,
+    mtLfo1Rate, mtLfo2Rate, mtLfo3Rate,
     kNumModTargets
 };
 
@@ -219,6 +219,9 @@ public:
     juce::String getPresetName() const;
 
     std::array<float, granulum::kNumHarmonics> getHarmonics() const { return harmonics; }
+    // which harmonics go through the granulator (bit k = harmonic k+1); the rest stay clean & mono
+    uint32_t getGrainMask() const { return grainMask.load(); }
+    void setGrainMask (uint32_t m) { grainMask.store (m & 0xffffu); harmonicsDirty.store (true); }
     void setHarmonics (const std::array<float, granulum::kNumHarmonics>&);
     void rebuildNow() { timerCallback(); }
 
@@ -254,10 +257,12 @@ public:
     std::array<std::atomic<float>, kNumModTargets> modNorm {};
     std::array<std::atomic<float>, kNumLfos> lfoValueOut {}, lfoPhaseOut {}, lfoRiseOut {};
     std::atomic<float> outputLevel { 0.0f };
+    std::atomic<float> peakL { 0.0f }, peakR { 0.0f };   // max since the UI last read them (UI swaps in 0)
+    std::atomic<bool>  clipped { false };                 // set when the output hit 0 dBFS; the UI clears it
     std::atomic<float> keyCutoff { 20000.0f };
 
     juce::AudioProcessorValueTreeState apvts;
-    granulum::GrainEngine engineAdd, engineSmp, engineNoise;
+    granulum::GrainEngine engineAdd, engineAddClean, engineSmp, engineNoise;
     juce::MidiKeyboardState keyboardState;
 
 private:
@@ -276,7 +281,8 @@ private:
 
     juce::AudioFormatManager formatManager;
 
-    SourceSlot addSlot, smpSlot, noiseSlot;
+    SourceSlot addSlot, addCleanSlot, smpSlot, noiseSlot;
+    std::atomic<uint32_t> grainMask { 0xffffu };
     std::vector<std::shared_ptr<granulum::SampleData>> noises;
     std::vector<std::shared_ptr<const WaveformPeaks>> noisePeaks;
     int shownNoise = -1;

@@ -107,15 +107,32 @@ int main()
     auto c0 = run (cp, { { 0, 57 }, { 1.2, -57 } }, 1.2, noise);
     cp.keyTrack = true; cp.chime = 0.45f;
     auto c1 = run (cp, { { 0, 57 }, { 1.2, -57 } }, 1.2, noise);
-    const double h1 = dftMag (c1.L, 220.0, 0.3, 1.1), h2 = dftMag (c1.L, 440.0, 0.3, 1.1), between = dftMag (c1.L, 330.0, 0.3, 1.1);
-    printf ("chime 0.45: 220 %.0f  440 %.0f  330 %.0f\n", h1, h2, between);
-    check (h1 > between * 4 && h2 > between * 2, "CHIME rings harmonics of the note");
+    // A3 (220 Hz) is lifted to 880 Hz: rings 880, 1760 ... but adds nothing in the low mids
+    const double h1 = dftMag (c1.L, 880.0, 0.3, 1.1), h2 = dftMag (c1.L, 1760.0, 0.3, 1.1), between = dftMag (c1.L, 1320.0, 0.3, 1.1);
+    const double low0 = dftMag (c0.L, 220.0, 0.3, 1.1) + dftMag (c0.L, 330.0, 0.3, 1.1), low1 = dftMag (c1.L, 220.0, 0.3, 1.1) + dftMag (c1.L, 330.0, 0.3, 1.1);
+    printf ("chime 0.45: 880 %.0f  1760 %.0f  1320 %.0f | low mids %.0f -> %.0f\n", h1, h2, between, low0, low1);
+    check (h1 > between * 4 && h2 > between * 2, "CHIME rings in key, up in the air");
+    check (low1 < low0 * 1.6, "CHIME leaves the low mids alone");
+    double sd = 0; for (size_t i = (size_t) (0.3 * 44100); i < (size_t) (1.1 * 44100); ++i) sd += std::abs (c1.L[i] - c1.Rr[i]);
     cp.chime = 1.0f;
     auto c2 = run (cp, { { 0, 57 }, { 1.2, -57 } }, 3.0, noise);
-    const double bell = dftMag (c2.L, 220.0 * 2.756, 0.3, 1.1), harm3 = dftMag (c2.L, 660.0, 0.3, 1.1);
+    const double bell = dftMag (c2.L, 880.0 * 2.756, 0.3, 1.1), harm3 = dftMag (c2.L, 2640.0, 0.3, 1.1);
     const double lv = rms (c2.L, 0.3, 1.1) / rms (c0.L, 0.3, 1.1);
-    printf ("chime 1.0: bell partial %.0f vs 3rd harmonic %.0f, level x%.2f, tail %.4f, left %d\n", bell, harm3, lv, rms (c2.L, 1.3, 1.6), c2.left);
+    printf ("chime 1.0: bell partial %.0f vs 3rd harmonic %.0f, level x%.2f, tail %.4f, left %d, stereo %.0f\n", bell, harm3, lv, rms (c2.L, 1.3, 1.6), c2.left, sd);
     check (c2.finite && bell > harm3 * 2 && lv > 0.5 && lv < 4.0 && rms (c2.L, 1.3, 1.6) > 1e-4 && c2.left == 0, "CHIME at max: bell, sane level, rings out, ends");
+
+    // per-harmonic split: grain part + clean part == the full sound (grains off)
+    std::array<float, kNumHarmonics> hs {}; hs[0] = 1; hs[1] = 0.5f; hs[2] = 0.7f; hs[5] = 0.3f;
+    auto full = renderAdditive (hs);
+    auto parts = renderAdditiveSplit (hs, 0xfffcu);   // harmonics 1-2 clean
+    double err = 0, e1 = 0;
+    for (size_t i = 0; i < full.channels[0].size(); ++i)
+    {
+        err += std::abs (full.channels[0][i] - parts.first.channels[0][i] - parts.second.channels[0][i]);
+        e1 += std::abs (parts.second.channels[0][i]);
+    }
+    printf ("split error %.6f, clean energy %.1f\n", err, e1);
+    check (err < 1e-2 && e1 > 100, "per-harmonic split adds up to the full sound");
 
     // keyTrack off: low and high notes play the source at the same pitch
     Params kt = clean; kt.keyTrack = false;

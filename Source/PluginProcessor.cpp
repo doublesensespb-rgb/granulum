@@ -28,7 +28,7 @@ namespace
         ParamID::delayTime, ParamID::delayFb, ParamID::delayTone, ParamID::delayMix,
         ParamID::revMix, ParamID::revSize,
         ParamID::porta, ParamID::output,
-        "lfo1Rate", "lfo2Rate"
+        "lfo1Rate", "lfo2Rate", "lfo3Rate"
     };
 
     String hzWithNote (float hz)
@@ -397,7 +397,7 @@ GranulumProcessor::GranulumProcessor()
     loadNoises();
     harmonics = {};
     harmonics[0] = 1.0f;
-    for (int l = 0; l < kNumLfos; ++l) setLfoPoints (l, lfoPreset (0));
+    for (int l = 0; l < kNumLfos; ++l) setLfoPoints (l, lfoPreset (1));   // triangle
 
     timerCallback();
     startTimerHz (30);
@@ -416,6 +416,7 @@ bool GranulumProcessor::isBusesLayoutSupported (const BusesLayout& layouts) cons
 void GranulumProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
 {
     engineAdd.prepare (sampleRate);
+    engineAddClean.prepare (sampleRate);
     engineSmp.prepare (sampleRate);
     engineNoise.prepare (sampleRate);
 
@@ -458,7 +459,8 @@ void GranulumProcessor::resetToInit()
     setHarmonics (h);
     for (auto& m : mods) m.target.store (-1);
     ++modVersion;
-    for (int l = 0; l < kNumLfos; ++l) setLfoPoints (l, lfoPreset (0));
+    for (int l = 0; l < kNumLfos; ++l) setLfoPoints (l, lfoPreset (1));
+    setGrainMask (0xffffu);
     presetName = "INIT";
 }
 
@@ -676,6 +678,7 @@ void GranulumProcessor::noteOn (int note, float velocity)
     }
     ++heldNotes;
     engineAdd.noteOn   (note, velocity, voiceParams (lastV.data(), 0));
+    engineAddClean.noteOn (note, velocity, voiceParams (lastV.data(), 0));
     engineSmp.noteOn   (note, velocity, voiceParams (lastV.data(), 1));
     engineNoise.noteOn (note, velocity, voiceParams (lastV.data(), 2));
 }
@@ -684,6 +687,7 @@ void GranulumProcessor::noteOff (int note)
 {
     heldNotes = jmax (0, heldNotes - 1);
     engineAdd.noteOff   (note, voiceParams (lastV.data(), 0));
+    engineAddClean.noteOff (note, voiceParams (lastV.data(), 0));
     engineSmp.noteOff   (note, voiceParams (lastV.data(), 1));
     engineNoise.noteOff (note, voiceParams (lastV.data(), 2));
 }
@@ -694,6 +698,7 @@ void GranulumProcessor::processBlock (AudioBuffer<float>& buffer, MidiBuffer& mi
     const int numSamples = buffer.getNumSamples();
 
     addSlot.swapOnAudioThread();
+    addCleanSlot.swapOnAudioThread();
     smpSlot.swapOnAudioThread();
     noiseSlot.swapOnAudioThread();
     keyboardState.processNextMidiBuffer (midi, 0, numSamples, true);
@@ -724,7 +729,7 @@ void GranulumProcessor::processBlock (AudioBuffer<float>& buffer, MidiBuffer& mi
         else if (m.isAllNotesOff() || m.isAllSoundOff())
         {
             heldNotes = 0;
-            engineAdd.allNotesOff(); engineSmp.allNotesOff(); engineNoise.allNotesOff();
+            engineAdd.allNotesOff(); engineAddClean.allNotesOff(); engineSmp.allNotesOff(); engineNoise.allNotesOff();
         }
     }
     renderRange (pos, numSamples);
@@ -766,7 +771,15 @@ void GranulumProcessor::processChunk (int from, int len)
         float* L = bufs[o]->getWritePointer (0) + from;
         float* R = bufs[o]->getWritePointer (1) + from;
         const bool audible = g[o] > 0.0001f || *lastG[o] > 0.0001f;
-        engines[o]->render (L, R, len, voiceParams (v, o), audible ? slots[o]->active.get() : nullptr);
+        const auto vp = voiceParams (v, o);
+        engines[o]->render (L, R, len, vp, audible ? slots[o]->active.get() : nullptr);
+        if (o == 0)
+        {
+            // harmonics switched off in the GRAIN row: clean and mono, never granulated
+            auto clean = vp;
+            clean.grainOn = false;
+            engineAddClean.render (L, R, len, clean, audible ? addCleanSlot.active.get() : nullptr);
+        }
         for (int i = 0; i < len; ++i)
         {
             const float gg = *lastG[o] + (g[o] - *lastG[o]) * (float) (i + 1) / (float) len;
@@ -851,13 +864,20 @@ void GranulumProcessor::processChunk (int from, int len)
 
     // ---- output ----
     outGain.setTargetValue (Decibels::decibelsToGain (v[mtOutput]));
+    float pl = 0.0f, pr = 0.0f;
     for (int i = 0; i < len; ++i)
     {
         const float gg = outGain.getNextValue();
-        outL[i] = std::tanh (outL[i] * gg);
-        outR[i] = std::tanh (outR[i] * gg);
+        const float l = outL[i] * gg, r = outR[i] * gg;
+        pl = jmax (pl, std::abs (l));
+        pr = jmax (pr, std::abs (r));
+        outL[i] = std::tanh (l);
+        outR[i] = std::tanh (r);
         blockPeak = jmax (blockPeak, std::abs (outL[i]), std::abs (outR[i]));
     }
+    if (pl > peakL.load (std::memory_order_relaxed)) peakL.store (pl, std::memory_order_relaxed);
+    if (pr > peakR.load (std::memory_order_relaxed)) peakR.store (pr, std::memory_order_relaxed);
+    if (pl >= 1.0f || pr >= 1.0f) clipped.store (true, std::memory_order_relaxed);
 
     advanceLfos (from + len, len, v);
 }
@@ -964,6 +984,7 @@ double GranulumProcessor::getSampleLengthSeconds() const
 void GranulumProcessor::timerCallback()
 {
     addSlot.collect();
+    addCleanSlot.collect();
     smpSlot.collect();
     noiseSlot.collect();
 
@@ -975,14 +996,17 @@ void GranulumProcessor::timerCallback()
 
     if (harmonicsDirty.exchange (false))
     {
-        auto data = std::make_shared<granulum::SampleData> (granulum::renderAdditive (harmonics));
-        auto pk = makePeaks (*data);
+        auto parts = granulum::renderAdditiveSplit (harmonics, grainMask.load());
+        granulum::SampleData full = parts.first;
+        for (size_t i = 0; i < full.channels[0].size(); ++i) full.channels[0][i] += parts.second.channels[0][i];
+        auto pk = makePeaks (full);
         {
             const ScopedLock sl (infoLock);
             addPeaks = std::move (pk);
-            addSeconds = data->numFrames() / data->sampleRate;
+            addSeconds = full.numFrames() / full.sampleRate;
         }
-        addSlot.push (std::move (data));
+        addSlot.push (std::make_shared<granulum::SampleData> (std::move (parts.first)));
+        addCleanSlot.push (std::make_shared<granulum::SampleData> (std::move (parts.second)));
     }
 }
 
@@ -1183,6 +1207,7 @@ void GranulumProcessor::getStateInformation (MemoryBlock& destData)
     for (float h : harmonics) hs.add (String (h, 4));
     state.setProperty ("harmonics", hs.joinIntoString (","), nullptr);
     state.setProperty ("presetName", presetName, nullptr);
+    state.setProperty ("grainMask", (int) grainMask.load(), nullptr);
 
     StringArray ms;
     for (auto& m : mods)
@@ -1213,8 +1238,10 @@ void GranulumProcessor::setStateInformation (const void* data, int sizeInBytes)
     std::array<String, kNumLfos> shapes;
     for (int l = 0; l < kNumLfos; ++l) shapes[(size_t) l] = state.getProperty ("lfoShape" + String (l + 1)).toString();
     const String pn = state.getProperty ("presetName", "INIT").toString();
+    const uint32_t gm = (uint32_t) (int) state.getProperty ("grainMask", 0xffff);
     apvts.replaceState (state);
     presetName = pn;
+    setGrainMask (gm);
 
     if (hs.size() == granulum::kNumHarmonics)
     {

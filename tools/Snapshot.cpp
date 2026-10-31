@@ -124,12 +124,13 @@ int main (int argc, char** argv)
     setP (ParamID::cutoff, 1800.0f);
     setP (ParamID::revOn, 1.0f);
     setP (ParamID::chime, 0.55f);
+    p.setGrainMask (0xfffcu);            // harmonics 1-2 clean & mono
     setP (ParamID::delayOn, 1.0f);
     setP (ParamID::route ("delay", 0).toRawUTF8(), 0.0f);
     ed->selectFx (1);
     p.setModulation (GranulumProcessor::modIndexOf (ParamID::cutoff), 0, 0.3f);
     p.setModulation (GranulumProcessor::modIndexOf (ParamID::smear), 1, 0.25f);
-    p.setLfoPoints (0, GranulumProcessor::lfoPreset (0));
+    p.setLfoPoints (0, GranulumProcessor::lfoPreset (1));
     p.keyboardState.noteOn (1, 48, 0.9f);
     run (p, ed, 90);
     save (*base, outDir, "ui-add.png");

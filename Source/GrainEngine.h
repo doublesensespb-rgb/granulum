@@ -9,6 +9,7 @@
 #include <atomic>
 #include <cmath>
 #include <cstdint>
+#include <utility>
 #include <vector>
 
 namespace granulum
@@ -30,16 +31,19 @@ struct SampleData
 // "breathing" partials. Levels are absolute: lower bars = quieter, all zero = silence.
 static constexpr int kNumHarmonics = 16;
 
-inline SampleData renderAdditive (const std::array<float, kNumHarmonics>& amps)
+// Renders the harmonics split in two parts: those whose bit is set in grainMask (-> granulator)
+// and the rest (-> clean). Both parts share the same loudness scaling, so grain + clean == full sound.
+inline std::pair<SampleData, SampleData> renderAdditiveSplit (const std::array<float, kNumHarmonics>& amps, uint32_t grainMask)
 {
     constexpr int period = 184;           // samples per cycle
     constexpr int cycles = 1044;          // ~4 s
     constexpr int N = period * cycles;
     constexpr double c4 = 261.6255653;    // plays at true C4 on note 60
 
-    SampleData s;
-    s.sampleRate = period * c4;
-    s.channels.assign (1, std::vector<float> ((size_t) N, 0.0f));
+    SampleData g, c;
+    g.sampleRate = c.sampleRate = period * c4;
+    g.channels.assign (1, std::vector<float> ((size_t) N, 0.0f));
+    c.channels.assign (1, std::vector<float> ((size_t) N, 0.0f));
 
     std::array<float, period> sine {};
     for (int i = 0; i < period; ++i)
@@ -48,7 +52,6 @@ inline SampleData renderAdditive (const std::array<float, kNumHarmonics>& amps)
     uint32_t seed = 0x1234567u;
     auto rnd = [&seed]() { seed = seed * 1664525u + 1013904223u; return (float) (seed >> 8) / 16777216.0f; };
 
-    auto& out = s.channels[0];
     for (int k = 1; k <= kNumHarmonics; ++k)
     {
         const float a = amps[(size_t) k - 1];
@@ -57,6 +60,7 @@ inline SampleData renderAdditive (const std::array<float, kNumHarmonics>& amps)
         const float  driftDepth  = (k == 1 ? 0.0f : 0.1f + 0.25f * rnd() * std::min (1.0f, (float) k / 4.0f));
         const int    phaseOff    = k == 1 ? 0 : (int) (rnd() * period);
         if (a <= 0.0005f || k * c4 > 20000.0) continue;
+        auto& out = ((grainMask >> (k - 1)) & 1u) ? g.channels[0] : c.channels[0];
         for (int i = 0; i < N; ++i)
         {
             const float drift = 1.0f - driftDepth * 0.5f * (1.0f + (float) std::sin (2.0 * kPi * driftCycles * (double) i / N + driftPhase));
@@ -64,12 +68,17 @@ inline SampleData renderAdditive (const std::array<float, kNumHarmonics>& amps)
         }
     }
 
-    for (auto& v : out) v *= 0.7f;
     float peak = 0.0f;
-    for (float v : out) peak = std::max (peak, std::abs (v));
-    if (peak > 0.95f)
-        for (auto& v : out) v *= 0.95f / peak;
-    return s;
+    for (int i = 0; i < N; ++i) peak = std::max (peak, std::abs (g.channels[0][(size_t) i] + c.channels[0][(size_t) i]) * 0.7f);
+    const float gain = 0.7f * (peak > 0.95f ? 0.95f / peak : 1.0f);
+    for (auto* ch : { &g.channels[0], &c.channels[0] })
+        for (auto& v : *ch) v *= gain;
+    return { std::move (g), std::move (c) };
+}
+
+inline SampleData renderAdditive (const std::array<float, kNumHarmonics>& amps)
+{
+    return renderAdditiveSplit (amps, 0xffffu).first;
 }
 
 // ---------------------------------------------------------------------------
@@ -140,6 +149,7 @@ struct GrainEvent
 static constexpr int kChimeModes = 6;
 static constexpr float kChimeHarm[kChimeModes] = { 1.0f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f };
 static constexpr float kChimeBell[kChimeModes] = { 1.0f, 2.756f, 5.404f, 8.933f, 13.34f, 18.64f };
+static constexpr float kChimePan[kChimeModes]  = { -0.15f, 0.55f, -0.7f, 0.8f, -0.5f, 0.35f };
 
 class GrainEngine
 {
@@ -287,7 +297,7 @@ public:
         const bool chimeOn = p.grainOn && p.chime > 0.001f;
         const float chimeT   = std::clamp ((p.chime - 0.55f) / 0.45f, 0.0f, 1.0f); // harmonic -> bell
         const float chimeT60 = 0.08f + 2.2f * p.chime * p.chime;                    // ring time (s)
-        const float chimeAmt = 2.2f * std::pow (p.chime, 1.3f);
+        const float chimeAmt = 3.6f * std::pow (p.chime, 1.3f);
 
         for (auto& v : voices)
         {
@@ -295,19 +305,28 @@ public:
 
             if (chimeOn)
             {
+                // the whole bank is lifted by octaves into the "air" (>= 700 Hz): it stays in key
+                // but never piles up in the low mids, even on low chords
                 const double noteNow = (p.keyTrack ? v.curNote : 60.0) + (double) p.transpose;
-                const double f0 = 261.6255653 * std::exp2 ((noteNow - 60.0) / 12.0);
+                double f0 = 261.6255653 * std::exp2 ((noteNow - 60.0) / 12.0);
+                while (f0 < 700.0) f0 *= 2.0;
+                const float voiceTrim = std::sqrt (v.chordGain);          // calmer per note on big chords
                 for (int m = 0; m < kChimeModes; ++m)
                 {
                     const double ratio = kChimeHarm[m] + (kChimeBell[m] - kChimeHarm[m]) * chimeT;
                     const double f = f0 * ratio;
                     auto& c = v.chimeCoef[(size_t) m];
-                    if (f > sr * 0.45 || f < 20.0) { c.gain = 0.0f; continue; }
+                    if (f > std::min (12000.0, sr * 0.45)) { c.gain = 0.0f; continue; }
                     const double t60 = chimeT60 / std::pow (ratio, 0.35);
                     const double r = std::exp (-6.907755 / (t60 * sr));
-                    c.a1 = (float) (2.0 * r * std::cos (2.0 * kPi * f / sr));
+                    const double detune = 1.0 + 0.0012 * (m + 1);                 // L/R shimmer
+                    c.a1L = (float) (2.0 * r * std::cos (2.0 * kPi * f / sr));
+                    c.a1R = (float) (2.0 * r * std::cos (2.0 * kPi * f * detune / sr));
                     c.a2 = (float) (-r * r);
-                    c.gain = (float) ((1.0 - r) * 2.0 / std::pow ((double) (m + 1), 0.15));
+                    c.gain = (float) ((1.0 - r) * 2.0 / std::pow ((double) (m + 1), 0.15)) * voiceTrim;
+                    const float pan = kChimePan[m];
+                    c.gl = std::sqrt (0.5f * (1.0f - pan)) * 1.41421356f;
+                    c.gr = std::sqrt (0.5f * (1.0f + pan)) * 1.41421356f;
                 }
             }
 
@@ -405,11 +424,12 @@ public:
                         const auto& c = v.chimeCoef[(size_t) m];
                         if (c.gain == 0.0f) continue;
                         auto& st = v.chimeState[(size_t) m];
-                        const float yl = c.gain * gl + c.a1 * st[0] + c.a2 * st[1];
-                        const float yr = c.gain * gr + c.a1 * st[2] + c.a2 * st[3];
+                        const float ex = 0.5f * (gl + gr);
+                        const float yl = c.gain * ex + c.a1L * st[0] + c.a2 * st[1];
+                        const float yr = c.gain * ex + c.a1R * st[2] + c.a2 * st[3];
                         st[1] = st[0]; st[0] = yl;
                         st[3] = st[2]; st[2] = yr;
-                        rl += yl; rr += yr;
+                        rl += yl * c.gl; rr += yr * c.gr;
                     }
                     gl += rl * chimeAmt;
                     gr += rr * chimeAmt;
@@ -458,7 +478,7 @@ private:
         uint64_t startStamp = 0;
         float    walk[4] {}, walkTarget[4] {};
         int      walkCount[4] {};
-        struct ChimeCoef { float a1 = 0, a2 = 0, gain = 0; };
+        struct ChimeCoef { float a1L = 0, a1R = 0, a2 = 0, gain = 0, gl = 1, gr = 1; };
         std::array<ChimeCoef, kChimeModes> chimeCoef {};
         std::array<std::array<float, 4>, kChimeModes> chimeState {};
         std::array<Grain, kGrainsPerVoice> grains {};

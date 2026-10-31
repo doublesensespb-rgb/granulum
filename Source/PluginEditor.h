@@ -44,7 +44,14 @@ namespace Palette
     }
     inline const bool themeReady = (applyTheme (0), true);
 
-    inline juce::Colour lfo (int i) { return i == 0 ? juce::Colour (0xffd6be9c) : juce::Colour (0xffbff3ff); }
+    // LFO colours: ice, mint, sand
+    inline juce::Colour lfo (int i) { return i == 0 ? juce::Colour (0xffbff3ff) : i == 1 ? juce::Colour (0xff9ee6c4) : juce::Colour (0xffd6be9c); }
+
+    // signature colour: used ONLY for the per-harmonic GRAIN row
+    inline const juce::Colour gold     { 0xffe6cc92 };
+    inline const juce::Colour goldDeep { 0xffb8955a };
+    // output meter red zone (muted)
+    inline const juce::Colour clip     { 0xffe0625a };
 }
 
 class GranulumLook final : public juce::LookAndFeel_V4
@@ -159,12 +166,13 @@ private:
     double lastTick = 0.0;
 };
 
-// Additive bars: draw the 16 harmonic amplitudes with the mouse
+// Additive bars: draw the 16 harmonic amplitudes; the gold GRAIN row below picks which harmonics are granulated
 class HarmonicEditor final : public juce::Component, public juce::SettableTooltipClient, private juce::Timer
 {
 public:
     explicit HarmonicEditor (GranulumProcessor&);
     void paint (juce::Graphics&) override;
+    void mouseMove (const juce::MouseEvent&) override;
     void mouseDown (const juce::MouseEvent&) override;
     void mouseDrag (const juce::MouseEvent&) override;
     void mouseUp (const juce::MouseEvent&) override;
@@ -172,14 +180,33 @@ public:
 private:
     void timerCallback() override;
     juce::Rectangle<float> barArea() const;
+    juce::Rectangle<float> pillRow() const;
     int barAt (float x) const;
     void applyMouse (const juce::MouseEvent&, bool first);
+    void applyPill (int bar);
+    bool grainsActive() const;
 
     GranulumProcessor& proc;
     std::array<float, granulum::kNumHarmonics> h {};
-    int lastBar = -1;
-    float lastValue = 0.0f;
-    bool erasing = false, editing = false;
+    uint32_t mask = 0xffffu;
+    int lastBar = -1, lastPill = -1;
+    float lastValue = 0.0f, time = 0.0f;
+    bool erasing = false, editing = false, pillMode = false, pillValue = true;
+};
+
+// Slim stereo peak meter with a red zone, peak hold and a CLIP flag (click to reset)
+class PeakMeter final : public juce::Component, public juce::SettableTooltipClient, private juce::Timer
+{
+public:
+    explicit PeakMeter (GranulumProcessor&);
+    void paint (juce::Graphics&) override;
+    void mouseDown (const juce::MouseEvent&) override;
+private:
+    void timerCallback() override;
+    GranulumProcessor& proc;
+    float level[2] {}, hold[2] {};
+    int holdAge[2] {};
+    bool clipShown = false;
 };
 
 // Chord / interval picker that pops out of the OSC 1 header
@@ -356,6 +383,7 @@ private:
     GrainField field;
     HarmonicEditor harmonics;
     NoisePicker noisePicker;
+    PeakMeter meterView;
     PresetBar presetBar;
 
     using ButtonAtt = juce::AudioProcessorValueTreeState::ButtonAttachment;
