@@ -232,7 +232,7 @@ def paper():
 
 
 NOISES = [
-    ("AIR", air), ("DEEP", deep), ("TAPE HISS", tape_hiss), ("VINYL", vinyl),
+    ("AIR", air), ("TAPE HISS", tape_hiss), ("VINYL", vinyl),
     ("STATIC", static), ("WIND", wind), ("BREATH", breath), ("PAPER", paper),
     ("DUST", dust), ("FROST", frost), ("METAL RAIN", metal_rain),
 ]

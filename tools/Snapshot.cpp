@@ -146,7 +146,7 @@ int main (int argc, char** argv)
     setP (ParamID::position, 0.2f);
     setP (ParamID::distOn, 1.0f);
     setP (ParamID::osc3On, 1.0f);
-    setP (ParamID::osc3Type, 7.0f);     // PAPER
+    setP (ParamID::osc3Type, 6.0f);     // PAPER
     setP (ParamID::osc3Color, 0.3f);
     setP (ParamID::route ("dist", 2).toRawUTF8(), 0.0f);
     ed->selectFx (0);
