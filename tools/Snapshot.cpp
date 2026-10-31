@@ -125,6 +125,7 @@ int main (int argc, char** argv)
     setP (ParamID::revOn, 1.0f);
     setP (ParamID::chime, 0.55f);
     p.setGrainMask (0xfffcu);            // harmonics 1-2 clean & mono
+    setP (ParamID::lfo (1, "On").toRawUTF8(), 0.0f);   // LFO 2 switched off (routings kept)
     setP (ParamID::delayOn, 1.0f);
     setP (ParamID::route ("delay", 0).toRawUTF8(), 0.0f);
     ed->selectFx (1);
@@ -169,19 +170,34 @@ int main (int argc, char** argv)
         p.setGrainMask (0xfffcu);
         auto& he = ed->harmonicEditor();
         const auto area = he.getBoundsInParent().expanded (6, 4).withTrimmedTop (-30).withRight (he.getBoundsInParent().getRight() + 160);
-        for (int style = 0; style < 1; ++style)
+        for (int style = 0; style < 5; ++style)
         {
-            he.rowStyle = style;
-            for (int f = 0; f < 76; ++f)
+            HarmonicEditor::barStyle = style;
+            for (int f = 0; f < 60; ++f)
             {
                 MessageManager::getInstance()->runDispatchLoopUntil (42);
                 auto img = base->createComponentSnapshot (area, true, 2.0f);
                 PNGImageFormat png;
-                auto file = outDir.getChildFile ("row" + String (style) + "_" + String (f).paddedLeft ('0', 2) + ".png");
+                auto file = outDir.getChildFile ("bar" + String (style) + "_" + String (f).paddedLeft ('0', 2) + ".png");
                 FileOutputStream os (file);
                 png.writeImageToStream (img, os);
             }
         }
+        return 0;
+    }
+
+    // design preview: "Snapshot <dir> strings" -> whole UI with string harmonics + flat knobs
+    if (argc > 2 && String (argv[2]) == "strings")
+    {
+        GranulumLook::flatKnobs = true;
+        HarmonicEditor::barStyle = 5;
+        ed->harmonicEditor().rowStyle = 2;
+        base->sendLookAndFeelChange();
+        setP (ParamID::osc1On, 1.0f);
+        setP (ParamID::chord, 3.0f);
+        p.setGrainMask (0xfffcu);
+        run (p, ed, 40);
+        save (*base, outDir, "strings-ui.png");
         return 0;
     }
 

@@ -244,6 +244,7 @@ public:
     bool hasModulation (int target, int lfo) const;
     float getModulationDepth (int target, int lfo) const;
     int countModulations (int lfo) const;
+    bool isLfoOn (int lfo) const { return pLfoOn[(size_t) lfo]->load() > 0.5f; }
 
     // ---- 4-point LFO shapes ----
     std::array<LfoPoint, kLfoPoints> getLfoPoints (int lfo) const;
@@ -338,7 +339,7 @@ private:
     std::atomic<float>* pDelayOn {}; std::atomic<float>* pDelaySync {}; std::atomic<float>* pDelayDiv {}; std::atomic<float>* pDelayPing {};
     std::array<std::array<std::atomic<float>*, kNumOscs>, 4> pRoute {};
     std::atomic<float>* pMono {};
-    std::array<std::atomic<float>*, kNumLfos> pLfoSync {}, pLfoDiv {}, pLfoMode {}, pLfoRise {};
+    std::array<std::atomic<float>*, kNumLfos> pLfoSync {}, pLfoDiv {}, pLfoMode {}, pLfoRise {}, pLfoOn {};
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (GranulumProcessor)
 };

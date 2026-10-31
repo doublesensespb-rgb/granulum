@@ -58,6 +58,7 @@ class GranulumLook final : public juce::LookAndFeel_V4
 {
 public:
     GranulumLook();
+    static inline bool flatKnobs = true;
     void drawRotarySlider (juce::Graphics&, int x, int y, int w, int h, float pos,
                            float start, float end, juce::Slider&) override;
     void drawButtonBackground (juce::Graphics&, juce::Button&, const juce::Colour&, bool over, bool down) override;
@@ -196,7 +197,8 @@ private:
     std::vector<Crystal> crystals;
     juce::Random rng;
 public:
-    int rowStyle = 0;   // 0 = pearl beads, 1 = glowing line (design preview)
+    int rowStyle = 2;
+    static inline int barStyle = 5;   // 5 strings, 0 sand wave, 1 frosted glass, 2 capsule + filament, 3 line + cap, 4 fade   // 0 = pearl beads, 1 = glowing line (design preview)
 };
 
 // Slim stereo peak meter with a red zone, peak hold and a CLIP flag (click to reset)
@@ -396,7 +398,7 @@ private:
     using ButtonAtt = juce::AudioProcessorValueTreeState::ButtonAttachment;
     using ComboAtt  = juce::AudioProcessorValueTreeState::ComboBoxAttachment;
 
-    Lamp osc1Lamp { "OSC 1", "ADD" }, osc2Lamp { "OSC 2", "SAMPLE" }, osc3Lamp { "OSC 3", "NOISE" };
+    Lamp osc1Lamp { "OSC 1", "ADDITIVE" }, osc2Lamp { "OSC 2", "SAMPLE" }, osc3Lamp { "OSC 3", "NOISE" };
     Lamp grainLamp { "GRANULAR" }, filterLamp { "FILTER" };
     std::unique_ptr<ButtonAtt> osc1LampA, osc2LampA, osc3LampA, grainLampA, filterLampA;
 

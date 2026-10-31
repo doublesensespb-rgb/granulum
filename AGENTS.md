@@ -55,6 +55,9 @@ Key facts:
 - Per-harmonic GRAIN row (OSC 1): gold pills under the bars; off = harmonic stays clean & mono (rendered by `engineAddClean`).
 - CHIME resonances are lifted by octaves above ~700 Hz so low chords don't get muddy.
 - Output: slim L/R peak meter with red zone + CLIP (no LED gems).
+- Design (owner-approved): harmonics drawn as STRINGS (barStyle 5) with small dot GRAIN toggles (rowStyle 2) and a GRAIN all-toggle button;
+  FLAT knobs everywhere (plain disc + pointer, GranulumLook::flatKnobs); soft segmented FX selector (FxTab::style 2).
+- Each LFO tab's light switches that LFO on/off everywhere (param lfoNOn), routings are kept.
 - Filter key-tracks from C3 = MIDI 60 (JUCE naming), readout "1.8 kHz  A5".
 - Audio thread is lock-free: sample buffers go through `SourceSlot`, LFO tables are double-buffered.
 - Audio is processed in 32-sample chunks so modulation is smooth.

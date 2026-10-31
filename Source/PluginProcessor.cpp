@@ -346,6 +346,7 @@ AudioProcessorValueTreeState::ParameterLayout GranulumProcessor::createLayout()
         ps.push_back (std::make_unique<AudioParameterChoice> (ParameterID { ParamID::lfo (l, "Div"), 1 }, n + "Division", divisionNames(), 4));
         ps.push_back (std::make_unique<AudioParameterChoice> (ParameterID { ParamID::lfo (l, "Mode"), 1 }, n + "Mode", StringArray { "FREE", "RETRIG", "ENV" }, 0));
         ps.push_back (std::make_unique<P> (ParameterID { ParamID::lfo (l, "Rise"), 1 }, n + "Rise", skewed (0.0f, 8.0f, 1.5f), 0.0f, secFmt));
+        ps.push_back (std::make_unique<B> (ParameterID { ParamID::lfo (l, "On"), 1 }, n + "On", true));
     }
 
     return { ps.begin(), ps.end() };
@@ -394,6 +395,7 @@ GranulumProcessor::GranulumProcessor()
         pLfoDiv[(size_t) l]  = apvts.getRawParameterValue (ParamID::lfo (l, "Div"));
         pLfoMode[(size_t) l] = apvts.getRawParameterValue (ParamID::lfo (l, "Mode"));
         pLfoRise[(size_t) l] = apvts.getRawParameterValue (ParamID::lfo (l, "Rise"));
+        pLfoOn[(size_t) l]   = apvts.getRawParameterValue (ParamID::lfo (l, "On"));
     }
 
     loadNoises();
@@ -576,6 +578,7 @@ void GranulumProcessor::computeModulated (float* v)
         const int t = m.target.load (std::memory_order_acquire);
         if (t < 0 || t >= kNumModTargets) continue;
         const int l = jlimit (0, kNumLfos - 1, m.lfo.load (std::memory_order_relaxed));
+        if (pLfoOn[(size_t) l]->load() < 0.5f) continue;     // LFO switched off: its routings stay, but do nothing
         off[t] += m.depth.load (std::memory_order_relaxed) * lfoValue[(size_t) l];
     }
     for (int t = 0; t < kNumModTargets; ++t)

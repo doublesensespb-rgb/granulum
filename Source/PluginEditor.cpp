@@ -63,6 +63,22 @@ GranulumLook::GranulumLook()
 void GranulumLook::drawRotarySlider (Graphics& g, int x, int y, int w, int h, float pos,
                                      float start, float end, Slider& s)
 {
+    if (flatKnobs)
+    {
+        // flat, quiet knob: a plain disc with one pointer line
+        auto b = Rectangle<int> (x, y, w, h).toFloat().reduced (5.0f);
+        const float r = jmin (b.getWidth(), b.getHeight()) * 0.5f;
+        const auto c = b.getCentre();
+        const float angle = start + pos * (end - start);
+        const float br = r * 0.78f;
+        g.setColour (s.isMouseOverOrDragging() ? Palette::knob.brighter (0.12f) : Palette::knob);
+        g.fillEllipse (Rectangle<float> (br * 2.0f, br * 2.0f).withCentre (c));
+        const auto p1 = c.getPointOnCircumference (br * 0.12f, angle);
+        const auto p2 = c.getPointOnCircumference (br * 0.78f, angle);
+        g.setColour (Palette::track);
+        g.drawLine ({ p1, p2 }, jmax (1.6f, br * 0.09f));
+        return;
+    }
     auto b = Rectangle<int> (x, y, w, h).toFloat().reduced (5.0f);
     const float r = jmin (b.getWidth(), b.getHeight()) * 0.5f;
     const auto c = b.getCentre();
@@ -198,7 +214,7 @@ void ModChip::updateTooltip()
 void ModChip::paint (Graphics& g)
 {
     auto r = getLocalBounds().toFloat().reduced (1.0f);
-    const auto col = Palette::lfo (lfo);
+    const auto col = Palette::lfo (lfo).withMultipliedAlpha (proc.isLfoOn (lfo) ? 1.0f : 0.35f);
     const float d = proc.getModulationDepth (owner.target, lfo);
     g.setColour (Colours::black.withAlpha (0.35f));
     g.fillEllipse (r.expanded (1.0f));
@@ -332,7 +348,7 @@ void Knob::paintOverChildren (Graphics& g)
     {
         if (! proc.hasModulation (target, l)) continue;
         const float depth = proc.getModulationDepth (target, l);
-        const auto col = Palette::lfo (l);
+        const auto col = Palette::lfo (l).withMultipliedAlpha (proc.isLfoOn (l) ? 1.0f : 0.3f);
         g.setColour (col.withAlpha (0.25f));
         g.strokePath (arcPath (d.c, ringR, angleOf (base), angleOf (base + depth)), PathStrokeType (d.track * 1.8f, PathStrokeType::curved, PathStrokeType::rounded));
         g.setColour (col);
@@ -1016,13 +1032,157 @@ void HarmonicEditor::paint (Graphics& g)
         auto slot = Rectangle<float> (a.getX() + bw * (float) k, a.getY(), bw, a.getHeight()).reduced (bw * 0.12f, 0.0f);
         const bool shattered = grains && ((mask >> k) & 1u);
         // granulated harmonics sit on a slightly warmer, sandy background
-        g.setColour (shattered ? Palette::track.interpolatedWith (Colour (0xffc9ae84), 0.16f) : Palette::track.withAlpha (0.85f));
-        g.fillRoundedRectangle (slot, 3.0f);
+        if (barStyle == 5)
+        {
+            g.setColour ((shattered ? Colour (0xffc9ae84) : Colours::white).withAlpha (shattered ? 0.14f : 0.06f));
+            g.fillRect (slot.getCentreX() - 0.5f, slot.getY(), 1.0f, slot.getHeight());
+        }
+        else
+        {
+            g.setColour (shattered ? Palette::track.interpolatedWith (Colour (0xffc9ae84), 0.16f) : Palette::track.withAlpha (0.85f));
+            g.fillRoundedRectangle (slot, 3.0f);
+        }
         const float v = h[(size_t) k];
         if (v <= 0.001f) continue;
         auto bar = slot.withTop (slot.getBottom() - slot.getHeight() * v);
         const auto col = active ? Palette::accent : Palette::accentSoft.withAlpha (0.35f);
 
+        const Colour sandLight (0xffead9b8);
+        const float head = std::fmod (time * 0.45f, 1.4f) - 0.2f;             // shared light wave, -0.2 .. 1.2
+        auto waveAt = [head] (float t) { const float d = (t - head) / 0.22f; return std::exp (-d * d); };
+        auto grainsInside = [&] (Rectangle<float> area)
+        {
+            for (auto& c : crystals)
+            {
+                if ((int) c.bar != k) continue;
+                const float lt = c.age / c.life;
+                const float fa = jmin (1.0f, c.age * 5.0f) * (1.0f - lt);
+                const float cx = area.getX() + area.getWidth() * c.dx;
+                const float cy = area.getBottom() - area.getHeight() * c.y;
+                g.setColour ((c.white ? Colours::white : Colour (0xfff7ecd6)).withAlpha (0.85f * fa));
+                g.fillEllipse (cx - c.size * 0.5f, cy - c.size * 0.5f, c.size, c.size);
+            }
+        };
+
+        if (barStyle == 5)
+        {
+            // STRINGS: a thin string with a round head; granulated strings turn sand, tremble softly
+            // and carry tiny dew drops running up along them
+            const float x = bar.getCentreX();
+            const float vib = shattered ? std::sin (time * 9.0f + (float) k) * 1.2f : 0.0f;
+            Path str;
+            str.startNewSubPath (x, bar.getBottom());
+            str.quadraticTo (x + vib, bar.getCentreY(), x, bar.getY());
+            const auto sc = shattered ? sandLight : col;
+            g.setColour (sc.withAlpha (0.22f));
+            g.strokePath (str, PathStrokeType (5.0f, PathStrokeType::curved, PathStrokeType::rounded));
+            g.setColour (sc);
+            g.strokePath (str, PathStrokeType (2.2f, PathStrokeType::curved, PathStrokeType::rounded));
+            if (shattered)
+                for (auto& c : crystals)
+                {
+                    if ((int) c.bar != k) continue;
+                    const float fa = jmin (1.0f, c.age * 5.0f) * (1.0f - c.age / c.life);
+                    g.setColour (Colour (0xfffff3dc).withAlpha (fa));
+                    g.fillEllipse (x + (c.dx - 0.5f) * 5.0f - 1.4f, bar.getBottom() - bar.getHeight() * c.y - 1.4f, 2.8f, 2.8f);
+                }
+            const float hr = jmin (4.2f, bw * 0.24f);
+            g.setColour ((shattered ? Colour (0xfffff3dc) : Palette::ice));
+            g.fillEllipse (x - hr, bar.getY() - hr, hr * 2.0f, hr * 2.0f);
+        }
+        else if (barStyle == 1)
+        {
+            // FROSTED GLASS: translucent glass column, bright rim on top and left edge;
+            // granulated = warm light breathing inside the glass
+            const auto base = shattered ? sandLight : col;
+            g.setGradientFill (ColourGradient (base.withAlpha (0.55f), bar.getX(), 0, base.withAlpha (0.28f), bar.getRight(), 0, false));
+            g.fillRoundedRectangle (bar, 4.0f);
+            if (shattered)
+            {
+                Graphics::ScopedSaveState ss (g);
+                Path cp; cp.addRoundedRectangle (bar, 4.0f); g.reduceClipRegion (cp);
+                const float yHead = bar.getBottom() - bar.getHeight() * head;
+                g.setGradientFill (ColourGradient (sandLight.withAlpha (0.0f), 0, yHead - 18.0f, sandLight.withAlpha (0.0f), 0, yHead + 18.0f, false));
+                ColourGradient cg (sandLight.withAlpha (0.0f), 0, yHead - 18.0f, sandLight.withAlpha (0.0f), 0, yHead + 18.0f, false);
+                cg.addColour (0.5, Colours::white.withAlpha (0.55f));
+                g.setGradientFill (cg);
+                g.fillRect (bar);
+                grainsInside (bar);
+            }
+            g.setColour (Colours::white.withAlpha (0.55f));
+            g.drawRoundedRectangle (bar.reduced (0.5f), 4.0f, 0.8f);
+            g.setColour (Colours::white.withAlpha (0.8f));
+            g.fillRoundedRectangle (bar.withHeight (jmin (2.0f, bar.getHeight())).reduced (1.0f, 0.0f), 1.0f);
+        }
+        else if (barStyle == 2)
+        {
+            // CAPSULE + FILAMENT: soft rounded capsules; granulated ones carry a glowing sand filament inside
+            const float rad = bar.getWidth() * 0.5f;
+            g.setGradientFill (ColourGradient (col.interpolatedWith (Palette::ice, 0.25f), 0, bar.getY(), col.darker (0.25f), 0, bar.getBottom(), false));
+            g.fillRoundedRectangle (bar, rad);
+            if (shattered)
+            {
+                const float fw = jmax (2.0f, bar.getWidth() * 0.22f);
+                auto fil = bar.withSizeKeepingCentre (fw, jmax (0.0f, bar.getHeight() - rad));
+                fil.setY (bar.getY() + rad * 0.5f);
+                for (float y = fil.getY(); y < fil.getBottom(); y += 1.5f)
+                {
+                    const float t = (bar.getBottom() - y) / jmax (1.0f, bar.getHeight());
+                    const float w = 0.35f + 0.65f * waveAt (t);
+                    g.setColour (sandLight.withAlpha (w).interpolatedWith (Colours::white, 0.3f * w));
+                    g.fillRect (fil.getX(), y, fil.getWidth(), 1.5f);
+                }
+                g.setColour (sandLight.withAlpha (0.18f));
+                g.fillRoundedRectangle (fil.expanded (3.0f, 2.0f), 3.0f);
+            }
+            g.setColour (Colours::white.withAlpha (0.35f));
+            g.fillEllipse (bar.getX() + rad * 0.45f, bar.getY() + rad * 0.3f, rad * 0.5f, rad * 0.5f);
+        }
+        else if (barStyle == 3)
+        {
+            // LINE + CAP: a slim stem with a round cap at the top (like a fader);
+            // granulated = sand cap with a soft halo and grains drifting up the stem
+            const float stemW = jmax (2.0f, bw * 0.16f);
+            auto stem = bar.withSizeKeepingCentre (stemW, bar.getHeight());
+            const auto stemCol = shattered ? sandLight : col;
+            g.setGradientFill (ColourGradient (stemCol.withAlpha (0.9f), 0, stem.getY(), stemCol.withAlpha (0.25f), 0, stem.getBottom(), false));
+            g.fillRoundedRectangle (stem, stemW * 0.5f);
+            const float capR = jmin (bw * 0.36f, 7.0f);
+            const auto cap = Rectangle<float> (capR * 2.0f, capR * 2.0f).withCentre ({ bar.getCentreX(), bar.getY() });
+            if (shattered)
+            {
+                const float pulse = 0.5f + 0.5f * std::sin (time * 2.2f);
+                g.setColour (sandLight.withAlpha (0.18f + 0.12f * pulse));
+                g.fillEllipse (cap.expanded (capR * 0.9f));
+                auto lane = bar.withSizeKeepingCentre (bw * 0.5f, bar.getHeight());
+                grainsInside (lane);
+            }
+            g.setGradientFill (ColourGradient (Colours::white, cap.getX(), cap.getY(), shattered ? sandLight : col, cap.getRight(), cap.getBottom(), false));
+            g.fillEllipse (cap);
+        }
+        else if (barStyle == 4)
+        {
+            // FADE: solid at the bottom, dissolving towards the top with a crisp bright edge;
+            // granulated = the edge turns sand and light rises through the fade
+            const auto base = shattered ? Palette::accent.interpolatedWith (sandLight, 0.55f) : col;
+            g.setGradientFill (ColourGradient (base.withAlpha (0.15f), 0, bar.getY(), base.withAlpha (0.95f), 0, bar.getBottom(), false));
+            g.fillRoundedRectangle (bar, 3.0f);
+            if (shattered)
+            {
+                Graphics::ScopedSaveState ss (g);
+                Path cp; cp.addRoundedRectangle (bar, 3.0f); g.reduceClipRegion (cp);
+                for (float y = bar.getY(); y < bar.getBottom(); y += 1.5f)
+                {
+                    const float t = (bar.getBottom() - y) / jmax (1.0f, bar.getHeight());
+                    g.setColour (sandLight.withAlpha (0.55f * waveAt (t)));
+                    g.fillRect (bar.getX(), y, bar.getWidth(), 1.5f);
+                }
+                grainsInside (bar);
+            }
+            g.setColour (shattered ? sandLight.brighter (0.2f) : Palette::ice);
+            g.fillRoundedRectangle (bar.withHeight (jmin (2.5f, bar.getHeight())), 1.2f);
+        }
+        else
         if (! shattered)
         {
             // clean harmonic: one solid, calm bar
@@ -1088,7 +1248,14 @@ void HarmonicEditor::paint (Graphics& g)
         {
             const auto cell = Rectangle<float> (row.getX() + bw * (float) k, row.getY(), bw, row.getHeight());
             const bool on = (mask >> k) & 1u;
-            if (rowStyle == 0)
+            if (rowStyle == 2)
+            {
+                const auto c = cell.getCentre();
+                const float rad = 2.8f;
+                if (on) { g.setColour (pearl.withAlpha (alpha)); g.fillEllipse (Rectangle<float> (rad * 2.0f, rad * 2.0f).withCentre (c)); }
+                else    { g.setColour (pearlShade.withAlpha (0.55f * alpha)); g.drawEllipse (Rectangle<float> (rad * 2.0f, rad * 2.0f).withCentre (c), 1.0f); }
+            }
+            else if (rowStyle == 0)
             {
                 // little lamp: lit = warm sand light, off = dark lamp
                 const auto c = cell.getCentre();
@@ -1340,7 +1507,7 @@ void ChordPicker::paint (Graphics& g)
 LfoTab::LfoTab (GranulumProcessor& p, int i) : index (i), proc (p)
 {
     setMouseCursor (MouseCursor::DraggingHandCursor);
-    setTooltip ("Drag onto any knob to modulate it");
+    setTooltip ("Click the light: switch this LFO on/off everywhere (routings are kept).\nDrag onto any knob to modulate it.");
 }
 
 void LfoTab::paint (Graphics& g)
@@ -1354,10 +1521,17 @@ void LfoTab::paint (Graphics& g)
         g.setColour (col);
         g.drawRoundedRectangle (r.reduced (0.5f), 6.0f, 1.2f);
     }
-    drawLed (g, Rectangle<float> (10.0f, 10.0f).withCentre ({ r.getX() + 13.0f, r.getCentreY() }), col, col.darker (0.6f),
-             selected ? 0.5f + 0.5f * proc.lfoValueOut[(size_t) index].load() : 0.3f);
+    const bool on = proc.isLfoOn (index);
+    const auto ledR = Rectangle<float> (10.0f, 10.0f).withCentre ({ r.getX() + 13.0f, r.getCentreY() });
+    if (on)
+        drawLed (g, ledR, col, col.darker (0.6f), 0.55f + 0.45f * proc.lfoValueOut[(size_t) index].load());
+    else
+    {
+        g.setColour (col.withAlpha (0.45f));
+        g.drawEllipse (ledR.reduced (0.5f), 1.2f);
+    }
 
-    g.setColour (selected ? Colours::white : Palette::text);
+    g.setColour ((selected ? Colours::white : Palette::text).withAlpha (on ? 1.0f : 0.45f));
     g.setFont (uiFont (13.0f, true, 0.08f));
     g.drawText ("LFO " + String (index + 1), r.withTrimmedLeft (24.0f), Justification::centredLeft, false);
 
@@ -1375,9 +1549,17 @@ void LfoTab::paint (Graphics& g)
     }
 }
 
-void LfoTab::mouseDown (const MouseEvent&)
+void LfoTab::mouseDown (const MouseEvent& e)
 {
     dragging = false;
+    if (e.position.x < 26.0f)
+        if (auto* prm = proc.apvts.getParameter (ParamID::lfo (index, "On")))
+        {
+            prm->beginChangeGesture();
+            prm->setValueNotifyingHost (prm->getValue() > 0.5f ? 0.0f : 1.0f);
+            prm->endChangeGesture();
+            repaint();
+        }
     if (onSelect) onSelect (index);
 }
 
