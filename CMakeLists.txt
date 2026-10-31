@@ -17,8 +17,8 @@ set_target_properties(GranulumData PROPERTIES POSITION_INDEPENDENT_CODE ON)
 
 juce_add_plugin(Granulum
     COMPANY_NAME "Thematic"
-    PLUGIN_MANUFACTURER_CODE Grnm
-    PLUGIN_CODE Grn1
+    PLUGIN_MANUFACTURER_CODE Thmt
+    PLUGIN_CODE GrFm
     FORMATS VST3 AU Standalone
     AU_MAIN_TYPE kAudioUnitType_MusicDevice
     BUNDLE_ID com.grainform.grainform
