@@ -1813,6 +1813,81 @@ struct RouteButtons::Digit final : public Button
     {
         auto r = getLocalBounds().toFloat().reduced (1.5f);
         const bool on = getToggleState();
+        const int st = RouteButtons::style;
+        if (st == 1)
+        {
+            // plain numerals: lit = bright with a small dot under it
+            g.setFont (uiFont (r.getHeight() * 0.62f, on, 0.0f));
+            g.setColour (on ? Palette::text : Palette::textDim.withAlpha (over ? 0.8f : 0.4f));
+            g.drawText (getButtonText(), r.withTrimmedBottom (5.0f), Justification::centred, false);
+            if (on)
+            {
+                g.setColour (Palette::accent);
+                g.fillEllipse (Rectangle<float> (3.5f, 3.5f).withCentre ({ r.getCentreX(), r.getBottom() - 2.5f }));
+            }
+            return;
+        }
+        if (st == 2)
+        {
+            // circles: lit = soft filled ring, off = thin outline
+            const auto c = Rectangle<float> (jmin (r.getWidth(), r.getHeight()), jmin (r.getWidth(), r.getHeight())).withCentre (r.getCentre()).reduced (1.0f);
+            if (on)
+            {
+                g.setColour (Palette::accent.withAlpha (0.22f));
+                g.fillEllipse (c);
+                g.setColour (Palette::accent);
+                g.drawEllipse (c.reduced (0.6f), 1.2f);
+            }
+            else
+            {
+                g.setColour (Palette::textDim.withAlpha (over ? 0.6f : 0.3f));
+                g.drawEllipse (c.reduced (0.6f), 1.0f);
+            }
+            g.setFont (uiFont (c.getHeight() * 0.55f, true));
+            g.setColour (on ? Palette::text : Palette::textDim.withAlpha (0.55f));
+            g.drawText (getButtonText(), c, Justification::centred, false);
+            return;
+        }
+        if (st == 3)
+        {
+            // soft segmented, same family as the FX selector
+            if (index == 0 || true)
+            {
+                auto seg = r.expanded (1.5f, 0.0f);
+                g.setColour (Palette::screen.withAlpha (0.7f));
+                g.fillRect (seg);
+            }
+            if (on)
+            {
+                g.setColour (Palette::buttonHi.withAlpha (0.65f));
+                g.fillRoundedRectangle (r.reduced (1.5f), 4.0f);
+            }
+            g.setFont (uiFont (r.getHeight() * 0.56f, on));
+            g.setColour (on ? Palette::text : Palette::textDim.withAlpha (over ? 0.8f : 0.45f));
+            g.drawText (getButtonText(), r, Justification::centred, false);
+            return;
+        }
+        if (st == 4)
+        {
+            // lamps: a tiny light next to each number
+            const auto led = Rectangle<float> (6.0f, 6.0f).withCentre ({ r.getX() + 6.0f, r.getCentreY() });
+            if (on)
+            {
+                g.setColour (Palette::accent.withAlpha (0.3f));
+                g.fillEllipse (led.expanded (2.5f));
+                g.setColour (Palette::accent.brighter (0.2f));
+                g.fillEllipse (led);
+            }
+            else
+            {
+                g.setColour (Palette::textDim.withAlpha (0.45f));
+                g.drawEllipse (led.reduced (0.4f), 1.0f);
+            }
+            g.setFont (uiFont (r.getHeight() * 0.58f, on));
+            g.setColour (on ? Palette::text : Palette::textDim.withAlpha (0.55f));
+            g.drawText (getButtonText(), r.withTrimmedLeft (11.0f), Justification::centredLeft, false);
+            return;
+        }
         if (on)
         {
             g.setColour (Palette::accent.withAlpha (over ? 1.0f : 0.85f));

@@ -201,6 +201,26 @@ int main (int argc, char** argv)
         return 0;
     }
 
+    // design preview: "Snapshot <dir> digits" -> routing digits in every style
+    if (argc > 2 && String (argv[2]) == "digits")
+    {
+        setP (ParamID::filterOn, 1.0f); setP (ParamID::delayOn, 1.0f);
+        setP (ParamID::route ("filter", 1).toRawUTF8(), 0.0f);
+        setP (ParamID::route ("delay", 0).toRawUTF8(), 0.0f);
+        ed->selectFx (1);
+        for (int st = 0; st < 5; ++st)
+        {
+            RouteButtons::style = st;
+            base->repaint();
+            MessageManager::getInstance()->runDispatchLoopUntil (80);
+            auto img = base->createComponentSnapshot (Rectangle<int> (530, 372, 534, 230), true, 2.0f);
+            PNGImageFormat png;
+            FileOutputStream os (outDir.getChildFile ("dg" + String (st) + ".png"));
+            png.writeImageToStream (img, os);
+        }
+        return 0;
+    }
+
     // design preview: "Snapshot <dir> fxtabs" -> the effects block in every tab style
     if (argc > 2 && String (argv[2]) == "fxtabs")
     {

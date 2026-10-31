@@ -286,6 +286,7 @@ public:
     ~RouteButtons() override;
     void resized() override;
     std::function<void (int)> onHover;   // oscillator index, -1 = none
+    static inline int style = 3;          // soft segmented (owner choice); 0 squares, 1 numerals, 2 circles, 4 lamps
 private:
     struct Digit;
     juce::OwnedArray<Digit> digits;
