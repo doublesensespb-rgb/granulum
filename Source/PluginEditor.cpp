@@ -1759,7 +1759,7 @@ void GranulumEditor::resized()
 
     {
         const int knobColW = S (150);
-        osc1Area = oscCol.removeFromTop ((int) (oscCol.getHeight() * 0.62f));
+        osc1Area = oscCol.removeFromTop ((int) (oscCol.getHeight() * 0.56f));
         oscCol.removeFromTop (S (6));
         osc2Area = oscCol;
 

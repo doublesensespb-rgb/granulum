@@ -12,7 +12,7 @@ namespace
         return r;
     }
 
-    String fmt (float v, int dec, const char* unit) { return String (v, dec) + unit; }
+    String fmt (float v, int dec, const char* unit) { return (dec <= 0 ? String (roundToInt (v)) : String (v, dec)) + unit; }
 
     constexpr int kChunk = 32;
 
