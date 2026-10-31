@@ -26,7 +26,7 @@ namespace Palette
     inline juce::Colour ledOff;
     inline juce::Colour whiteKey;
     inline juce::Colour blackKey;
-    inline juce::Colour hit { 0xffffc857 };
+    inline juce::Colour hit { 0xffd6be9c };   // muted sand / beige
 
     inline void applyTheme (int t)
     {
@@ -44,7 +44,7 @@ namespace Palette
     }
     inline const bool themeReady = (applyTheme (0), true);
 
-    inline juce::Colour lfo (int i) { return i == 0 ? juce::Colour (0xffffc857) : juce::Colour (0xffbff3ff); }
+    inline juce::Colour lfo (int i) { return i == 0 ? juce::Colour (0xffd6be9c) : juce::Colour (0xffbff3ff); }
 }
 
 class GranulumLook final : public juce::LookAndFeel_V4
@@ -101,6 +101,7 @@ public:
 
     void refreshMods();
     void tick();
+    void setCompact (bool c) { compact = c; slider.setPopupDisplayEnabled (c, true, nullptr); resized(); }   // no value box: value pops up while dragging
 
     juce::Slider slider;
     const int target;       // modulation target index, -1 if not modulatable
@@ -111,7 +112,7 @@ private:
     GranulumProcessor& proc;
     juce::String title;
     Size size;
-    bool dragHover = false, anyMod = false;
+    bool dragHover = false, anyMod = false, compact = false;
     std::array<std::unique_ptr<ModChip>, kNumLfos> chips;
     std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> attachment;
 };
@@ -243,6 +244,71 @@ private:
     juce::Point<float> dragStart;
 };
 
+// "1 2 3": which oscillators go through a block. Hovering a digit highlights that oscillator.
+class RouteButtons final : public juce::Component
+{
+public:
+    RouteButtons (GranulumProcessor&, const char* block, const juce::String& blockName);
+    ~RouteButtons() override;
+    void resized() override;
+    std::function<void (int)> onHover;   // oscillator index, -1 = none
+private:
+    struct Digit;
+    juce::OwnedArray<Digit> digits;
+    juce::OwnedArray<juce::AudioProcessorValueTreeState::ButtonAttachment> atts;
+};
+
+// Effect tab: LED on the left turns the effect on/off, the name selects the tab
+class FxTab final : public juce::Component, public juce::SettableTooltipClient
+{
+public:
+    FxTab (GranulumProcessor&, const char* onParam, const juce::String& name);
+    void paint (juce::Graphics&) override;
+    void mouseDown (const juce::MouseEvent&) override;
+    std::function<void()> onSelect;
+    bool selected = false;
+private:
+    juce::RangedAudioParameter* param;
+    juce::String name;
+};
+
+// Header preset browser: < NAME > SAVE
+class PresetBar final : public juce::Component, private juce::Timer
+{
+public:
+    explicit PresetBar (GranulumProcessor&);
+    void paint (juce::Graphics&) override;
+    void resized() override;
+    void mouseDown (const juce::MouseEvent&) override;
+    std::function<void()> onLoaded;
+private:
+    void timerCallback() override { repaint(); }
+    void step (int dir);
+    void showMenu();
+    void askSave();
+    GranulumProcessor& proc;
+    juce::TextButton prev { juce::String::fromUTF8 ("\xe2\x97\x80") }, next { juce::String::fromUTF8 ("\xe2\x96\xb6") }, save { "SAVE" };
+    juce::Rectangle<int> nameArea;
+    std::unique_ptr<juce::AlertWindow> saveWindow;
+};
+
+// OSC 3 noise picker: name + mini waveform, arrows to step, click for the full list
+class NoisePicker final : public juce::Component, private juce::Timer
+{
+public:
+    explicit NoisePicker (GranulumProcessor&);
+    void paint (juce::Graphics&) override;
+    void resized() override;
+    void mouseDown (const juce::MouseEvent&) override;
+private:
+    void timerCallback() override { repaint(); }
+    void setIndex (int i);
+    int index() const;
+    GranulumProcessor& proc;
+    juce::TextButton prev { juce::String::fromUTF8 ("\xe2\x97\x80") }, next { juce::String::fromUTF8 ("\xe2\x96\xb6") };
+    juce::Rectangle<int> body;
+};
+
 // Block on/off: LED + title, click toggles
 class Lamp final : public juce::Button
 {
@@ -264,6 +330,7 @@ public:
     ~GranulumEditor() override;
 
     void paint (juce::Graphics&) override;
+    void paintOverChildren (juce::Graphics&) override;
     void resized() override;
 
     bool isInterestedInFileDrag (const juce::StringArray& files) override;
@@ -273,6 +340,7 @@ public:
 
     GrainField& grainField() { return field; }
     GranulumLook& lookAndFeel() { return look; }
+    void selectFx (int i);
 
 private:
     void timerCallback() override;
@@ -280,33 +348,44 @@ private:
     void launchChooser();
     void selectLfo (int i);
     void showChordPicker();
+    void setHoverOsc (int o);
 
     GranulumProcessor& proc;
     GranulumLook look;
 
     GrainField field;
     HarmonicEditor harmonics;
+    NoisePicker noisePicker;
+    PresetBar presetBar;
 
     using ButtonAtt = juce::AudioProcessorValueTreeState::ButtonAttachment;
     using ComboAtt  = juce::AudioProcessorValueTreeState::ComboBoxAttachment;
 
-    Lamp osc1Lamp { "OSC 1", "ADD" }, osc2Lamp { "OSC 2", "SAMPLE" };
-    Lamp grainLamp { "GRANULAR" }, filterLamp { "FILTER" }, distLamp { "DISTORTION" }, revLamp { "REVERB" };
-    std::unique_ptr<ButtonAtt> osc1LampA, osc2LampA, grainLampA, filterLampA, distLampA, revLampA;
+    Lamp osc1Lamp { "OSC 1", "ADD" }, osc2Lamp { "OSC 2", "SAMPLE" }, osc3Lamp { "OSC 3", "NOISE" };
+    Lamp grainLamp { "GRANULAR" }, filterLamp { "FILTER" };
+    std::unique_ptr<ButtonAtt> osc1LampA, osc2LampA, osc3LampA, grainLampA, filterLampA;
 
     juce::TextButton initButton { "INIT" }, randomButton { "RANDOM ALL" }, loadButton { "LOAD" }, chordButton { "CHORD: OFF" };
     juce::TextButton rndGrains { "RANDOM" }, rndFilter { "RANDOM" }, rndFx { "RANDOM" }, rndBars { "RANDOM" };
-    juce::TextButton osc1Grain { "GRAIN" }, osc2Grain { "GRAIN" };
+    juce::TextButton osc1Grain { "GRAIN" }, osc2Grain { "GRAIN" }, osc3Grain { "GRAIN" };
     juce::TextButton polyButton { "POLY" }, monoButton { "MONO" };
-    std::unique_ptr<ButtonAtt> osc1GrainA, osc2GrainA;
-    juce::ComboBox filterType, distType;
-    std::unique_ptr<ComboAtt> filterTypeA, distTypeA;
+    juce::TextButton delaySync { "SYNC" }, delayPing { "PING-PONG" };
+    std::unique_ptr<ButtonAtt> osc1GrainA, osc2GrainA, osc3GrainA, delaySyncA, delayPingA;
+    juce::ComboBox filterType, distType, delayDiv;
+    std::unique_ptr<ComboAtt> filterTypeA, distTypeA, delayDivA;
     juce::MidiKeyboardComponent keyboard;
     std::unique_ptr<juce::FileChooser> chooser;
     juce::TooltipWindow tooltips { this, 600 };
 
-    std::vector<std::unique_ptr<Knob>> heroKnobs, smallKnobs, osc1Knobs, osc2Knobs, filterKnobs, distKnobs, revKnobs, globalKnobs;
+    std::vector<std::unique_ptr<Knob>> heroKnobs, smallKnobs, osc1Knobs, osc2Knobs, osc3Knobs, filterKnobs,
+                                       distKnobs, delayKnobs, revKnobs, globalKnobs;
     std::vector<Knob*> allKnobs;
+
+    // effects: tabs + routing
+    std::array<std::unique_ptr<FxTab>, 3> fxTabs;
+    std::array<std::unique_ptr<RouteButtons>, 4> routes;   // filter, dist, delay, reverb
+    int selectedFx = 0;
+    int hoverOsc = -1;
 
     struct LfoControls
     {
@@ -321,8 +400,8 @@ private:
     LfoEditor lfoEditor;
     int selectedLfo = 0;
 
-    juce::Rectangle<int> titleArea, gemsArea, screenFrame, osc1Area, osc2Area, osc1Bars, dropZone,
-                         grainArea, filterArea, fxArea, ledArea, lfoFrame, voiceArea,
+    juce::Rectangle<int> titleArea, gemsArea, screenFrame, osc1Area, osc2Area, osc3Area, dropZone,
+                         grainArea, filterArea, fxArea, ledArea, lfoFrame, voiceArea, fxContent,
                          lfoPresetLabel, lfoModeLabel, lfoDivLabel, distTypeLabel, fxLabel;
     float meter = 0.0f;
     float activity = 0.0f;

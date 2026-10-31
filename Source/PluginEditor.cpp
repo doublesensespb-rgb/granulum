@@ -295,7 +295,8 @@ void Knob::resized()
     const int boxH   = size == Size::Hero ? 20 : size == Size::Small ? 15 : 18;
     auto r = getLocalBounds();
     r.removeFromTop (titleH);
-    slider.setTextBoxStyle (Slider::TextBoxBelow, false, jmin (getWidth() - 2, 90), boxH);
+    if (compact) slider.setTextBoxStyle (Slider::NoTextBox, false, 0, 0);
+    else         slider.setTextBoxStyle (Slider::TextBoxBelow, false, jmin (getWidth() - 2, 90), boxH);
     slider.setBounds (r);
     refreshMods();
 }
@@ -572,8 +573,9 @@ void GrainField::simulate (float dt)
         m.phase += dt;
         m.x += (m.vx + std::sin (m.phase * 0.4f + m.y * 3.0f) * 0.004f * (1.0f + 4.0f * drift)) * dt;
         m.y += (m.vy + std::cos (m.phase * 0.3f + m.x * 5.0f) * 0.01f) * dt;
-        if (m.x < 0) m.x += 1; if (m.x > 1) m.x -= 1;
-        if (m.y < -1) m.y += 2; if (m.y > 1) m.y -= 2;
+        m.x -= std::floor (m.x);
+        if (m.y < -1) m.y += 2;
+        if (m.y > 1)  m.y -= 2;
     }
 
     for (auto& hc : heat) hc *= std::exp (-dt * 2.2f);
@@ -1321,10 +1323,294 @@ void Lamp::paintButton (Graphics& g, bool over, bool)
 }
 
 // ============================================================================
+// Routing digits "1 2 3"
+
+struct RouteButtons::Digit final : public Button
+{
+    Digit (int i, RouteButtons& o) : Button (String (i + 1)), index (i), owner (o)
+    {
+        setClickingTogglesState (true);
+        setMouseCursor (MouseCursor::PointingHandCursor);
+    }
+    void paintButton (Graphics& g, bool over, bool) override
+    {
+        auto r = getLocalBounds().toFloat().reduced (1.5f);
+        const bool on = getToggleState();
+        if (on)
+        {
+            g.setColour (Palette::accent.withAlpha (over ? 1.0f : 0.85f));
+            g.fillRoundedRectangle (r, 4.0f);
+        }
+        else
+        {
+            g.setColour (Palette::field);
+            g.fillRoundedRectangle (r, 4.0f);
+            g.setColour (Palette::textDim.withAlpha (over ? 0.9f : 0.45f));
+            g.drawRoundedRectangle (r.reduced (0.5f), 4.0f, 1.0f);
+        }
+        g.setColour (on ? Palette::screen : Palette::textDim.withAlpha (over ? 1.0f : 0.7f));
+        g.setFont (uiFont (r.getHeight() * 0.68f, true));
+        g.drawText (getButtonText(), r, Justification::centred, false);
+    }
+    void mouseEnter (const MouseEvent& e) override { Button::mouseEnter (e); if (owner.onHover) owner.onHover (index); }
+    void mouseExit  (const MouseEvent& e) override { Button::mouseExit (e);  if (owner.onHover) owner.onHover (-1); }
+    const int index;
+    RouteButtons& owner;
+};
+
+RouteButtons::RouteButtons (GranulumProcessor& p, const char* block, const String& blockName)
+{
+    for (int o = 0; o < kNumOscs; ++o)
+    {
+        auto* d = digits.add (new Digit (o, *this));
+        d->setTooltip (blockName + " on OSC " + String (o + 1) + ".\nLit = this oscillator goes through " + blockName + ".");
+        addAndMakeVisible (d);
+        atts.add (new AudioProcessorValueTreeState::ButtonAttachment (p.apvts, ParamID::route (block, o), *d));
+    }
+}
+
+RouteButtons::~RouteButtons() { atts.clear(); }
+
+void RouteButtons::resized()
+{
+    auto r = getLocalBounds();
+    const int w = r.getWidth() / kNumOscs;
+    for (auto* d : digits) d->setBounds (r.removeFromLeft (w));
+}
+
+// ============================================================================
+// Effect tab
+
+FxTab::FxTab (GranulumProcessor& p, const char* onParam, const String& n)
+    : param (p.apvts.getParameter (onParam)), name (n)
+{
+    setMouseCursor (MouseCursor::PointingHandCursor);
+    setTooltip ("Click the light to switch " + n + " on/off, click the name to edit it");
+}
+
+void FxTab::paint (Graphics& g)
+{
+    auto r = getLocalBounds().toFloat().reduced (1.0f);
+    const bool on = param->getValue() > 0.5f;
+    if (selected)
+    {
+        g.setColour (Palette::field);
+        g.fillRoundedRectangle (r, 6.0f);
+        g.setColour (Palette::accent.withAlpha (0.8f));
+        g.fillRoundedRectangle (r.withTop (r.getBottom() - 2.5f).reduced (8.0f, 0.0f), 1.2f);
+    }
+    drawLed (g, Rectangle<float> (10.0f, 10.0f).withCentre ({ r.getX() + 12.0f, r.getCentreY() }),
+             Palette::accent, Palette::ledOff.darker (0.3f), on ? 1.0f : 0.0f);
+    g.setColour (selected ? Palette::text : Palette::textDim.withAlpha (isMouseOver() ? 1.0f : 0.75f));
+    g.setFont (uiFont (12.5f, false, 0.08f));
+    g.drawText (name, r.withTrimmedLeft (22.0f), Justification::centredLeft, false);
+}
+
+void FxTab::mouseDown (const MouseEvent& e)
+{
+    if (e.position.x < 24.0f)
+    {
+        param->beginChangeGesture();
+        param->setValueNotifyingHost (param->getValue() > 0.5f ? 0.0f : 1.0f);
+        param->endChangeGesture();
+    }
+    if (onSelect) onSelect();
+    repaint();
+}
+
+// ============================================================================
+// Preset bar
+
+PresetBar::PresetBar (GranulumProcessor& p) : proc (p)
+{
+    for (auto* b : { &prev, &next, &save }) addAndMakeVisible (*b);
+    prev.onClick = [this] { step (-1); };
+    next.onClick = [this] { step (1); };
+    save.onClick = [this] { askSave(); };
+    prev.setTooltip ("Previous preset");
+    next.setTooltip ("Next preset");
+    save.setTooltip ("Save the current sound as a preset");
+    setMouseCursor (MouseCursor::PointingHandCursor);
+    startTimerHz (4);
+}
+
+void PresetBar::resized()
+{
+    auto r = getLocalBounds();
+    save.setBounds (r.removeFromRight (58));
+    r.removeFromRight (6);
+    next.setBounds (r.removeFromRight (28));
+    prev.setBounds (r.removeFromLeft (28));
+    nameArea = r.reduced (4, 0);
+}
+
+void PresetBar::paint (Graphics& g)
+{
+    auto r = nameArea.toFloat();
+    g.setColour (Palette::screen);
+    g.fillRoundedRectangle (r, 6.0f);
+    g.setColour (Colours::white.withAlpha (0.06f));
+    g.drawRoundedRectangle (r.reduced (0.5f), 6.0f, 1.0f);
+    g.setColour (Palette::text);
+    g.setFont (uiFont (13.0f, false, 0.08f));
+    g.drawText (proc.getPresetName().toUpperCase(), r.reduced (10.0f, 0.0f), Justification::centred, true);
+    g.setColour (Palette::textDim);
+    Path arrow;
+    const float ax = r.getRight() - 12.0f, ay = r.getCentreY();
+    arrow.addTriangle (ax - 3.5f, ay - 1.5f, ax + 3.5f, ay - 1.5f, ax, ay + 2.5f);
+    g.fillPath (arrow);
+}
+
+void PresetBar::mouseDown (const MouseEvent& e)
+{
+    if (nameArea.contains (e.getPosition())) showMenu();
+}
+
+void PresetBar::step (int dir)
+{
+    const auto list = proc.listPresets();
+    if (list.isEmpty()) return;
+    int cur = -1;
+    for (int i = 0; i < list.size(); ++i)
+        if (list[i].getFileNameWithoutExtension() == proc.getPresetName()) cur = i;
+    const int n = list.size();
+    const int idx = cur < 0 ? (dir > 0 ? 0 : n - 1) : ((cur + dir) % n + n) % n;
+    proc.loadPreset (list[idx]);
+    if (onLoaded) onLoaded();
+    repaint();
+}
+
+void PresetBar::showMenu()
+{
+    const auto list = proc.listPresets();
+    PopupMenu m;
+    m.addItem (1, "INIT");
+    m.addSeparator();
+    for (int i = 0; i < list.size(); ++i)
+        m.addItem (100 + i, list[i].getFileNameWithoutExtension(), true, list[i].getFileNameWithoutExtension() == proc.getPresetName());
+    if (list.isEmpty()) m.addItem (2, "(no saved presets yet)", false);
+    m.addSeparator();
+    m.addItem (3, "Save as...");
+    m.addItem (4, "Open presets folder");
+    Component::SafePointer<PresetBar> safe (this);
+    m.showMenuAsync (PopupMenu::Options().withTargetComponent (this).withMinimumWidth (getWidth()), [safe, list] (int res)
+    {
+        if (safe == nullptr || res == 0) return;
+        auto& b = *safe;
+        if (res == 1) b.proc.resetToInit();
+        else if (res == 3) { b.askSave(); return; }
+        else if (res == 4) { GranulumProcessor::presetFolder().startAsProcess(); return; }
+        else if (res >= 100) b.proc.loadPreset (list[res - 100]);
+        if (b.onLoaded) b.onLoaded();
+        b.repaint();
+    });
+}
+
+void PresetBar::askSave()
+{
+    saveWindow = std::make_unique<AlertWindow> ("Save preset", "Name:", MessageBoxIconType::NoIcon, this);
+    saveWindow->addTextEditor ("name", proc.getPresetName() == "INIT" ? String ("My Sound") : proc.getPresetName());
+    saveWindow->addButton ("SAVE", 1, KeyPress (KeyPress::returnKey));
+    saveWindow->addButton ("CANCEL", 0, KeyPress (KeyPress::escapeKey));
+    saveWindow->setColour (AlertWindow::backgroundColourId, Palette::panel);
+    saveWindow->setColour (AlertWindow::textColourId, Palette::text);
+    saveWindow->setColour (AlertWindow::outlineColourId, Palette::accent.withAlpha (0.4f));
+    Component::SafePointer<PresetBar> safe (this);
+    saveWindow->enterModalState (true, ModalCallbackFunction::create ([safe] (int result)
+    {
+        if (safe == nullptr) return;
+        if (result == 1)
+        {
+            safe->proc.savePreset (safe->saveWindow->getTextEditorContents ("name"));   // same name = update that preset
+        }
+        safe->saveWindow.reset();
+        safe->repaint();
+    }), false);
+}
+
+// ============================================================================
+// OSC 3 noise picker
+
+NoisePicker::NoisePicker (GranulumProcessor& p) : proc (p)
+{
+    for (auto* b : { &prev, &next }) addAndMakeVisible (*b);
+    prev.onClick = [this] { setIndex (index() - 1); };
+    next.onClick = [this] { setIndex (index() + 1); };
+    setMouseCursor (MouseCursor::PointingHandCursor);
+    startTimerHz (10);
+}
+
+int NoisePicker::index() const { return (int) proc.apvts.getRawParameterValue (ParamID::osc3Type)->load(); }
+
+void NoisePicker::setIndex (int i)
+{
+    const int n = GranulumProcessor::noiseNames().size();
+    i = ((i % n) + n) % n;
+    if (auto* prm = proc.apvts.getParameter (ParamID::osc3Type))
+    {
+        prm->beginChangeGesture();
+        prm->setValueNotifyingHost (prm->convertTo0to1 ((float) i));
+        prm->endChangeGesture();
+    }
+    repaint();
+}
+
+void NoisePicker::resized()
+{
+    auto r = getLocalBounds();
+    prev.setBounds (r.removeFromLeft (24).withSizeKeepingCentre (24, jmin (r.getHeight(), 26)));
+    next.setBounds (r.removeFromRight (24).withSizeKeepingCentre (24, jmin (r.getHeight(), 26)));
+    body = r.reduced (4, 0);
+}
+
+void NoisePicker::paint (Graphics& g)
+{
+    auto r = body.toFloat();
+    g.setColour (Palette::screen);
+    g.fillRoundedRectangle (r, 7.0f);
+
+    const bool on = proc.apvts.getRawParameterValue (ParamID::osc3On)->load() > 0.5f;
+    // mini waveform across the box
+    if (auto pk = proc.getNoisePeaks (index()); pk != nullptr && ! pk->maxs.empty())
+    {
+        auto w = r.reduced (8.0f, 5.0f);
+        const int cols = jmax (2, (int) w.getWidth() / 2);
+        const int bins = (int) pk->maxs.size();
+        Path p;
+        for (int x = 0; x < cols; ++x)
+        {
+            const int b0 = x * bins / cols, b1 = jmax (b0 + 1, (x + 1) * bins / cols);
+            float m = 0.0f;
+            for (int b = b0; b < b1; ++b) m = jmax (m, pk->maxs[(size_t) b], -pk->mins[(size_t) b]);
+            const float px = w.getX() + w.getWidth() * (float) x / (float) (cols - 1);
+            p.addRectangle (px, w.getCentreY() - m * w.getHeight() * 0.5f, 1.2f, jmax (1.0f, m * w.getHeight()));
+        }
+        g.setColour (Palette::accent.withAlpha (on ? 0.28f : 0.12f));
+        g.fillPath (p);
+    }
+    g.setColour (on ? Palette::ice : Palette::textDim);
+    g.setFont (uiFont (13.5f, true, 0.14f));
+    g.drawText (GranulumProcessor::noiseNames()[index()], r, Justification::centred, false);
+}
+
+void NoisePicker::mouseDown (const MouseEvent& e)
+{
+    if (! body.contains (e.getPosition())) return;
+    PopupMenu m;
+    const auto& names = GranulumProcessor::noiseNames();
+    for (int i = 0; i < names.size(); ++i) m.addItem (i + 1, names[i], true, i == index());
+    Component::SafePointer<NoisePicker> safe (this);
+    m.showMenuAsync (PopupMenu::Options().withTargetComponent (this), [safe] (int res)
+    {
+        if (safe != nullptr && res > 0) safe->setIndex (res - 1);
+    });
+}
+
+// ============================================================================
 // Editor
 
 GranulumEditor::GranulumEditor (GranulumProcessor& p)
-    : AudioProcessorEditor (&p), proc (p), field (p), harmonics (p),
+    : AudioProcessorEditor (&p), proc (p), field (p), harmonics (p), noisePicker (p), presetBar (p),
       keyboard (p.keyboardState, MidiKeyboardComponent::horizontalKeyboard), lfoEditor (p)
 {
     setLookAndFeel (&look);
@@ -1342,6 +1628,7 @@ GranulumEditor::GranulumEditor (GranulumProcessor& p)
     add (heroKnobs,  ParamID::scatter,  "Scatter", Knob::Size::Hero);
     add (heroKnobs,  ParamID::shimmer,  "Shimmer", Knob::Size::Hero);
     add (heroKnobs,  ParamID::drift,    "Drift",   Knob::Size::Hero);
+    add (heroKnobs,  ParamID::chime,    "Chime",   Knob::Size::Hero);
     add (smallKnobs, ParamID::gsize,    "Size",     Knob::Size::Small);
     add (smallKnobs, ParamID::speed,    "Speed",    Knob::Size::Small);
     add (smallKnobs, ParamID::position, "Position", Knob::Size::Small);
@@ -1355,15 +1642,21 @@ GranulumEditor::GranulumEditor (GranulumProcessor& p)
     add (osc2Knobs, ParamID::osc2Vol,  "Vol",  Knob::Size::Small);
     add (osc2Knobs, ParamID::osc2Oct,  "Oct",  Knob::Size::Small);
     add (osc2Knobs, ParamID::osc2Semi, "Semi", Knob::Size::Small);
+    add (osc3Knobs, ParamID::osc3Vol,   "Vol",   Knob::Size::Small);
+    add (osc3Knobs, ParamID::osc3Color, "Color", Knob::Size::Small);
 
     add (filterKnobs, ParamID::cutoff, "Cutoff");
     add (filterKnobs, ParamID::reso,   "Reso");
 
-    add (distKnobs, ParamID::distDrive, "Drive", Knob::Size::Small);
-    add (distKnobs, ParamID::distTone,  "Tone",  Knob::Size::Small);
-    add (distKnobs, ParamID::distMix,   "Mix",   Knob::Size::Small);
-    add (revKnobs,  ParamID::revMix,    "Mix",   Knob::Size::Small);
-    add (revKnobs,  ParamID::revSize,   "Size",  Knob::Size::Small);
+    add (distKnobs,  ParamID::distDrive, "Drive",    Knob::Size::Small);
+    add (distKnobs,  ParamID::distTone,  "Tone",     Knob::Size::Small);
+    add (distKnobs,  ParamID::distMix,   "Mix",      Knob::Size::Small);
+    add (delayKnobs, ParamID::delayTime, "Time",     Knob::Size::Small);
+    add (delayKnobs, ParamID::delayFb,   "Feedback", Knob::Size::Small);
+    add (delayKnobs, ParamID::delayTone, "Tone",     Knob::Size::Small);
+    add (delayKnobs, ParamID::delayMix,  "Mix",      Knob::Size::Small);
+    add (revKnobs,   ParamID::revMix,    "Mix",      Knob::Size::Small);
+    add (revKnobs,   ParamID::revSize,   "Size",     Knob::Size::Small);
 
     add (globalKnobs, ParamID::porta,  "Porta",  Knob::Size::Small);
     add (globalKnobs, ParamID::output, "Output", Knob::Size::Small);
@@ -1373,28 +1666,35 @@ GranulumEditor::GranulumEditor (GranulumProcessor& p)
     heroKnobs[2]->slider.setTooltip ("SCATTER: grains jump around the source and across the stereo field.");
     heroKnobs[3]->slider.setTooltip ("SHIMMER: some grains sparkle an octave (or a twelfth) up, some play backwards.");
     heroKnobs[4]->slider.setTooltip ("DRIFT: pitch, position and pan slowly wander. The sound breathes.");
+    heroKnobs[5]->slider.setTooltip ("CHIME: every grain rings tuned resonances. Low = soft glassy overtones, high = long metallic bells.");
     smallKnobs[5]->slider.setTooltip ("EVOLVE: after each note the granular cloud grows in over this time.");
+    osc3Knobs[1]->slider.setTooltip ("COLOR: left = darker, right = brighter");
+    for (auto& k : osc3Knobs) k->setCompact (true);
 
     // lamps
-    for (auto* l : { &osc1Lamp, &osc2Lamp, &grainLamp, &filterLamp, &distLamp, &revLamp }) addAndMakeVisible (*l);
-    osc1Lamp.fontSize = osc2Lamp.fontSize = 13.5f;
-    distLamp.fontSize = revLamp.fontSize = 12.0f;
+    for (auto* l : { &osc1Lamp, &osc2Lamp, &osc3Lamp, &grainLamp, &filterLamp }) addAndMakeVisible (*l);
+    osc1Lamp.fontSize = osc2Lamp.fontSize = osc3Lamp.fontSize = 13.5f;
     osc1LampA   = std::make_unique<ButtonAtt> (s, ParamID::osc1On,   osc1Lamp);
     osc2LampA   = std::make_unique<ButtonAtt> (s, ParamID::osc2On,   osc2Lamp);
+    osc3LampA   = std::make_unique<ButtonAtt> (s, ParamID::osc3On,   osc3Lamp);
     grainLampA  = std::make_unique<ButtonAtt> (s, ParamID::grainOn,  grainLamp);
     filterLampA = std::make_unique<ButtonAtt> (s, ParamID::filterOn, filterLamp);
-    distLampA   = std::make_unique<ButtonAtt> (s, ParamID::distOn,   distLamp);
-    revLampA    = std::make_unique<ButtonAtt> (s, ParamID::revOn,    revLamp);
 
-    for (auto* b : { &osc1Grain, &osc2Grain })
+    for (auto* b : { &osc1Grain, &osc2Grain, &osc3Grain, &delaySync, &delayPing })
     {
         b->setClickingTogglesState (true);
         addAndMakeVisible (*b);
     }
     osc1GrainA = std::make_unique<ButtonAtt> (s, ParamID::osc1Grain, osc1Grain);
     osc2GrainA = std::make_unique<ButtonAtt> (s, ParamID::osc2Grain, osc2Grain);
+    osc3GrainA = std::make_unique<ButtonAtt> (s, ParamID::osc3Grain, osc3Grain);
+    delaySyncA = std::make_unique<ButtonAtt> (s, ParamID::delaySync, delaySync);
+    delayPingA = std::make_unique<ButtonAtt> (s, ParamID::delayPing, delayPing);
     osc1Grain.setTooltip ("Send OSC 1 through the granular block");
     osc2Grain.setTooltip ("Send OSC 2 through the granular block. Off: the sample loops from POSITION");
+    osc3Grain.setTooltip ("Send OSC 3 through the granular block. Off: the noise plays clean");
+    delaySync.setTooltip ("Lock the delay time to the project tempo");
+    delayPing.setTooltip ("Echoes bounce between left and right");
 
     for (auto* b : { &polyButton, &monoButton }) addAndMakeVisible (*b);
     polyButton.onClick = [this] { if (auto* x = proc.apvts.getParameter (ParamID::mono)) x->setValueNotifyingHost (0.0f); };
@@ -1402,14 +1702,35 @@ GranulumEditor::GranulumEditor (GranulumProcessor& p)
 
     filterType.addItemList ({ "LOW PASS", "BAND PASS", "HIGH PASS" }, 1);
     distType.addItemList (Distortion::typeNames(), 1);
-    addAndMakeVisible (filterType);
-    addAndMakeVisible (distType);
+    delayDiv.addItemList (GranulumProcessor::divisionNames(), 1);
+    for (auto* c : { &filterType, &distType, &delayDiv }) addAndMakeVisible (*c);
     filterTypeA = std::make_unique<ComboAtt> (s, ParamID::ftype, filterType);
     distTypeA   = std::make_unique<ComboAtt> (s, ParamID::distType, distType);
+    delayDivA   = std::make_unique<ComboAtt> (s, ParamID::delayDiv, delayDiv);
     filterKnobs[0]->slider.setTooltip ("Cutoff follows the note you play (set at C3). The readout shows the note where it cuts.");
+
+    // effects tabs + routing digits
+    const char* fxOn[3]   = { ParamID::distOn, ParamID::delayOn, ParamID::revOn };
+    const char* fxName[3] = { "DIST", "DELAY", "REVERB" };
+    for (int i = 0; i < 3; ++i)
+    {
+        fxTabs[(size_t) i] = std::make_unique<FxTab> (proc, fxOn[i], fxName[i]);
+        fxTabs[(size_t) i]->onSelect = [this, i] { selectFx (i); };
+        addAndMakeVisible (*fxTabs[(size_t) i]);
+    }
+    const char* routeNames[4] = { "FILTER", "DISTORTION", "DELAY", "REVERB" };
+    for (int b = 0; b < 4; ++b)
+    {
+        routes[(size_t) b] = std::make_unique<RouteButtons> (proc, kRouteBlocks[b], routeNames[b]);
+        routes[(size_t) b]->onHover = [this] (int o) { setHoverOsc (o); };
+        addAndMakeVisible (*routes[(size_t) b]);
+    }
 
     addAndMakeVisible (field);
     addAndMakeVisible (harmonics);
+    addAndMakeVisible (noisePicker);
+    addAndMakeVisible (presetBar);
+    presetBar.onLoaded = [this] { lfoEditor.setLfo (selectedLfo); };
 
     for (auto* b : { &rndGrains, &rndFilter, &rndFx, &rndBars, &randomButton, &initButton, &loadButton, &chordButton }) addAndMakeVisible (*b);
     rndGrains.onClick    = [this] { proc.randomizeSection (0); };
@@ -1481,6 +1802,7 @@ GranulumEditor::GranulumEditor (GranulumProcessor& p)
     getConstrainer()->setFixedAspectRatio (1080.0 / 800.0);
     setResizeLimits (864, 640, 1620, 1200);
     setSize (1080, 800);
+    selectFx (0);
     startTimerHz (30);
     timerCallback();
 }
@@ -1503,6 +1825,29 @@ void GranulumEditor::selectLfo (int i)
             comp->setVisible (l == i);
     }
     lfoEditor.setLfo (i);
+}
+
+void GranulumEditor::selectFx (int i)
+{
+    selectedFx = i;
+    for (int t = 0; t < 3; ++t) { fxTabs[(size_t) t]->selected = (t == i); fxTabs[(size_t) t]->repaint(); }
+    for (auto& k : distKnobs)  k->setVisible (i == 0);
+    for (auto& k : delayKnobs) k->setVisible (i == 1);
+    for (auto& k : revKnobs)   k->setVisible (i == 2);
+    distType.setVisible (i == 0);
+    delaySync.setVisible (i == 1);
+    delayPing.setVisible (i == 1);
+    delayDiv.setVisible (i == 1);
+    for (int b = 1; b < 4; ++b) routes[(size_t) b]->setVisible (b - 1 == i);
+    resized();
+    repaint();
+}
+
+void GranulumEditor::setHoverOsc (int o)
+{
+    if (hoverOsc == o) return;
+    hoverOsc = o;
+    repaint();
 }
 
 void GranulumEditor::showChordPicker()
@@ -1546,17 +1891,27 @@ void GranulumEditor::timerCallback()
 
     auto dim = [] (std::initializer_list<Component*> comps, bool on) { for (auto* c : comps) c->setAlpha (on ? 1.0f : 0.38f); };
     auto dimK = [] (std::vector<std::unique_ptr<Knob>>& ks, bool on) { for (auto& k : ks) k->setAlpha (on ? 1.0f : 0.38f); };
-    const bool o1 = osc1Lamp.getToggleState(), o2 = osc2Lamp.getToggleState();
-    const bool gOn = grainLamp.getToggleState(), fOn = filterLamp.getToggleState();
-    const bool dOn = distLamp.getToggleState(), rOn = revLamp.getToggleState();
+    auto on = [&s] (const char* id) { return s.getRawParameterValue (id)->load() > 0.5f; };
+    const bool o1 = on (ParamID::osc1On), o2 = on (ParamID::osc2On), o3 = on (ParamID::osc3On);
+    const bool gOn = on (ParamID::grainOn), fOn = on (ParamID::filterOn);
+    const bool dOn = on (ParamID::distOn), lOn = on (ParamID::delayOn), rOn = on (ParamID::revOn);
     dimK (osc1Knobs, o1); dim ({ &harmonics, &chordButton, &rndBars }, o1);
     dimK (osc2Knobs, o2);
+    dimK (osc3Knobs, o3); dim ({ &noisePicker }, o3);
     dim ({ &osc1Grain }, o1 && gOn);
     dim ({ &osc2Grain }, o2 && gOn);
+    dim ({ &osc3Grain }, o3 && gOn);
     dimK (heroKnobs, gOn); dimK (smallKnobs, gOn); dim ({ &rndGrains }, gOn);
-    dimK (filterKnobs, fOn); dim ({ &filterType, &rndFilter }, fOn);
-    dimK (distKnobs, dOn); dim ({ &distType }, dOn);
-    dimK (revKnobs, rOn);
+    dimK (filterKnobs, fOn); dim ({ &filterType, &rndFilter, routes[0].get() }, fOn);
+    dimK (distKnobs, dOn);  dim ({ &distType, routes[1].get() }, dOn);
+    dimK (delayKnobs, lOn); dim ({ &delaySync, &delayPing, &delayDiv, routes[2].get() }, lOn);
+    dimK (revKnobs, rOn);   dim ({ routes[3].get() }, rOn);
+    for (auto& t : fxTabs) t->repaint();
+
+    // delay: TIME knob in free mode, division box when synced
+    const bool dsync = on (ParamID::delaySync);
+    delayKnobs[0]->setVisible (selectedFx == 1 && ! dsync);
+    delayDiv.setVisible (selectedFx == 1 && dsync);
 
     for (int l = 0; l < kNumLfos; ++l)
     {
@@ -1615,7 +1970,7 @@ void GranulumEditor::paint (Graphics& g)
         auto c = Rectangle<float> (cx - gs * 0.5f, cy - gs * 0.5f, gs, gs);
         g.setColour (Palette::deep.withAlpha (0.6f));
         g.fillEllipse (c.expanded (gs * 0.14f));
-        drawLed (g, c, i < 5 ? Palette::accent : Palette::ice, Palette::track.brighter (0.15f), lvl);
+        drawLed (g, c, i < 5 ? Palette::accent : Palette::hit, Palette::track.brighter (0.15f), lvl);
     }
 
     for (auto fr : { screenFrame, lfoFrame })
@@ -1629,7 +1984,7 @@ void GranulumEditor::paint (Graphics& g)
     g.setFont (uiFont (13.0f * sc, false, 0.12f));
     g.drawText ("GRAIN FIELD", screenFrame.getX() + (int) (18 * sc), screenFrame.getY() + (int) (8 * sc), (int) (160 * sc), (int) (26 * sc), Justification::centredLeft);
 
-    for (auto a : { osc1Area, osc2Area })
+    for (auto a : { osc1Area, osc2Area, osc3Area })
     {
         g.setColour (Colours::black.withAlpha (0.14f));
         g.fillRoundedRectangle (a.toFloat(), 10.0f);
@@ -1686,18 +2041,15 @@ void GranulumEditor::paint (Graphics& g)
     g.setColour (Colours::white.withAlpha (0.06f));
     for (auto x : { filterArea.getX() - 9, fxArea.getX() - 9 })
         g.drawVerticalLine (x, (float) grainArea.getY() + 4.0f, (float) grainArea.getBottom() - 4.0f);
-    {
-        const int y = revLamp.getY() - (int) (5 * sc);
-        g.setColour (Colours::white.withAlpha (0.06f));
-        g.drawHorizontalLine (y, (float) fxArea.getX(), (float) fxArea.getRight());
-    }
 
     g.setColour (Palette::text);
     g.setFont (uiFont (14.5f * sc, false, 0.08f));
     g.drawText ("EFFECTS", fxLabel, Justification::centredLeft, false);
     g.setColour (Palette::label);
     g.setFont (uiFont (10.5f * sc, false, 0.08f));
-    g.drawText ("TYPE", distTypeLabel, Justification::centred, false);
+    if (selectedFx == 0) g.drawText ("TYPE", distTypeLabel, Justification::centredLeft, false);
+    if (selectedFx == 1 && proc.apvts.getRawParameterValue (ParamID::delaySync)->load() > 0.5f)
+        g.drawText ("TIME", distTypeLabel, Justification::centredLeft, false);
 
     g.drawText ("SHAPE",    lfoPresetLabel, Justification::centredLeft, false);
     g.drawText ("MODE",     lfoModeLabel,   Justification::centredLeft, false);
@@ -1710,6 +2062,17 @@ void GranulumEditor::paint (Graphics& g)
 
     g.setColour (Colours::black.withAlpha (0.25f));
     g.fillRoundedRectangle (keyboard.getBounds().toFloat().expanded (3.0f), 6.0f);
+}
+
+void GranulumEditor::paintOverChildren (Graphics& g)
+{
+    // hovering a routing digit outlines that oscillator
+    if (hoverOsc < 0 || hoverOsc > 2) return;
+    const auto a = (hoverOsc == 0 ? osc1Area : hoverOsc == 1 ? osc2Area : osc3Area).toFloat().expanded (2.0f);
+    g.setColour (Palette::accent.withAlpha (0.10f));
+    g.fillRoundedRectangle (a, 11.0f);
+    g.setColour (Palette::accent.withAlpha (0.9f));
+    g.drawRoundedRectangle (a, 11.0f, 2.0f);
 }
 
 void GranulumEditor::resized()
@@ -1725,12 +2088,11 @@ void GranulumEditor::resized()
     header.removeFromRight (S (12));
     globalKnobs[1]->setBounds (header.removeFromRight (S (68)));   // output
     header.removeFromRight (S (14));
-    {
-        auto bcol = header.removeFromRight (S (128)).withSizeKeepingCentre (S (128), S (30));
-        randomButton.setBounds (bcol);
-        header.removeFromRight (S (8));
-        initButton.setBounds (header.removeFromRight (S (64)).withSizeKeepingCentre (S (64), S (30)));
-    }
+    randomButton.setBounds (header.removeFromRight (S (118)).withSizeKeepingCentre (S (118), S (30)));
+    header.removeFromRight (S (8));
+    initButton.setBounds (header.removeFromRight (S (60)).withSizeKeepingCentre (S (60), S (30)));
+    header.removeFromRight (S (16));
+    presetBar.setBounds (header.removeFromRight (S (300)).withSizeKeepingCentre (S (300), S (30)));
     titleArea = header.withTrimmedLeft (S (4));
     r.removeFromTop (S (6));
 
@@ -1745,7 +2107,7 @@ void GranulumEditor::resized()
     auto blocks = r.removeFromBottom (S (222));
     r.removeFromBottom (S (10));
 
-    // ---- screen: grain field + oscillators ----
+    // ---- screen: grain field + OSC 3 below it, OSC 1/2 on the right ----
     screenFrame = r;
     auto inside = r.reduced (S (14), S (8));
     auto top = inside.removeFromTop (S (28));
@@ -1755,7 +2117,20 @@ void GranulumEditor::resized()
     auto oscCol = inside.removeFromRight (S (500));
     oscCol.setTop (screenFrame.getY() + S (8));
     inside.removeFromRight (S (12));
+
+    osc3Area = inside.removeFromBottom (S (62));
+    inside.removeFromBottom (S (6));
     field.setBounds (inside);
+    {
+        auto a3 = osc3Area.reduced (S (8), S (4));
+        osc3Lamp.setBounds (a3.removeFromLeft (S (112)));
+        osc3Grain.setBounds (a3.removeFromRight (S (56)).withSizeKeepingCentre (S (56), S (26)));
+        a3.removeFromRight (S (4));
+        for (int i = (int) osc3Knobs.size() - 1; i >= 0; --i)
+            osc3Knobs[(size_t) i]->setBounds (a3.removeFromRight (S (56)));
+        a3.removeFromRight (S (4));
+        noisePicker.setBounds (a3.withSizeKeepingCentre (a3.getWidth(), S (40)));
+    }
 
     {
         const int knobColW = S (150);
@@ -1827,29 +2202,52 @@ void GranulumEditor::resized()
         auto f = filterArea.withTrimmedTop (S (32));
         auto row1 = f.removeFromTop ((int) (f.getHeight() * 0.64f));
         layoutRow (filterKnobs, row1);
-        filterType.setBounds (f.withSizeKeepingCentre (jmin (f.getWidth() - S (10), S (130)), S (28)));
+        auto row2 = f.withSizeKeepingCentre (f.getWidth(), S (28));
+        routes[0]->setBounds (row2.removeFromRight (S (66)));
+        row2.removeFromRight (S (6));
+        filterType.setBounds (row2);
     }
     {
-        auto e = fxArea.withTrimmedTop (S (30));
-        const int rh = (e.getHeight() - S (8)) / 2;
-        auto row1 = e.removeFromTop (rh);
+        auto e = fxArea.withTrimmedTop (S (32));
+        auto tabs = e.removeFromTop (S (28));
+        const int tw = tabs.getWidth() / 3;
+        for (auto& t : fxTabs) t->setBounds (tabs.removeFromLeft (tw).reduced (S (2), 0));
         e.removeFromTop (S (8));
-        auto row2 = e;
-        const int cw = row1.getWidth() / 4;
 
-        auto typeCol = row1.removeFromLeft (cw);
-        distLamp.setBounds (typeCol.removeFromTop (S (20)).withWidth (cw * 2));
-        typeCol.removeFromTop (S (6));
-        distTypeLabel = typeCol.removeFromTop (S (14));
-        distType.setBounds (typeCol.removeFromTop (S (28)).reduced (S (2), 0));
-        row1.removeFromTop (S (18));
-        layoutRow (distKnobs, row1);
+        auto ctl = e.removeFromTop (S (26));
+        for (int b = 1; b < 4; ++b) routes[(size_t) b]->setBounds (ctl.withTrimmedLeft (ctl.getWidth() - S (66)));
+        fxContent = e.withTrimmedTop (S (4));
 
-        auto revCol = row2.removeFromLeft (cw);
-        revLamp.setBounds (revCol.removeFromTop (S (20)).withWidth (cw * 2));
-        row2.removeFromTop (S (12));
-        revKnobs[0]->setBounds (row2.removeFromLeft (cw));
-        revKnobs[1]->setBounds (row2.removeFromLeft (cw));
+        // DIST: type + 3 knobs
+        {
+            auto row = fxContent;
+            const int cw = row.getWidth() / 4;
+            auto typeCol = row.removeFromLeft (cw);
+            distTypeLabel = typeCol.removeFromTop (S (16)).withTrimmedLeft (S (4));
+            distType.setBounds (typeCol.removeFromTop (S (28)).reduced (S (2), 0));
+            layoutRow (distKnobs, row);
+        }
+        // DELAY: sync / ping on the control line, 4 knobs (TIME swaps with the division box)
+        {
+            auto c2 = ctl.withTrimmedRight (S (72));
+            delaySync.setBounds (c2.removeFromLeft (S (58)));
+            c2.removeFromLeft (S (6));
+            delayPing.setBounds (c2.removeFromLeft (S (92)));
+            auto row = fxContent;
+            const int cw = row.getWidth() / 4;
+            delayKnobs[0]->setBounds (row.getX(), row.getY(), cw, row.getHeight());
+            delayDiv.setBounds (Rectangle<int> (row.getX(), row.getY() + S (18), cw, S (28)).reduced (S (2), 0));
+            for (int i = 1; i < 4; ++i) delayKnobs[(size_t) i]->setBounds (row.getX() + i * cw, row.getY(), cw, row.getHeight());
+        }
+        // REVERB: 2 knobs
+        {
+            auto row = fxContent;
+            const int cw = row.getWidth() / 4;
+            revKnobs[0]->setBounds (row.removeFromLeft (cw));
+            revKnobs[1]->setBounds (row.removeFromLeft (cw));
+        }
+        if (selectedFx == 1)
+            distTypeLabel = Rectangle<int> (fxContent.getX() + S (4), fxContent.getY(), fxContent.getWidth() / 4, S (16));
     }
 
     // ---- LFO strip + voice ----

@@ -1,5 +1,6 @@
 #include "PluginProcessor.h"
 #include "PluginEditor.h"
+#include "BinaryData.h"
 
 using namespace juce;
 
@@ -19,10 +20,13 @@ namespace
     const char* const kModTargetIds[kNumModTargets] =
     {
         ParamID::osc1Vol, ParamID::osc1Oct, ParamID::osc1Semi, ParamID::osc2Vol, ParamID::osc2Oct, ParamID::osc2Semi,
-        ParamID::bloom, ParamID::smear, ParamID::scatter, ParamID::shimmer, ParamID::drift,
+        ParamID::osc3Vol, ParamID::osc3Color,
+        ParamID::bloom, ParamID::smear, ParamID::scatter, ParamID::shimmer, ParamID::drift, ParamID::chime,
         ParamID::gsize, ParamID::speed, ParamID::position, ParamID::density, ParamID::gmix,
         ParamID::cutoff, ParamID::reso,
-        ParamID::distDrive, ParamID::distTone, ParamID::distMix, ParamID::revMix, ParamID::revSize,
+        ParamID::distDrive, ParamID::distTone, ParamID::distMix,
+        ParamID::delayTime, ParamID::delayFb, ParamID::delayTone, ParamID::delayMix,
+        ParamID::revMix, ParamID::revSize,
         ParamID::porta, ParamID::output,
         "lfo1Rate", "lfo2Rate"
     };
@@ -90,6 +94,73 @@ void Distortion::process (float* L, float* R, int n, int type, float drive, floa
             lp[c] = (1.0f - a) * d + a * lp[c];
             x[i] = x[i] * (1.0f - mix) + lp[c] * mix;
         }
+    }
+}
+
+// ===========================================================================
+// Delay
+
+void Delay::prepare (double sampleRate)
+{
+    sr = sampleRate;
+    const int n = (int) (sr * 2.6) + 8;
+    bufL.assign ((size_t) n, 0.0f);
+    bufR.assign ((size_t) n, 0.0f);
+    reset();
+}
+
+void Delay::reset()
+{
+    std::fill (bufL.begin(), bufL.end(), 0.0f);
+    std::fill (bufR.begin(), bufR.end(), 0.0f);
+    write = 0; curDelay = -1.0f; lpL = lpR = 0.0f;
+}
+
+void Delay::process (float* L, float* R, int n, float timeMs, float feedback, float tone, float mix, bool ping)
+{
+    const int size = (int) bufL.size();
+    if (size < 8) return;
+    const float target = jlimit (2.0f, (float) (size - 4), timeMs * 0.001f * (float) sr);
+    if (curDelay < 0.0f) curDelay = target;
+    const float glide = 1.0f - std::exp (-1.0f / (0.08f * (float) sr));   // smooth time changes (tape-like)
+    const float fc = 600.0f * std::pow (25.0f, jlimit (0.0f, 1.0f, tone));
+    const float a = std::exp (-MathConstants<float>::twoPi * jmin (fc, (float) sr * 0.45f) / (float) sr);
+    const float fb = jlimit (0.0f, 0.95f, feedback);
+
+    auto read = [size] (const std::vector<float>& b, float pos)
+    {
+        const int i0 = (int) pos;
+        const float f = pos - (float) i0;
+        const float x0 = b[(size_t) ((i0 % size + size) % size)];
+        const float x1 = b[(size_t) (((i0 + 1) % size + size) % size)];
+        return x0 + (x1 - x0) * f;
+    };
+
+    for (int i = 0; i < n; ++i)
+    {
+        curDelay += (target - curDelay) * glide;
+        const float rp = (float) write - curDelay;
+        float dl = read (bufL, rp < 0.0f ? rp + (float) size : rp);
+        float dr = read (bufR, rp < 0.0f ? rp + (float) size : rp);
+        lpL = (1.0f - a) * dl + a * lpL;
+        lpR = (1.0f - a) * dr + a * lpR;
+        dl = lpL; dr = lpR;
+
+        const float inL = L[i], inR = R[i];
+        if (ping)
+        {
+            bufL[(size_t) write] = (inL + inR) * 0.5f + dr * fb;
+            bufR[(size_t) write] = dl * fb;
+        }
+        else
+        {
+            bufL[(size_t) write] = inL + dl * fb;
+            bufR[(size_t) write] = inR + dr * fb;
+        }
+        if (++write >= size) write = 0;
+
+        L[i] = inL * (1.0f - 0.5f * mix) + dl * mix;
+        R[i] = inR * (1.0f - 0.5f * mix) + dr * mix;
     }
 }
 
@@ -193,6 +264,14 @@ AudioProcessorValueTreeState::ParameterLayout GranulumProcessor::createLayout()
     }
     ps.push_back (std::make_unique<AudioParameterChoice> (ParameterID { ParamID::chord, 1 }, "Chord", chordNames(), 0));
 
+    // OSC 3: built-in noises, no key tracking
+    ps.push_back (std::make_unique<B> (ParameterID { ParamID::osc3On, 1 }, "Osc 3 On", false));
+    ps.push_back (std::make_unique<P> (ParameterID { ParamID::osc3Vol, 1 }, "Osc 3 Volume", NormalisableRange<float> (0.0f, 1.0f), 0.5f, pct));
+    ps.push_back (std::make_unique<AudioParameterChoice> (ParameterID { ParamID::osc3Type, 1 }, "Osc 3 Noise", noiseNames(), 0));
+    ps.push_back (std::make_unique<P> (ParameterID { ParamID::osc3Color, 1 }, "Osc 3 Color", NormalisableRange<float> (-1.0f, 1.0f), 0.0f,
+                                       A().withStringFromValueFunction ([] (float v, int) { return std::abs (v) < 0.02f ? String ("NEUTRAL") : (v < 0 ? "DARK " : "BRIGHT ") + String (roundToInt (std::abs (v) * 100.0f)); })));
+    ps.push_back (std::make_unique<B> (ParameterID { ParamID::osc3Grain, 1 }, "Osc 3 Granular", true));
+
     // GRANULAR
     ps.push_back (std::make_unique<B> (ParameterID { ParamID::grainOn, 1 }, "Granular On", false));
     ps.push_back (std::make_unique<P> (ParameterID { ParamID::bloom, 1 },   "Bloom",   NormalisableRange<float> (0.0f, 1.0f), 0.0f, pct));
@@ -209,6 +288,7 @@ AudioProcessorValueTreeState::ParameterLayout GranulumProcessor::createLayout()
                                        A().withStringFromValueFunction ([] (float v, int) { return fmt (3.0f * std::pow (60.0f, v), 0, " /s"); })));
     ps.push_back (std::make_unique<P> (ParameterID { ParamID::gmix, 1 },    "Grain Mix", NormalisableRange<float> (0.0f, 1.0f), 1.0f, pct));
     ps.push_back (std::make_unique<P> (ParameterID { ParamID::evolve, 1 },  "Evolve",  skewed (0.0f, 8.0f, 1.5f), 0.0f, secFmt));
+    ps.push_back (std::make_unique<P> (ParameterID { ParamID::chime, 1 },   "Chime",   NormalisableRange<float> (0.0f, 1.0f), 0.0f, pct));
 
     // FILTER (key-tracked from C3 under the hood)
     ps.push_back (std::make_unique<B> (ParameterID { ParamID::filterOn, 1 }, "Filter On", false));
@@ -225,10 +305,27 @@ AudioProcessorValueTreeState::ParameterLayout GranulumProcessor::createLayout()
     ps.push_back (std::make_unique<P> (ParameterID { ParamID::distTone, 1 },  "Distortion Tone",  NormalisableRange<float> (0.0f, 1.0f), 0.8f, pct));
     ps.push_back (std::make_unique<P> (ParameterID { ParamID::distMix, 1 },   "Distortion Mix",   NormalisableRange<float> (0.0f, 1.0f), 1.0f, pct));
 
+    // DELAY
+    ps.push_back (std::make_unique<B> (ParameterID { ParamID::delayOn, 1 }, "Delay On", false));
+    ps.push_back (std::make_unique<P> (ParameterID { ParamID::delayTime, 1 }, "Delay Time", skewed (5.0f, 2000.0f, 300.0f), 375.0f,
+                                       A().withStringFromValueFunction ([] (float v, int) { return v < 1000.0f ? fmt (v, 0, " ms") : fmt (v / 1000.0f, 2, " s"); })));
+    ps.push_back (std::make_unique<B> (ParameterID { ParamID::delaySync, 1 }, "Delay Sync", true));
+    ps.push_back (std::make_unique<AudioParameterChoice> (ParameterID { ParamID::delayDiv, 1 }, "Delay Division", divisionNames(), 14));
+    ps.push_back (std::make_unique<P> (ParameterID { ParamID::delayFb, 1 },   "Delay Feedback", NormalisableRange<float> (0.0f, 0.95f), 0.4f, pct));
+    ps.push_back (std::make_unique<P> (ParameterID { ParamID::delayTone, 1 }, "Delay Tone",     NormalisableRange<float> (0.0f, 1.0f), 0.6f, pct));
+    ps.push_back (std::make_unique<P> (ParameterID { ParamID::delayMix, 1 },  "Delay Mix",      NormalisableRange<float> (0.0f, 1.0f), 0.3f, pct));
+    ps.push_back (std::make_unique<B> (ParameterID { ParamID::delayPing, 1 }, "Delay Ping-Pong", true));
+
     // REVERB
     ps.push_back (std::make_unique<B> (ParameterID { ParamID::revOn, 1 }, "Reverb On", false));
     ps.push_back (std::make_unique<P> (ParameterID { ParamID::revMix, 1 },  "Reverb Mix",  NormalisableRange<float> (0.0f, 1.0f), 0.3f, pct));
     ps.push_back (std::make_unique<P> (ParameterID { ParamID::revSize, 1 }, "Reverb Size", NormalisableRange<float> (0.0f, 1.0f), 0.6f, pct));
+
+    // routing: which oscillators go through each block
+    for (auto* block : kRouteBlocks)
+        for (int o = 0; o < kNumOscs; ++o)
+            ps.push_back (std::make_unique<B> (ParameterID { ParamID::route (block, o), 1 },
+                                               String (block) + " gets Osc " + String (o + 1), true));
 
     // VOICE / global
     ps.push_back (std::make_unique<B> (ParameterID { ParamID::mono, 1 }, "Mono", false));
@@ -278,6 +375,16 @@ GranulumProcessor::GranulumProcessor()
     pDistOn    = apvts.getRawParameterValue (ParamID::distOn);
     pDistType  = apvts.getRawParameterValue (ParamID::distType);
     pRevOn     = apvts.getRawParameterValue (ParamID::revOn);
+    pOsc3On    = apvts.getRawParameterValue (ParamID::osc3On);
+    pOsc3Type  = apvts.getRawParameterValue (ParamID::osc3Type);
+    pOsc3Grain = apvts.getRawParameterValue (ParamID::osc3Grain);
+    pDelayOn   = apvts.getRawParameterValue (ParamID::delayOn);
+    pDelaySync = apvts.getRawParameterValue (ParamID::delaySync);
+    pDelayDiv  = apvts.getRawParameterValue (ParamID::delayDiv);
+    pDelayPing = apvts.getRawParameterValue (ParamID::delayPing);
+    for (int b = 0; b < 4; ++b)
+        for (int o = 0; o < kNumOscs; ++o)
+            pRoute[(size_t) b][(size_t) o] = apvts.getRawParameterValue (ParamID::route (kRouteBlocks[b], o));
     pMono      = apvts.getRawParameterValue (ParamID::mono);
     for (int l = 0; l < kNumLfos; ++l)
     {
@@ -287,6 +394,7 @@ GranulumProcessor::GranulumProcessor()
         pLfoRise[(size_t) l] = apvts.getRawParameterValue (ParamID::lfo (l, "Rise"));
     }
 
+    loadNoises();
     harmonics = {};
     harmonics[0] = 1.0f;
     for (int l = 0; l < kNumLfos; ++l) setLfoPoints (l, lfoPreset (0));
@@ -309,19 +417,24 @@ void GranulumProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
 {
     engineAdd.prepare (sampleRate);
     engineSmp.prepare (sampleRate);
+    engineNoise.prepare (sampleRate);
 
     dsp::ProcessSpec spec { sampleRate, (uint32) jmax (kChunk, samplesPerBlock), 2 };
-    filter.prepare (spec); filter.reset();
-    reverb.prepare (spec); reverb.reset();
-    distortion.prepare (sampleRate);
+    for (auto& c : chains)
+    {
+        c.filter.prepare (spec); c.filter.reset();
+        c.reverb.prepare (spec); c.reverb.reset();
+        c.distortion.prepare (sampleRate);
+        c.delay.prepare (sampleRate);
+        c.quietSeconds = 1.0e9;
+    }
 
     outGain.reset (sampleRate, 0.05);
     outGain.setCurrentAndTargetValue (Decibels::decibelsToGain (apvts.getRawParameterValue (ParamID::output)->load()));
 
     const int n = jmax (kChunk, samplesPerBlock);
-    addBuf.setSize (2, n, false, true, true);
-    smpBuf.setSize (2, n, false, true, true);
-    work.setSize   (2, n, false, true, true);
+    for (auto* b : { &addBuf, &smpBuf, &noiseBuf, &work }) b->setSize (2, n, false, true, true);
+    colorLp[0] = colorLp[1] = colorHp[0] = colorHp[1] = 0.0f;
 
     heldNotes = 0;
     sinceTrigger = 1.0e9;
@@ -346,6 +459,7 @@ void GranulumProcessor::resetToInit()
     for (auto& m : mods) m.target.store (-1);
     ++modVersion;
     for (int l = 0; l < kNumLfos; ++l) setLfoPoints (l, lfoPreset (0));
+    presetName = "INIT";
 }
 
 // ===========================================================================
@@ -506,7 +620,7 @@ void GranulumProcessor::advanceLfos (int endSample, int len, const float* v)
 // ===========================================================================
 // Audio
 
-granulum::Params GranulumProcessor::voiceParams (const float* v, bool forAdd) const
+granulum::Params GranulumProcessor::voiceParams (const float* v, int osc) const
 {
     granulum::Params p;
     p.bloom    = v[mtBloom];
@@ -514,6 +628,7 @@ granulum::Params GranulumProcessor::voiceParams (const float* v, bool forAdd) co
     p.scatter  = v[mtScatter];
     p.shimmer  = v[mtShimmer];
     p.drift    = v[mtDrift];
+    p.chime    = v[mtChime];
     p.size     = v[mtSize];
     p.speed    = v[mtSpeed];
     p.position = v[mtPosition];
@@ -524,7 +639,7 @@ granulum::Params GranulumProcessor::voiceParams (const float* v, bool forAdd) co
     p.portaMs  = v[mtPorta];
 
     const bool grainBlock = pGrainOn->load() > 0.5f;
-    if (forAdd)
+    if (osc == 0)
     {
         p.transpose = v[mtOsc1Oct] * 12.0f + v[mtOsc1Semi];
         p.grainOn = grainBlock && pOsc1Grain->load() > 0.5f;
@@ -532,10 +647,17 @@ granulum::Params GranulumProcessor::voiceParams (const float* v, bool forAdd) co
         p.chordSize = (int) iv.size();
         for (size_t i = 0; i < iv.size() && i < p.chord.size(); ++i) p.chord[i] = iv[i];
     }
-    else
+    else if (osc == 1)
     {
         p.transpose = v[mtOsc2Oct] * 12.0f + v[mtOsc2Semi];
         p.grainOn = grainBlock && pOsc2Grain->load() > 0.5f;
+    }
+    else
+    {
+        p.keyTrack = false;        // noise sounds the same on every note
+        p.randomStart = true;      // stacked voices don't phase against each other
+        p.portaMs = 0.0f;
+        p.grainOn = grainBlock && pOsc3Grain->load() > 0.5f;
     }
     return p;
 }
@@ -553,15 +675,17 @@ void GranulumProcessor::noteOn (int note, float velocity)
             }
     }
     ++heldNotes;
-    engineAdd.noteOn (note, velocity, voiceParams (lastV.data(), true));
-    engineSmp.noteOn (note, velocity, voiceParams (lastV.data(), false));
+    engineAdd.noteOn   (note, velocity, voiceParams (lastV.data(), 0));
+    engineSmp.noteOn   (note, velocity, voiceParams (lastV.data(), 1));
+    engineNoise.noteOn (note, velocity, voiceParams (lastV.data(), 2));
 }
 
 void GranulumProcessor::noteOff (int note)
 {
     heldNotes = jmax (0, heldNotes - 1);
-    engineAdd.noteOff (note, voiceParams (lastV.data(), true));
-    engineSmp.noteOff (note, voiceParams (lastV.data(), false));
+    engineAdd.noteOff   (note, voiceParams (lastV.data(), 0));
+    engineSmp.noteOff   (note, voiceParams (lastV.data(), 1));
+    engineNoise.noteOff (note, voiceParams (lastV.data(), 2));
 }
 
 void GranulumProcessor::processBlock (AudioBuffer<float>& buffer, MidiBuffer& midi)
@@ -571,15 +695,12 @@ void GranulumProcessor::processBlock (AudioBuffer<float>& buffer, MidiBuffer& mi
 
     addSlot.swapOnAudioThread();
     smpSlot.swapOnAudioThread();
+    noiseSlot.swapOnAudioThread();
     keyboardState.processNextMidiBuffer (midi, 0, numSamples, true);
 
     if (work.getNumSamples() < numSamples)
-    {
-        addBuf.setSize (2, numSamples, false, false, true);
-        smpBuf.setSize (2, numSamples, false, false, true);
-        work.setSize   (2, numSamples, false, false, true);
-    }
-    addBuf.clear(); smpBuf.clear(); work.clear();
+        for (auto* b : { &addBuf, &smpBuf, &noiseBuf, &work }) b->setSize (2, numSamples, false, false, true);
+    for (auto* b : { &addBuf, &smpBuf, &noiseBuf, &work }) b->clear();
 
     hostBpm = 120.0; hostPpq = -1.0; hostPlaying = false;
     if (auto* ph = getPlayHead())
@@ -600,7 +721,11 @@ void GranulumProcessor::processBlock (AudioBuffer<float>& buffer, MidiBuffer& mi
         const auto m = meta.getMessage();
         if (m.isNoteOn())       noteOn (m.getNoteNumber(), m.getFloatVelocity());
         else if (m.isNoteOff()) noteOff (m.getNoteNumber());
-        else if (m.isAllNotesOff() || m.isAllSoundOff()) { heldNotes = 0; engineAdd.allNotesOff(); engineSmp.allNotesOff(); }
+        else if (m.isAllNotesOff() || m.isAllSoundOff())
+        {
+            heldNotes = 0;
+            engineAdd.allNotesOff(); engineSmp.allNotesOff(); engineNoise.allNotesOff();
+        }
     }
     renderRange (pos, numSamples);
     midi.clear();
@@ -625,77 +750,113 @@ void GranulumProcessor::processChunk (int from, int len)
     float v[kNumModTargets];
     computeModulated (v);
     std::copy (v, v + kNumModTargets, lastV.begin());
+    const double sr = getSampleRate() > 0 ? getSampleRate() : 44100.0;
 
-    const auto p1 = voiceParams (v, true);
-    const auto p2 = voiceParams (v, false);
-    const float g1 = pOsc1On->load() > 0.5f ? v[mtOsc1Vol] : 0.0f;
-    const float g2 = pOsc2On->load() > 0.5f ? v[mtOsc2Vol] : 0.0f;
+    const float g[kNumOscs] = { pOsc1On->load() > 0.5f ? v[mtOsc1Vol] : 0.0f,
+                                pOsc2On->load() > 0.5f ? v[mtOsc2Vol] : 0.0f,
+                                pOsc3On->load() > 0.5f ? v[mtOsc3Vol] * 1.4f : 0.0f };
+    float* lastG[kNumOscs] = { &lastG1, &lastG2, &lastG3 };
+    AudioBuffer<float>* bufs[kNumOscs] = { &addBuf, &smpBuf, &noiseBuf };
+    granulum::GrainEngine* engines[kNumOscs] = { &engineAdd, &engineSmp, &engineNoise };
+    SourceSlot* slots[kNumOscs] = { &addSlot, &smpSlot, &noiseSlot };
 
-    float* aL = addBuf.getWritePointer (0) + from;
-    float* aR = addBuf.getWritePointer (1) + from;
-    float* sL = smpBuf.getWritePointer (0) + from;
-    float* sR = smpBuf.getWritePointer (1) + from;
-    float* L  = work.getWritePointer (0) + from;
-    float* R  = work.getWritePointer (1) + from;
-
-    engineAdd.render (aL, aR, len, p1, (g1 > 0.0001f || lastG1 > 0.0001f) ? addSlot.active.get() : nullptr);
-    engineSmp.render (sL, sR, len, p2, (g2 > 0.0001f || lastG2 > 0.0001f) ? smpSlot.active.get() : nullptr);
-
-    for (int i = 0; i < len; ++i)
+    // ---- the three oscillators, each into its own buffer ----
+    for (int o = 0; o < kNumOscs; ++o)
     {
-        const float t = (float) (i + 1) / (float) len;
-        const float a = lastG1 + (g1 - lastG1) * t;
-        const float b = lastG2 + (g2 - lastG2) * t;
-        L[i] = aL[i] * a + sL[i] * b;
-        R[i] = aR[i] * a + sR[i] * b;
+        float* L = bufs[o]->getWritePointer (0) + from;
+        float* R = bufs[o]->getWritePointer (1) + from;
+        const bool audible = g[o] > 0.0001f || *lastG[o] > 0.0001f;
+        engines[o]->render (L, R, len, voiceParams (v, o), audible ? slots[o]->active.get() : nullptr);
+        for (int i = 0; i < len; ++i)
+        {
+            const float gg = *lastG[o] + (g[o] - *lastG[o]) * (float) (i + 1) / (float) len;
+            L[i] *= gg; R[i] *= gg;
+        }
+        *lastG[o] = g[o];
     }
-    lastG1 = g1;
-    lastG2 = g2;
 
-    auto block = dsp::AudioBlock<float> (work).getSubBlock ((size_t) from, (size_t) len);
-    dsp::ProcessContextReplacing<float> ctx (block);
+    // ---- OSC 3 COLOR: one knob from dark (low-pass) to bright (high-pass) ----
+    {
+        const float c = v[mtOsc3Color];
+        float* ch[2] = { noiseBuf.getWritePointer (0) + from, noiseBuf.getWritePointer (1) + from };
+        const float lpHz = c < 0.0f ? 20000.0f * std::pow (0.012f, -c) : 20000.0f;
+        const float hpHz = c > 0.0f ? 20.0f * std::pow (200.0f, c) : 5.0f;
+        const float al = std::exp (-MathConstants<float>::twoPi * jmin (lpHz, (float) sr * 0.45f) / (float) sr);
+        const float ah = std::exp (-MathConstants<float>::twoPi * hpHz / (float) sr);
+        for (int k = 0; k < 2; ++k)
+            for (int i = 0; i < len; ++i)
+            {
+                colorLp[k] = (1.0f - al) * ch[k][i] + al * colorLp[k];
+                colorHp[k] = (1.0f - ah) * colorLp[k] + ah * colorHp[k];
+                ch[k][i] = colorLp[k] - colorHp[k];
+            }
+    }
 
-    // ---- FILTER: key-tracked from C3 ----
+    // ---- shared block settings ----
     const float note = engineAdd.lastNote.load (std::memory_order_relaxed);
-    const float cut = jlimit (20.0f, (float) (getSampleRate() * 0.45), v[mtCutoff] * std::exp2 ((note - 60.0f) / 12.0f));
+    const float cut = jlimit (20.0f, (float) (sr * 0.45), v[mtCutoff] * std::exp2 ((note - 60.0f) / 12.0f));
     keyCutoff.store (cut, std::memory_order_relaxed);
-    if (pFilterOn->load() > 0.5f)
-    {
-        const int ft = (int) pFtype->load();
-        filter.setType (ft == 0 ? dsp::StateVariableTPTFilterType::lowpass
-                      : ft == 1 ? dsp::StateVariableTPTFilterType::bandpass
-                                : dsp::StateVariableTPTFilterType::highpass);
-        filter.setCutoffFrequency (cut);
-        filter.setResonance (v[mtReso]);
-        filter.process (ctx);
-    }
+    const bool filterOn = pFilterOn->load() > 0.5f, distOn = pDistOn->load() > 0.5f && v[mtDistMix] > 0.001f;
+    const bool delayOn = pDelayOn->load() > 0.5f, revOn = pRevOn->load() > 0.5f;
+    const int ft = (int) pFtype->load();
+    const float delayMs = pDelaySync->load() > 0.5f ? (float) (divisionBeats ((int) pDelayDiv->load()) * 60000.0 / hostBpm)
+                                                    : v[mtDelayTime];
+    dsp::Reverb::Parameters rp;
+    rp.roomSize = 0.3f + 0.69f * v[mtRevSize];
+    rp.damping  = 0.4f;
+    rp.wetLevel = v[mtRevMix] * 0.9f;
+    rp.dryLevel = 1.0f - v[mtRevMix] * 0.5f;
+    rp.width    = 1.0f;
 
-    // ---- DISTORTION ----
-    if (pDistOn->load() > 0.5f && v[mtDistMix] > 0.001f)
-        distortion.process (L, R, len, (int) pDistType->load(), v[mtDistDrive], v[mtDistTone], v[mtDistMix]);
+    float* outL = work.getWritePointer (0) + from;
+    float* outR = work.getWritePointer (1) + from;
 
-    // ---- REVERB ----
-    if (pRevOn->load() > 0.5f)
+    // ---- every oscillator through the blocks it is routed to ----
+    for (int o = 0; o < kNumOscs; ++o)
     {
-        const float mix = v[mtRevMix];
-        dsp::Reverb::Parameters rp;
-        rp.roomSize = 0.3f + 0.69f * v[mtRevSize];
-        rp.damping  = 0.4f;
-        rp.wetLevel = mix * 0.9f;
-        rp.dryLevel = 1.0f - mix * 0.5f;
-        rp.width    = 1.0f;
-        reverb.setParameters (rp);
-        reverb.process (ctx);
+        auto& c = chains[(size_t) o];
+        float* L = bufs[o]->getWritePointer (0) + from;
+        float* R = bufs[o]->getWritePointer (1) + from;
+
+        float peak = 0.0f;
+        for (int i = 0; i < len; ++i) peak = jmax (peak, std::abs (L[i]), std::abs (R[i]));
+        c.quietSeconds = peak > 1.0e-6f ? 0.0 : c.quietSeconds + (double) len / sr;
+        if (c.quietSeconds > 12.0) continue;          // silent for a long time: nothing left to ring out
+
+        auto routed = [this, o] (int block) { return pRoute[(size_t) block][(size_t) o]->load() > 0.5f; };
+        auto blk = dsp::AudioBlock<float> (*bufs[o]).getSubBlock ((size_t) from, (size_t) len);
+        dsp::ProcessContextReplacing<float> ctx (blk);
+
+        if (filterOn && routed (0))
+        {
+            c.filter.setType (ft == 0 ? dsp::StateVariableTPTFilterType::lowpass
+                            : ft == 1 ? dsp::StateVariableTPTFilterType::bandpass
+                                      : dsp::StateVariableTPTFilterType::highpass);
+            c.filter.setCutoffFrequency (cut);
+            c.filter.setResonance (v[mtReso]);
+            c.filter.process (ctx);
+        }
+        if (distOn && routed (1))
+            c.distortion.process (L, R, len, (int) pDistType->load(), v[mtDistDrive], v[mtDistTone], v[mtDistMix]);
+        if (delayOn && routed (2))
+            c.delay.process (L, R, len, delayMs, v[mtDelayFb], v[mtDelayTone], v[mtDelayMix], pDelayPing->load() > 0.5f);
+        if (revOn && routed (3))
+        {
+            c.reverb.setParameters (rp);
+            c.reverb.process (ctx);
+        }
+
+        for (int i = 0; i < len; ++i) { outL[i] += L[i]; outR[i] += R[i]; }
     }
 
     // ---- output ----
     outGain.setTargetValue (Decibels::decibelsToGain (v[mtOutput]));
     for (int i = 0; i < len; ++i)
     {
-        const float g = outGain.getNextValue();
-        L[i] = std::tanh (L[i] * g);
-        R[i] = std::tanh (R[i] * g);
-        blockPeak = jmax (blockPeak, std::abs (L[i]), std::abs (R[i]));
+        const float gg = outGain.getNextValue();
+        outL[i] = std::tanh (outL[i] * gg);
+        outR[i] = std::tanh (outR[i] * gg);
+        blockPeak = jmax (blockPeak, std::abs (outL[i]), std::abs (outR[i]));
     }
 
     advanceLfos (from + len, len, v);
@@ -804,6 +965,13 @@ void GranulumProcessor::timerCallback()
 {
     addSlot.collect();
     smpSlot.collect();
+    noiseSlot.collect();
+
+    if (const int t = (int) pOsc3Type->load(); t != shownNoise && t >= 0 && t < (int) noises.size())
+    {
+        shownNoise = t;
+        noiseSlot.push (noises[(size_t) t]);
+    }
 
     if (harmonicsDirty.exchange (false))
     {
@@ -817,6 +985,120 @@ void GranulumProcessor::timerCallback()
         addSlot.push (std::move (data));
     }
 }
+
+// ===========================================================================
+// OSC 3 noises (FLAC files compiled into the plugin as BinaryData)
+
+namespace
+{
+    struct NoiseRes { String file, name; };
+    const std::vector<NoiseRes>& noiseResources()
+    {
+        static const std::vector<NoiseRes> list = []
+        {
+            std::vector<NoiseRes> v;
+            for (int i = 0; i < BinaryData::namedResourceListSize; ++i)
+            {
+                const String file = BinaryData::getNamedResourceOriginalFilename (BinaryData::namedResourceList[i]);
+                if (! file.endsWithIgnoreCase (".flac")) continue;
+                // "03_TAPE_HISS.flac" -> "TAPE HISS"
+                const String name = file.upToLastOccurrenceOf (".", false, false).fromFirstOccurrenceOf ("_", false, false).replace ("_", " ");
+                v.push_back ({ BinaryData::namedResourceList[i], name });
+            }
+            std::sort (v.begin(), v.end(), [] (const NoiseRes& a, const NoiseRes& b)
+            {
+                return String (BinaryData::getNamedResourceOriginalFilename (a.file.toRawUTF8()))
+                     < String (BinaryData::getNamedResourceOriginalFilename (b.file.toRawUTF8()));
+            });
+            return v;
+        }();
+        return list;
+    }
+}
+
+const StringArray& GranulumProcessor::noiseNames()
+{
+    static const StringArray names = []
+    {
+        StringArray s;
+        for (auto& r : noiseResources()) s.add (r.name);
+        if (s.isEmpty()) s.add ("NONE");
+        return s;
+    }();
+    return names;
+}
+
+void GranulumProcessor::loadNoises()
+{
+    FlacAudioFormat flac;
+    for (auto& r : noiseResources())
+    {
+        int size = 0;
+        const char* data = BinaryData::getNamedResource (r.file.toRawUTF8(), size);
+        auto d = std::make_shared<granulum::SampleData>();
+        if (data != nullptr && size > 0)
+            if (std::unique_ptr<AudioFormatReader> reader (flac.createReaderFor (new MemoryInputStream (data, (size_t) size, false), true)); reader != nullptr)
+            {
+                const int frames = (int) reader->lengthInSamples;
+                const int chans = jlimit (1, 2, (int) reader->numChannels);
+                AudioBuffer<float> tmp (chans, frames);
+                reader->read (&tmp, 0, frames, 0, true, chans > 1);
+                d->sampleRate = reader->sampleRate;
+                d->channels.resize ((size_t) chans);
+                for (int c = 0; c < chans; ++c)
+                    d->channels[(size_t) c].assign (tmp.getReadPointer (c), tmp.getReadPointer (c) + frames);
+            }
+        noisePeaks.push_back (makePeaks (*d));
+        noises.push_back (std::move (d));
+    }
+}
+
+std::shared_ptr<const WaveformPeaks> GranulumProcessor::getNoisePeaks (int index) const
+{
+    return (index >= 0 && index < (int) noisePeaks.size()) ? noisePeaks[(size_t) index] : nullptr;
+}
+
+// ===========================================================================
+// Presets: plain XML files in Documents/Granulum/Presets
+
+File GranulumProcessor::presetFolder()
+{
+    auto f = File::getSpecialLocation (File::userDocumentsDirectory).getChildFile ("Granulum").getChildFile ("Presets");
+    f.createDirectory();
+    return f;
+}
+
+Array<File> GranulumProcessor::listPresets() const
+{
+    auto files = presetFolder().findChildFiles (File::findFiles, false, "*.gpreset");
+    files.sort();
+    return files;
+}
+
+bool GranulumProcessor::savePreset (const String& rawName)
+{
+    const auto name = File::createLegalFileName (rawName.trim());
+    if (name.isEmpty()) return false;
+    MemoryBlock mb;
+    presetName = name;
+    getStateInformation (mb);
+    if (auto xml = getXmlFromBinary (mb.getData(), (int) mb.getSize()))
+        return xml->writeTo (presetFolder().getChildFile (name + ".gpreset"));
+    return false;
+}
+
+bool GranulumProcessor::loadPreset (const File& f)
+{
+    auto xml = parseXML (f);
+    if (xml == nullptr) return false;
+    MemoryBlock mb;
+    copyXmlToBinary (*xml, mb);
+    setStateInformation (mb.getData(), (int) mb.getSize());
+    presetName = f.getFileNameWithoutExtension();
+    return true;
+}
+
+String GranulumProcessor::getPresetName() const { return presetName; }
 
 // ===========================================================================
 // Random
@@ -852,6 +1134,7 @@ void GranulumProcessor::randomizeSection (int section)
         set (ParamID::density,  range (0.25f, 0.8f));
         set (ParamID::speed,    r.nextFloat() < 0.25f ? 0.0f : range (-0.5f, 1.2f));
         set (ParamID::position, range (0.0f, 0.8f));
+        set (ParamID::chime,    maybe (0.4f, range (0.15f, 0.8f)));
     }
     else if (section == 1)
     {
@@ -868,6 +1151,10 @@ void GranulumProcessor::randomizeSection (int section)
         set (ParamID::distMix,   range (0.4f, 1.0f));
         set (ParamID::revMix,    range (0.1f, 0.5f));
         set (ParamID::revSize,   range (0.3f, 0.95f));
+        set (ParamID::delayDiv,  (float) (3 + r.nextInt (12)));
+        set (ParamID::delayFb,   range (0.2f, 0.7f));
+        set (ParamID::delayTone, range (0.3f, 0.9f));
+        set (ParamID::delayMix,  range (0.15f, 0.45f));
     }
     else
     {
@@ -895,6 +1182,7 @@ void GranulumProcessor::getStateInformation (MemoryBlock& destData)
     StringArray hs;
     for (float h : harmonics) hs.add (String (h, 4));
     state.setProperty ("harmonics", hs.joinIntoString (","), nullptr);
+    state.setProperty ("presetName", presetName, nullptr);
 
     StringArray ms;
     for (auto& m : mods)
@@ -924,7 +1212,9 @@ void GranulumProcessor::setStateInformation (const void* data, int sizeInBytes)
     const auto ms = StringArray::fromTokens (state.getProperty ("mods").toString(), ";", "");
     std::array<String, kNumLfos> shapes;
     for (int l = 0; l < kNumLfos; ++l) shapes[(size_t) l] = state.getProperty ("lfoShape" + String (l + 1)).toString();
+    const String pn = state.getProperty ("presetName", "INIT").toString();
     apvts.replaceState (state);
+    presetName = pn;
 
     if (hs.size() == granulum::kNumHarmonics)
     {

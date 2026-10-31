@@ -100,6 +100,29 @@ int main()
     printf ("evolve width start %.1f end %.1f\n", dStart, dEnd);
     check (dEnd > dStart * 5, "EVOLVE blooms over time");
 
+    // CHIME: grains of plain noise ring at the note's harmonics (A3 = 220 Hz)
+    SampleData noise; noise.sampleRate = 44100.0; noise.channels.assign (1, std::vector<float> (44100 * 2));
+    { uint32_t sd = 1; for (auto& x : noise.channels[0]) { sd = sd * 1664525u + 1013904223u; x = ((float) (sd >> 8) / 16777216.0f * 2.0f - 1.0f) * 0.3f; } }
+    Params cp; cp.grainOn = true; cp.keyTrack = false; cp.randomStart = true;
+    auto c0 = run (cp, { { 0, 57 }, { 1.2, -57 } }, 1.2, noise);
+    cp.keyTrack = true; cp.chime = 0.45f;
+    auto c1 = run (cp, { { 0, 57 }, { 1.2, -57 } }, 1.2, noise);
+    const double h1 = dftMag (c1.L, 220.0, 0.3, 1.1), h2 = dftMag (c1.L, 440.0, 0.3, 1.1), between = dftMag (c1.L, 330.0, 0.3, 1.1);
+    printf ("chime 0.45: 220 %.0f  440 %.0f  330 %.0f\n", h1, h2, between);
+    check (h1 > between * 4 && h2 > between * 2, "CHIME rings harmonics of the note");
+    cp.chime = 1.0f;
+    auto c2 = run (cp, { { 0, 57 }, { 1.2, -57 } }, 3.0, noise);
+    const double bell = dftMag (c2.L, 220.0 * 2.756, 0.3, 1.1), harm3 = dftMag (c2.L, 660.0, 0.3, 1.1);
+    const double lv = rms (c2.L, 0.3, 1.1) / rms (c0.L, 0.3, 1.1);
+    printf ("chime 1.0: bell partial %.0f vs 3rd harmonic %.0f, level x%.2f, tail %.4f, left %d\n", bell, harm3, lv, rms (c2.L, 1.3, 1.6), c2.left);
+    check (c2.finite && bell > harm3 * 2 && lv > 0.5 && lv < 4.0 && rms (c2.L, 1.3, 1.6) > 1e-4 && c2.left == 0, "CHIME at max: bell, sane level, rings out, ends");
+
+    // keyTrack off: low and high notes play the source at the same pitch
+    Params kt = clean; kt.keyTrack = false;
+    auto k1 = run (kt, { { 0, 40 }, { 0.8, -40 } }, 1.0, sine);
+    auto k2 = run (kt, { { 0, 70 }, { 0.8, -70 } }, 1.0, sine);
+    check (std::abs (freqAt (k1.L, 0.2, 0.7) - freqAt (k2.L, 0.2, 0.7)) < 1.0, "keyTrack off ignores the note");
+
     printf (ok ? "ALL OK\n" : "FAILED\n");
     return ok ? 0 : 1;
 }

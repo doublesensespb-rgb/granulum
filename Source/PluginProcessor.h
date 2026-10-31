@@ -20,6 +20,12 @@ namespace ParamID
     inline constexpr const char* osc2Oct   = "osc2Oct";
     inline constexpr const char* osc2Semi  = "osc2Semi";
     inline constexpr const char* osc2Grain = "osc2Grain";
+    // OSC 3 (NOISE, built-in)
+    inline constexpr const char* osc3On    = "osc3On";
+    inline constexpr const char* osc3Vol   = "osc3Vol";
+    inline constexpr const char* osc3Type  = "osc3Type";
+    inline constexpr const char* osc3Color = "osc3Color";
+    inline constexpr const char* osc3Grain = "osc3Grain";
     // GRANULAR macros
     inline constexpr const char* grainOn   = "grainOn";
     inline constexpr const char* bloom     = "bloom";
@@ -33,6 +39,7 @@ namespace ParamID
     inline constexpr const char* density   = "density";
     inline constexpr const char* gmix      = "gmix";
     inline constexpr const char* evolve    = "evolve";
+    inline constexpr const char* chime     = "chime";
     // FILTER
     inline constexpr const char* filterOn  = "filterOn";
     inline constexpr const char* cutoff    = "cutoff";
@@ -44,6 +51,15 @@ namespace ParamID
     inline constexpr const char* distDrive = "distDrive";
     inline constexpr const char* distTone  = "distTone";
     inline constexpr const char* distMix   = "distMix";
+    // DELAY
+    inline constexpr const char* delayOn   = "delayOn";
+    inline constexpr const char* delayTime = "delayTime";
+    inline constexpr const char* delaySync = "delaySync";
+    inline constexpr const char* delayDiv  = "delayDiv";
+    inline constexpr const char* delayFb   = "delayFb";
+    inline constexpr const char* delayTone = "delayTone";
+    inline constexpr const char* delayMix  = "delayMix";
+    inline constexpr const char* delayPing = "delayPing";
     // REVERB
     inline constexpr const char* revOn     = "revOn";
     inline constexpr const char* revMix    = "revMix";
@@ -54,19 +70,23 @@ namespace ParamID
     inline constexpr const char* output    = "output";
     // LFOs: "lfo1Rate", "lfo1Sync", "lfo1Div", "lfo1Mode", "lfo1Rise" ...
     inline juce::String lfo (int index, const char* what) { return "lfo" + juce::String (index + 1) + what; }
+    // which oscillators go through a block: "filterR1", "distR2", "delayR3", "revR1" ...
+    inline juce::String route (const char* block, int osc) { return juce::String (block) + "R" + juce::String (osc + 1); }
 }
 
 static constexpr int kNumLfos = 2;
 static constexpr int kMaxMods = 48;
 static constexpr int kLfoTable = 512;
 static constexpr int kLfoPoints = 4;
+static constexpr int kNumOscs = 3;
+static constexpr const char* kRouteBlocks[4] = { "filter", "dist", "delay", "rev" };
 
 enum ModTarget
 {
-    mtOsc1Vol, mtOsc1Oct, mtOsc1Semi, mtOsc2Vol, mtOsc2Oct, mtOsc2Semi,
-    mtBloom, mtSmear, mtScatter, mtShimmer, mtDrift, mtSize, mtSpeed, mtPosition, mtDensity, mtGmix,
+    mtOsc1Vol, mtOsc1Oct, mtOsc1Semi, mtOsc2Vol, mtOsc2Oct, mtOsc2Semi, mtOsc3Vol, mtOsc3Color,
+    mtBloom, mtSmear, mtScatter, mtShimmer, mtDrift, mtChime, mtSize, mtSpeed, mtPosition, mtDensity, mtGmix,
     mtCutoff, mtReso,
-    mtDistDrive, mtDistTone, mtDistMix, mtRevMix, mtRevSize,
+    mtDistDrive, mtDistTone, mtDistMix, mtDelayTime, mtDelayFb, mtDelayTone, mtDelayMix, mtRevMix, mtRevSize,
     mtPorta, mtOutput,
     mtLfo1Rate, mtLfo2Rate,
     kNumModTargets
@@ -123,6 +143,30 @@ private:
     int count[2] {};
 };
 
+// Stereo delay with tone filter in the feedback loop and optional ping-pong
+class Delay
+{
+public:
+    void prepare (double sampleRate);
+    void reset();
+    void process (float* L, float* R, int n, float timeMs, float feedback, float tone, float mix, bool ping);
+private:
+    std::vector<float> bufL, bufR;
+    int write = 0;
+    double sr = 44100.0;
+    float curDelay = -1.0f, lpL = 0.0f, lpR = 0.0f;
+};
+
+// One effect chain per oscillator, so every block can choose which oscillators it processes
+struct FxChain
+{
+    juce::dsp::StateVariableTPTFilter<float> filter;
+    Distortion distortion;
+    Delay delay;
+    juce::dsp::Reverb reverb;
+    double quietSeconds = 1.0e9;
+};
+
 class GranulumProcessor final : public juce::AudioProcessor,
                                 private juce::Timer
 {
@@ -163,6 +207,17 @@ public:
     static bool isSupportedAudioFile (const juce::String& path);
     granulum::GrainEngine& vizEngine() { return showingSample() ? engineSmp : engineAdd; }
 
+    // ---- OSC 3 noises (built in) ----
+    static const juce::StringArray& noiseNames();
+    std::shared_ptr<const WaveformPeaks> getNoisePeaks (int index) const;
+
+    // ---- presets ----
+    static juce::File presetFolder();
+    juce::Array<juce::File> listPresets() const;
+    bool savePreset (const juce::String& name);
+    bool loadPreset (const juce::File&);
+    juce::String getPresetName() const;
+
     std::array<float, granulum::kNumHarmonics> getHarmonics() const { return harmonics; }
     void setHarmonics (const std::array<float, granulum::kNumHarmonics>&);
     void rebuildNow() { timerCallback(); }
@@ -202,7 +257,7 @@ public:
     std::atomic<float> keyCutoff { 20000.0f };
 
     juce::AudioProcessorValueTreeState apvts;
-    granulum::GrainEngine engineAdd, engineSmp;
+    granulum::GrainEngine engineAdd, engineSmp, engineNoise;
     juce::MidiKeyboardState keyboardState;
 
 private:
@@ -211,7 +266,8 @@ private:
     void renderRange (int from, int to);
     void processChunk (int from, int len);
     void computeModulated (float* values);
-    granulum::Params voiceParams (const float* v, bool forAdd) const;
+    granulum::Params voiceParams (const float* v, int osc) const;
+    void loadNoises();
     void advanceLfos (int endSample, int len, const float* values);
     void noteOn (int note, float velocity);
     void noteOff (int note);
@@ -220,7 +276,11 @@ private:
 
     juce::AudioFormatManager formatManager;
 
-    SourceSlot addSlot, smpSlot;
+    SourceSlot addSlot, smpSlot, noiseSlot;
+    std::vector<std::shared_ptr<granulum::SampleData>> noises;
+    std::vector<std::shared_ptr<const WaveformPeaks>> noisePeaks;
+    int shownNoise = -1;
+    juce::String presetName { "INIT" };
     std::array<float, granulum::kNumHarmonics> harmonics {};
     std::atomic<bool> harmonicsDirty { true };
     std::atomic<bool> sampleLoaded { false };
@@ -253,12 +313,11 @@ private:
     double hostBpm = 120.0, hostPpq = -1.0;
     bool hostPlaying = false;
 
-    juce::dsp::StateVariableTPTFilter<float> filter;
-    Distortion distortion;
-    juce::dsp::Reverb reverb;
+    std::array<FxChain, kNumOscs> chains;
     juce::SmoothedValue<float> outGain;
-    juce::AudioBuffer<float> addBuf, smpBuf, work;
-    float lastG1 = 0.0f, lastG2 = 0.0f, blockPeak = 0.0f;
+    juce::AudioBuffer<float> addBuf, smpBuf, noiseBuf, work;
+    float lastG1 = 0.0f, lastG2 = 0.0f, lastG3 = 0.0f, blockPeak = 0.0f;
+    float colorLp[2] {}, colorHp[2] {};
 
     std::atomic<float>* pOsc1On {};   std::atomic<float>* pOsc2On {};
     std::atomic<float>* pOsc1Grain {}; std::atomic<float>* pOsc2Grain {};
@@ -267,6 +326,9 @@ private:
     std::atomic<float>* pFilterOn {}; std::atomic<float>* pFtype {};
     std::atomic<float>* pDistOn {};   std::atomic<float>* pDistType {};
     std::atomic<float>* pRevOn {};
+    std::atomic<float>* pOsc3On {}; std::atomic<float>* pOsc3Type {}; std::atomic<float>* pOsc3Grain {};
+    std::atomic<float>* pDelayOn {}; std::atomic<float>* pDelaySync {}; std::atomic<float>* pDelayDiv {}; std::atomic<float>* pDelayPing {};
+    std::array<std::array<std::atomic<float>*, kNumOscs>, 4> pRoute {};
     std::atomic<float>* pMono {};
     std::array<std::atomic<float>*, kNumLfos> pLfoSync {}, pLfoDiv {}, pLfoMode {}, pLfoRise {};
 

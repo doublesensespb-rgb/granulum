@@ -88,10 +88,13 @@ struct Params
     float density  = 0.4f;
     float mix      = 1.0f;
     float evolve   = 0.0f;   // seconds, 0 = off
+    float chime    = 0.0f;   // CHIME: grains ring a bank of resonators tuned to the note
     bool  grainOn  = false;
 
     // oscillator
     float transpose = 0.0f;  // semitones
+    bool  keyTrack  = true;  // false: every note plays the source at its original pitch (noise)
+    bool  randomStart = false; // voices start at random places in the source (noise)
     std::array<int, 5> chord { 0, 0, 0, 0, 0 };
     int chordSize = 1;
 
@@ -132,6 +135,11 @@ struct GrainEvent
     float len = 0.0f;    // seconds
     uint8_t kind = 0;
 };
+
+// CHIME resonator bank: ratios morph from harmonic (glassy) to struck-bar (bell) partials
+static constexpr int kChimeModes = 6;
+static constexpr float kChimeHarm[kChimeModes] = { 1.0f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f };
+static constexpr float kChimeBell[kChimeModes] = { 1.0f, 2.756f, 5.404f, 8.933f, 13.34f, 18.64f };
 
 class GrainEngine
 {
@@ -274,11 +282,34 @@ public:
         const float* srcR     = hasSample ? (sample->numChannels() > 1 ? sample->channels[1].data() : srcL) : nullptr;
 
         const float attackInc  = 1.0f / (0.003f * (float) sr);
-        const float releaseDec = 1.0f / (0.15f * (float) sr);
+        const float releaseDec = 1.0f / ((0.15f + (p.grainOn ? 1.2f * p.chime * p.chime : 0.0f)) * (float) sr);
+
+        const bool chimeOn = p.grainOn && p.chime > 0.001f;
+        const float chimeT   = std::clamp ((p.chime - 0.55f) / 0.45f, 0.0f, 1.0f); // harmonic -> bell
+        const float chimeT60 = 0.08f + 2.2f * p.chime * p.chime;                    // ring time (s)
+        const float chimeAmt = 2.2f * std::pow (p.chime, 1.3f);
 
         for (auto& v : voices)
         {
             if (! v.active) continue;
+
+            if (chimeOn)
+            {
+                const double noteNow = (p.keyTrack ? v.curNote : 60.0) + (double) p.transpose;
+                const double f0 = 261.6255653 * std::exp2 ((noteNow - 60.0) / 12.0);
+                for (int m = 0; m < kChimeModes; ++m)
+                {
+                    const double ratio = kChimeHarm[m] + (kChimeBell[m] - kChimeHarm[m]) * chimeT;
+                    const double f = f0 * ratio;
+                    auto& c = v.chimeCoef[(size_t) m];
+                    if (f > sr * 0.45 || f < 20.0) { c.gain = 0.0f; continue; }
+                    const double t60 = chimeT60 / std::pow (ratio, 0.35);
+                    const double r = std::exp (-6.907755 / (t60 * sr));
+                    c.a1 = (float) (2.0 * r * std::cos (2.0 * kPi * f / sr));
+                    c.a2 = (float) (-r * r);
+                    c.gain = (float) ((1.0 - r) * 2.0 / std::pow ((double) (m + 1), 0.15));
+                }
+            }
 
             for (int i = 0; i < numSamples; ++i)
             {
@@ -318,7 +349,7 @@ public:
 
                 if (! hasSample) continue;
 
-                const double semis = v.curNote - 60.0 + (double) p.transpose;
+                const double semis = (p.keyTrack ? v.curNote - 60.0 : 0.0) + (double) p.transpose;
                 const double ratio = std::exp2 (semis / 12.0) * fileRate;
                 const float  amp   = v.env * v.velocity * v.chordGain;
 
@@ -365,8 +396,26 @@ public:
 
                 const float wet = p.mix * ev * ev;
                 const float ga = v.norm * 1.2f;
-                outL[i] += (dl * 0.85f * (1.0f - wet) + sumL * ga * wet) * amp;
-                outR[i] += (dr * 0.85f * (1.0f - wet) + sumR * ga * wet) * amp;
+                float gl = sumL * ga, gr = sumR * ga;
+                if (chimeOn)
+                {
+                    float rl = 0.0f, rr = 0.0f;
+                    for (int m = 0; m < kChimeModes; ++m)
+                    {
+                        const auto& c = v.chimeCoef[(size_t) m];
+                        if (c.gain == 0.0f) continue;
+                        auto& st = v.chimeState[(size_t) m];
+                        const float yl = c.gain * gl + c.a1 * st[0] + c.a2 * st[1];
+                        const float yr = c.gain * gr + c.a1 * st[2] + c.a2 * st[3];
+                        st[1] = st[0]; st[0] = yl;
+                        st[3] = st[2]; st[2] = yr;
+                        rl += yl; rr += yr;
+                    }
+                    gl += rl * chimeAmt;
+                    gr += rr * chimeAmt;
+                }
+                outL[i] += (dl * 0.85f * (1.0f - wet) + gl * wet) * amp;
+                outR[i] += (dr * 0.85f * (1.0f - wet) + gr * wet) * amp;
             }
         }
 
@@ -409,6 +458,9 @@ private:
         uint64_t startStamp = 0;
         float    walk[4] {}, walkTarget[4] {};
         int      walkCount[4] {};
+        struct ChimeCoef { float a1 = 0, a2 = 0, gain = 0; };
+        std::array<ChimeCoef, kChimeModes> chimeCoef {};
+        std::array<std::array<float, 4>, kChimeModes> chimeState {};
         std::array<Grain, kGrainsPerVoice> grains {};
     };
 
@@ -419,7 +471,17 @@ private:
         v.stage = Stage::Attack; v.startStamp = ++stamp;
         v.travel = 0.0; v.nextGrainIn = 0.0; v.age = 0;
         v.playPos = (double) std::clamp (p.position, 0.0f, 0.9999f) * (double) lastNumFrames;
-        if (fresh) { v.env = 0.0f; for (auto& g : v.grains) g.active = false; }
+        if (p.randomStart)
+        {
+            v.travel = rng.uni();
+            v.playPos = std::fmod (v.playPos + v.travel * (double) lastNumFrames, (double) lastNumFrames);
+        }
+        if (fresh)
+        {
+            v.env = 0.0f;
+            for (auto& g : v.grains) g.active = false;
+            for (auto& st : v.chimeState) st = {};
+        }
     }
 
     void startGlide (Voice& v, double from, double to, const Params& p)

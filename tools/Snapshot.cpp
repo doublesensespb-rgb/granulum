@@ -123,6 +123,10 @@ int main (int argc, char** argv)
     setP (ParamID::filterOn, 1.0f);
     setP (ParamID::cutoff, 1800.0f);
     setP (ParamID::revOn, 1.0f);
+    setP (ParamID::chime, 0.55f);
+    setP (ParamID::delayOn, 1.0f);
+    setP (ParamID::route ("delay", 0).toRawUTF8(), 0.0f);
+    ed->selectFx (1);
     p.setModulation (GranulumProcessor::modIndexOf (ParamID::cutoff), 0, 0.3f);
     p.setModulation (GranulumProcessor::modIndexOf (ParamID::smear), 1, 0.25f);
     p.setLfoPoints (0, GranulumProcessor::lfoPreset (0));
@@ -141,6 +145,11 @@ int main (int argc, char** argv)
     setP (ParamID::shimmer, 0.7f);
     setP (ParamID::position, 0.2f);
     setP (ParamID::distOn, 1.0f);
+    setP (ParamID::osc3On, 1.0f);
+    setP (ParamID::osc3Type, 7.0f);     // PAPER
+    setP (ParamID::osc3Color, 0.3f);
+    setP (ParamID::route ("dist", 2).toRawUTF8(), 0.0f);
+    ed->selectFx (0);
     p.rebuildNow();
     run (p, ed, 4);
     p.keyboardState.noteOn (1, 52, 0.9f);
