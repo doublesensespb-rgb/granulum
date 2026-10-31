@@ -1683,11 +1683,9 @@ FxTab::FxTab (GranulumProcessor& p, const char* onParam, const String& n)
     setTooltip ("Click the light to switch " + n + " on/off, click the name to edit it");
 }
 
-void FxTab::paint (Graphics& g)
+static void paintFxTabFilled (Graphics& g, Rectangle<int> bounds, bool on, bool selected, bool over, const String& name)
 {
-    auto r = getLocalBounds().toFloat().reduced (1.5f);
-    const bool on = param->getValue() > 0.5f;
-    const bool over = isMouseOver();
+    auto r = bounds.toFloat().reduced (1.5f);
     if (selected)
     {
         g.setColour (Palette::accent.withAlpha (0.22f));
@@ -1719,6 +1717,86 @@ void FxTab::paint (Graphics& g)
     g.setColour (selected ? Palette::screen : (on ? Palette::text : Palette::textDim));
     g.setFont (uiFont (13.5f, true, 0.1f));
     g.drawText (name, r.withTrimmedLeft (26.0f).withTrimmedRight (4.0f), Justification::centred, false);
+}
+
+void FxTab::paint (Graphics& g)
+{
+    const bool on = param->getValue() > 0.5f;
+    const bool over = isMouseOver();
+    auto r = getLocalBounds().toFloat();
+
+    if (style == 0) { paintFxTabFilled (g, getLocalBounds(), on, selected, over, name); return; }
+
+    // the on/off light: small, calm, glows only when the effect runs
+    auto lamp = [&] (Point<float> c)
+    {
+        const auto led = Rectangle<float> (7.0f, 7.0f).withCentre (c);
+        if (on)
+        {
+            g.setColour (Palette::accent.withAlpha (0.28f));
+            g.fillEllipse (led.expanded (3.0f));
+            g.setColour (Palette::accent.brighter (0.2f));
+            g.fillEllipse (led);
+        }
+        else
+        {
+            g.setColour (Palette::textDim.withAlpha (0.5f));
+            g.drawEllipse (led.reduced (0.3f), 1.1f);
+        }
+    };
+
+    const auto font = uiFont (12.5f, selected, 0.16f);
+    const float tw = (float) GlyphArrangement::getStringWidthInt (font, name);
+    const float groupW = tw + 15.0f;
+    const float gx = r.getCentreX() - groupW * 0.5f;
+
+    if (style == 1)
+    {
+        // text tabs: bright name + thin accent underline on the selected one
+        lamp ({ gx + 3.5f, r.getCentreY() - 1.0f });
+        g.setFont (font);
+        g.setColour (selected ? Palette::text : Palette::textDim.withAlpha (over ? 0.95f : 0.7f));
+        g.drawText (name, Rectangle<float> (gx + 15.0f, r.getY(), tw + 2.0f, r.getHeight() - 2.0f), Justification::centredLeft, false);
+        if (selected)
+        {
+            g.setColour (Palette::accent);
+            g.fillRoundedRectangle (Rectangle<float> (gx, r.getBottom() - 3.0f, groupW, 2.0f), 1.0f);
+        }
+        else
+        {
+            g.setColour (Colours::white.withAlpha (0.06f));
+            g.fillRect (Rectangle<float> (r.getX() + 6.0f, r.getBottom() - 1.5f, r.getWidth() - 12.0f, 1.0f));
+        }
+        return;
+    }
+
+    if (style == 2)
+    {
+        // soft segmented: the selected segment is a slightly lighter, quiet plate
+        if (selected)
+        {
+            g.setColour (Palette::buttonHi.withAlpha (0.55f));
+            g.fillRoundedRectangle (r.reduced (3.0f), 6.0f);
+            g.setColour (Colours::white.withAlpha (0.08f));
+            g.drawRoundedRectangle (r.reduced (3.5f), 6.0f, 1.0f);
+        }
+        lamp ({ gx + 3.5f, r.getCentreY() });
+        g.setFont (font);
+        g.setColour (selected ? Palette::text : Palette::textDim.withAlpha (over ? 0.95f : 0.7f));
+        g.drawText (name, Rectangle<float> (gx + 15.0f, r.getY(), tw + 2.0f, r.getHeight()), Justification::centredLeft, false);
+        return;
+    }
+
+    // style 3: outline pills
+    auto pr = r.reduced (2.5f, 3.0f);
+    g.setColour (selected ? Palette::accent.withAlpha (0.10f) : Colours::transparentBlack);
+    g.fillRoundedRectangle (pr, pr.getHeight() * 0.5f);
+    g.setColour (selected ? Palette::accent.withAlpha (0.85f) : Colours::white.withAlpha (over ? 0.18f : 0.10f));
+    g.drawRoundedRectangle (pr, pr.getHeight() * 0.5f, 1.0f);
+    lamp ({ gx + 3.5f, r.getCentreY() });
+    g.setFont (font);
+    g.setColour (selected ? Palette::accent.brighter (0.3f) : Palette::textDim.withAlpha (over ? 0.95f : 0.75f));
+    g.drawText (name, Rectangle<float> (gx + 15.0f, r.getY(), tw + 2.0f, r.getHeight()), Justification::centredLeft, false);
 }
 
 void FxTab::mouseDown (const MouseEvent& e)
@@ -1972,6 +2050,7 @@ GranulumEditor::GranulumEditor (GranulumProcessor& p)
     add (delayKnobs, ParamID::delayMix,  "Mix",      Knob::Size::Small);
     add (revKnobs,   ParamID::revMix,    "Mix",      Knob::Size::Small);
     add (revKnobs,   ParamID::revSize,   "Size",     Knob::Size::Small);
+    add (revKnobs,   ParamID::revLowCut, "Low Cut",  Knob::Size::Small);
 
     add (globalKnobs, ParamID::porta,  "Porta",  Knob::Size::Small);
     add (globalKnobs, ParamID::output, "Output", Knob::Size::Small);
@@ -2340,6 +2419,14 @@ void GranulumEditor::paint (Graphics& g)
     g.setColour (Palette::text);
     g.setFont (uiFont (14.5f * sc, false, 0.08f));
     g.drawText ("EFFECTS", fxLabel, Justification::centredLeft, false);
+    if (FxTab::style == 2 && fxTabs[0] != nullptr)
+    {
+        auto seg = fxTabs[0]->getBounds().getUnion (fxTabs[2]->getBounds()).toFloat();
+        g.setColour (Palette::screen.withAlpha (0.7f));
+        g.fillRoundedRectangle (seg, 8.0f);
+        g.setColour (Colours::white.withAlpha (0.05f));
+        g.drawRoundedRectangle (seg.reduced (0.5f), 8.0f, 1.0f);
+    }
     g.setColour (Palette::label);
     g.setFont (uiFont (10.5f * sc, false, 0.08f));
     if (selectedFx == 0) g.drawText ("TYPE", distTypeLabel, Justification::centredLeft, false);
@@ -2536,8 +2623,7 @@ void GranulumEditor::resized()
         {
             auto row = fxContent;
             const int cw = row.getWidth() / 4;
-            revKnobs[0]->setBounds (row.removeFromLeft (cw));
-            revKnobs[1]->setBounds (row.removeFromLeft (cw));
+            for (auto& k : revKnobs) k->setBounds (row.removeFromLeft (cw));
         }
         if (selectedFx == 1)
             distTypeLabel = Rectangle<int> (fxContent.getX() + S (4), fxContent.getY(), fxContent.getWidth() / 4, S (16));

@@ -26,7 +26,7 @@ namespace
         ParamID::cutoff, ParamID::reso,
         ParamID::distDrive, ParamID::distTone, ParamID::distMix,
         ParamID::delayTime, ParamID::delayFb, ParamID::delayTone, ParamID::delayMix,
-        ParamID::revMix, ParamID::revSize,
+        ParamID::revMix, ParamID::revSize, ParamID::revLowCut,
         ParamID::porta, ParamID::output,
         "lfo1Rate", "lfo2Rate", "lfo3Rate"
     };
@@ -320,6 +320,8 @@ AudioProcessorValueTreeState::ParameterLayout GranulumProcessor::createLayout()
     ps.push_back (std::make_unique<B> (ParameterID { ParamID::revOn, 1 }, "Reverb On", false));
     ps.push_back (std::make_unique<P> (ParameterID { ParamID::revMix, 1 },  "Reverb Mix",  NormalisableRange<float> (0.0f, 1.0f), 0.3f, pct));
     ps.push_back (std::make_unique<P> (ParameterID { ParamID::revSize, 1 }, "Reverb Size", NormalisableRange<float> (0.0f, 1.0f), 0.6f, pct));
+    ps.push_back (std::make_unique<P> (ParameterID { ParamID::revLowCut, 1 }, "Reverb Low Cut", skewed (20.0f, 1000.0f, 150.0f), 150.0f,
+                                       A().withStringFromValueFunction ([] (float v, int) { return v < 22.0f ? String ("OFF") : fmt (v, 0, " Hz"); })));
 
     // routing: which oscillators go through each block
     for (auto* block : kRouteBlocks)
@@ -425,6 +427,9 @@ void GranulumProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
     {
         c.filter.prepare (spec); c.filter.reset();
         c.reverb.prepare (spec); c.reverb.reset();
+        c.revCut.prepare (spec); c.revCut.reset();
+        c.revCut.setType (dsp::StateVariableTPTFilterType::highpass);
+        c.revCut.setResonance (0.6f);
         c.distortion.prepare (sampleRate);
         c.delay.prepare (sampleRate);
         c.quietSeconds = 1.0e9;
@@ -434,7 +439,7 @@ void GranulumProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
     outGain.setCurrentAndTargetValue (Decibels::decibelsToGain (apvts.getRawParameterValue (ParamID::output)->load()));
 
     const int n = jmax (kChunk, samplesPerBlock);
-    for (auto* b : { &addBuf, &smpBuf, &noiseBuf, &work }) b->setSize (2, n, false, true, true);
+    for (auto* b : { &addBuf, &smpBuf, &noiseBuf, &work, &wetBuf }) b->setSize (2, n, false, true, true);
     colorLp[0] = colorLp[1] = colorHp[0] = colorHp[1] = 0.0f;
 
     heldNotes = 0;
@@ -704,7 +709,7 @@ void GranulumProcessor::processBlock (AudioBuffer<float>& buffer, MidiBuffer& mi
     keyboardState.processNextMidiBuffer (midi, 0, numSamples, true);
 
     if (work.getNumSamples() < numSamples)
-        for (auto* b : { &addBuf, &smpBuf, &noiseBuf, &work }) b->setSize (2, numSamples, false, false, true);
+        for (auto* b : { &addBuf, &smpBuf, &noiseBuf, &work, &wetBuf }) b->setSize (2, numSamples, false, false, true);
     for (auto* b : { &addBuf, &smpBuf, &noiseBuf, &work }) b->clear();
 
     hostBpm = 120.0; hostPpq = -1.0; hostPlaying = false;
@@ -818,7 +823,9 @@ void GranulumProcessor::processChunk (int from, int len)
     rp.roomSize = 0.3f + 0.69f * v[mtRevSize];
     rp.damping  = 0.4f;
     rp.wetLevel = v[mtRevMix] * 0.9f;
-    rp.dryLevel = 1.0f - v[mtRevMix] * 0.5f;
+    rp.dryLevel = 0.0f;                                  // dry is mixed back by hand, so LOW CUT touches the tail only
+    const float revDry = 1.0f - v[mtRevMix] * 0.5f;
+    const float revCutHz = v[mtRevLowCut];
     rp.width    = 1.0f;
 
     float* outL = work.getWritePointer (0) + from;
@@ -855,8 +862,24 @@ void GranulumProcessor::processChunk (int from, int len)
             c.delay.process (L, R, len, delayMs, v[mtDelayFb], v[mtDelayTone], v[mtDelayMix], pDelayPing->load() > 0.5f);
         if (revOn && routed (3))
         {
+            float* wL = wetBuf.getWritePointer (0);
+            float* wR = wetBuf.getWritePointer (1);
+            std::copy (L, L + len, wL);
+            std::copy (R, R + len, wR);
+            auto wetBlock = dsp::AudioBlock<float> (wetBuf).getSubBlock (0, (size_t) len);
+            dsp::ProcessContextReplacing<float> wctx (wetBlock);
             c.reverb.setParameters (rp);
-            c.reverb.process (ctx);
+            c.reverb.process (wctx);
+            if (revCutHz > 22.0f)
+            {
+                c.revCut.setCutoffFrequency (revCutHz);
+                c.revCut.process (wctx);
+            }
+            for (int i = 0; i < len; ++i)
+            {
+                L[i] = L[i] * revDry + wL[i];
+                R[i] = R[i] * revDry + wR[i];
+            }
         }
 
         for (int i = 0; i < len; ++i) { outL[i] += L[i]; outR[i] += R[i]; }
@@ -1175,6 +1198,7 @@ void GranulumProcessor::randomizeSection (int section)
         set (ParamID::distMix,   range (0.4f, 1.0f));
         set (ParamID::revMix,    range (0.1f, 0.5f));
         set (ParamID::revSize,   range (0.3f, 0.95f));
+        set (ParamID::revLowCut, range (80.0f, 400.0f));
         set (ParamID::delayDiv,  (float) (3 + r.nextInt (12)));
         set (ParamID::delayFb,   range (0.2f, 0.7f));
         set (ParamID::delayTone, range (0.3f, 0.9f));

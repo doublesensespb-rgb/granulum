@@ -64,6 +64,7 @@ namespace ParamID
     inline constexpr const char* revOn     = "revOn";
     inline constexpr const char* revMix    = "revMix";
     inline constexpr const char* revSize   = "revSize";
+    inline constexpr const char* revLowCut = "revLowCut";
     // VOICE / global
     inline constexpr const char* mono      = "mono";
     inline constexpr const char* porta     = "porta";
@@ -86,7 +87,7 @@ enum ModTarget
     mtOsc1Vol, mtOsc1Oct, mtOsc1Semi, mtOsc2Vol, mtOsc2Oct, mtOsc2Semi, mtOsc3Vol, mtOsc3Color,
     mtBloom, mtSmear, mtScatter, mtShimmer, mtDrift, mtChime, mtSize, mtSpeed, mtPosition, mtDensity, mtGmix,
     mtCutoff, mtReso,
-    mtDistDrive, mtDistTone, mtDistMix, mtDelayTime, mtDelayFb, mtDelayTone, mtDelayMix, mtRevMix, mtRevSize,
+    mtDistDrive, mtDistTone, mtDistMix, mtDelayTime, mtDelayFb, mtDelayTone, mtDelayMix, mtRevMix, mtRevSize, mtRevLowCut,
     mtPorta, mtOutput,
     mtLfo1Rate, mtLfo2Rate, mtLfo3Rate,
     kNumModTargets
@@ -164,6 +165,7 @@ struct FxChain
     Distortion distortion;
     Delay delay;
     juce::dsp::Reverb reverb;
+    juce::dsp::StateVariableTPTFilter<float> revCut;   // LOW CUT on the reverb tail only
     double quietSeconds = 1.0e9;
 };
 
@@ -321,7 +323,7 @@ private:
 
     std::array<FxChain, kNumOscs> chains;
     juce::SmoothedValue<float> outGain;
-    juce::AudioBuffer<float> addBuf, smpBuf, noiseBuf, work;
+    juce::AudioBuffer<float> addBuf, smpBuf, noiseBuf, work, wetBuf;
     float lastG1 = 0.0f, lastG2 = 0.0f, lastG3 = 0.0f, blockPeak = 0.0f;
     float colorLp[2] {}, colorHp[2] {};
 

@@ -299,6 +299,7 @@ public:
     void mouseDown (const juce::MouseEvent&) override;
     std::function<void()> onSelect;
     bool selected = false;
+    static inline int style = 2;   // 0 filled buttons, 1 text + underline, 2 soft segmented, 3 outline
 private:
     juce::RangedAudioParameter* param;
     juce::String name;

@@ -185,6 +185,24 @@ int main (int argc, char** argv)
         return 0;
     }
 
+    // design preview: "Snapshot <dir> fxtabs" -> the effects block in every tab style
+    if (argc > 2 && String (argv[2]) == "fxtabs")
+    {
+        setP (ParamID::distOn, 0.0f); setP (ParamID::delayOn, 1.0f); setP (ParamID::revOn, 1.0f);
+        ed->selectFx (2);
+        for (int st = 2; st < 3; ++st)
+        {
+            FxTab::style = st;
+            base->repaint();
+            MessageManager::getInstance()->runDispatchLoopUntil (60);
+            auto img = base->createComponentSnapshot (Rectangle<int> (728, 372, 336, 230), true, 2.0f);
+            PNGImageFormat png;
+            FileOutputStream os (outDir.getChildFile ("fx" + String (st) + ".png"));
+            png.writeImageToStream (img, os);
+        }
+        return 0;
+    }
+
     // 3) the chord popup on its own
     {
         setP (ParamID::chord, 5.0f);   // MAJ9
