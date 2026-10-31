@@ -3,30 +3,46 @@
 #include <juce_audio_utils/juce_audio_utils.h>
 #include "PluginProcessor.h"
 
-// "Deep petrol" flat theme — teal family only, lighter and darker
+// Colour theme. Theme 0 is the shipping teal; 1-4 are design variants previewed by the snapshot tool.
 namespace Palette
 {
-    const juce::Colour bgTop     { 0xff1f5160 };
-    const juce::Colour bgBottom  { 0xff1a4654 };
-    const juce::Colour panel     { 0xff163e4b };
-    const juce::Colour screen    { 0xff0f2d37 };
-    const juce::Colour deep      { 0xff081c23 };
-    const juce::Colour field     { 0xff15394a };
-    const juce::Colour button    { 0xff3a6a78 };
-    const juce::Colour buttonHi  { 0xff4a7d8b };
-    const juce::Colour text      { 0xffdce8ea };
-    const juce::Colour textDim   { 0xff9fbcc2 };
-    const juce::Colour label     { 0xffc5d6da };
-    const juce::Colour knob      { 0xffa3b1b5 };
-    const juce::Colour knobDark  { 0xff7f9095 };
-    const juce::Colour track     { 0xff13323d };
-    const juce::Colour accent    { 0xff4fd6d9 };
-    const juce::Colour accentSoft{ 0xff83c8cc };
-    const juce::Colour ice       { 0xffd8fbff };
-    const juce::Colour hit       { 0xffffc857 };
-    const juce::Colour ledOff    { 0xff7d9399 };
-    const juce::Colour whiteKey  { 0xffe9f0ee };
-    const juce::Colour blackKey  { 0xff5f8d97 };
+    inline juce::Colour bgTop;
+    inline juce::Colour bgBottom;
+    inline juce::Colour panel;
+    inline juce::Colour screen;
+    inline juce::Colour deep;
+    inline juce::Colour field;
+    inline juce::Colour button;
+    inline juce::Colour buttonHi;
+    inline juce::Colour text;
+    inline juce::Colour textDim;
+    inline juce::Colour label;
+    inline juce::Colour knob;
+    inline juce::Colour knobDark;
+    inline juce::Colour track;
+    inline juce::Colour accent;
+    inline juce::Colour accentSoft;
+    inline juce::Colour ice;
+    inline juce::Colour ledOff;
+    inline juce::Colour whiteKey;
+    inline juce::Colour blackKey;
+    inline juce::Colour hit { 0xffffc857 };
+
+    inline void applyTheme (int t)
+    {
+        static const juce::uint32 themes[][20] =
+        {
+            { 0xff1f5160, 0xff1a4654, 0xff163e4b, 0xff0f2d37, 0xff081c23, 0xff15394a, 0xff3a6a78, 0xff4a7d8b, 0xffdce8ea, 0xff9fbcc2, 0xffc5d6da, 0xffa3b1b5, 0xff7f9095, 0xff13323d, 0xff4fd6d9, 0xff83c8cc, 0xffd8fbff, 0xff7d9399, 0xffe9f0ee, 0xff5f8d97 },
+            { 0xff2c4a61, 0xff263f53, 0xff213a4d, 0xff172b3a, 0xff0c1823, 0xff1d3446, 0xff3f6585, 0xff4d7596, 0xfff7f8f0, 0xffa9c2d6, 0xffcddbe6, 0xffb8c6d2, 0xff8b9cab, 0xff182e3e, 0xff9cd5ff, 0xff7aaace, 0xfff7f8f0, 0xff7d93a6, 0xfff7f8f0, 0xff55799a },
+            { 0xff355872, 0xff2f4f67, 0xff2a475d, 0xff1d3346, 0xff10202d, 0xff284459, 0xff5a87ab, 0xff6896ba, 0xfff7f8f0, 0xffc4d9e8, 0xffdde8f0, 0xffd9dee0, 0xffa5b0b8, 0xff213a4d, 0xff9cd5ff, 0xff7aaace, 0xfff7f8f0, 0xff8aa3b8, 0xfff7f8f0, 0xff5a7f9e },
+            { 0xfff7f8f0, 0xffeceee5, 0xffe2e9ec, 0xff2b4a63, 0xff172b3a, 0xffd4e0e8, 0xff7aaace, 0xff8cb8d8, 0xff1f3a50, 0xff4e6a80, 0xff355872, 0xffc3ccd2, 0xff98a5ae, 0xffc9d7e2, 0xff5f9bcc, 0xff9cd5ff, 0xfff7f8f0, 0xff9aaebd, 0xfff7f8f0, 0xff7aaace },
+            { 0xff7aaace, 0xff6c9cc1, 0xff355872, 0xff24405a, 0xff142636, 0xff2d4c63, 0xff4b7598, 0xff5b86aa, 0xfff7f8f0, 0xffc8dcec, 0xffe6eef4, 0xffe2e6e2, 0xffaab4bb, 0xff1f384b, 0xff9cd5ff, 0xff7aaace, 0xfff7f8f0, 0xff8aa3b8, 0xfff7f8f0, 0xff55799a },
+        };
+        const auto& c = themes[juce::jlimit (0, (int) std::size (themes) - 1, t)];
+        juce::Colour* dst[] = { &bgTop, &bgBottom, &panel, &screen, &deep, &field, &button, &buttonHi, &text, &textDim, &label, &knob, &knobDark, &track, &accent, &accentSoft, &ice, &ledOff, &whiteKey, &blackKey };
+        for (size_t i = 0; i < std::size (dst); ++i) *dst[i] = juce::Colour (c[i]);
+    }
+    inline const bool themeReady = (applyTheme (0), true);
 
     inline juce::Colour lfo (int i) { return i == 0 ? juce::Colour (0xffffc857) : juce::Colour (0xffbff3ff); }
 }

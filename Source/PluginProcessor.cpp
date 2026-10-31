@@ -736,7 +736,7 @@ bool GranulumProcessor::loadSample (const File& file, String& error)
     std::unique_ptr<AudioFormatReader> reader (formatManager.createReaderFor (file));
     if (reader == nullptr) { error = "Can't read this file"; return false; }
 
-    const auto frames = (int) jmin<int64> (reader->lengthInSamples, (int64) (reader->sampleRate * 600.0));
+    const auto frames = (int) std::min<juce::int64> (reader->lengthInSamples, (juce::int64) (reader->sampleRate * 600.0));
     if (frames < 16) { error = "File is empty"; return false; }
 
     const int chans = jlimit (1, 2, (int) reader->numChannels);

@@ -41,14 +41,63 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
-          name: Granulum-Windows
-          path: out/
+          name: win
+          path: |
+            Granulum-Windows.zip
+            shots/*.png
 
-      - name: Publish to builds branch
-        shell: bash
+  mac:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Get JUCE
+        run: git clone --depth 1 --branch 8.0.10 https://github.com/juce-framework/JUCE.git JUCE
+
+      - name: Configure
+        run: cmake -B build -G Xcode -DCMAKE_OSX_ARCHITECTURES="arm64;x86_64" -DCMAKE_OSX_DEPLOYMENT_TARGET=10.15
+
+      - name: Build
+        run: cmake --build build --config Release --target Granulum_VST3 Granulum_AU Granulum_Standalone -- -quiet
+
+      - name: Package
         run: |
-          mkdir pub && cp Granulum-Windows.zip pub/
-          cp shots/*.png pub/ || true
+          mkdir out
+          cp -R build/Granulum_artefacts/Release/VST3/Granulum.vst3 out/
+          cp -R build/Granulum_artefacts/Release/AU/Granulum.component out/
+          cp -R build/Granulum_artefacts/Release/Standalone/Granulum.app out/
+          for b in out/*; do codesign --force --deep --sign - "$b"; done
+          lipo -info out/Granulum.vst3/Contents/MacOS/Granulum
+          cat > out/README.txt <<'TXT'
+          Granulum for macOS (Apple Silicon + Intel)
+
+          1. Copy Granulum.vst3      to  /Library/Audio/Plug-Ins/VST3/
+             Copy Granulum.component to  /Library/Audio/Plug-Ins/Components/
+          2. Open Terminal and run (removes the "downloaded from internet" block):
+             sudo xattr -dr com.apple.quarantine /Library/Audio/Plug-Ins/VST3/Granulum.vst3 /Library/Audio/Plug-Ins/Components/Granulum.component
+          3. Rescan plugins in your DAW.
+          TXT
+          ditto -c -k --sequesterRsrc out Granulum-macOS.zip
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mac
+          path: Granulum-macOS.zip
+
+  publish:
+    needs: [windows, mac]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: art
+      - name: Publish to builds branch
+        run: |
+          mkdir pub
+          find art -name '*.zip' -exec cp {} pub/ \;
+          find art -name '*.png' -exec cp {} pub/ \;
+          ls pub
           cd pub
           git init -q -b builds
           git config user.name "github-actions"

@@ -404,7 +404,7 @@ namespace
 {
     Colour shardColour (float tint)   // 0 deep teal .. 1 icy white
     {
-        const Colour a (0xff1aa6b0), b = Palette::accent, c = Palette::ice;
+        const Colour a = Palette::accentSoft.darker (0.35f), b = Palette::accent, c = Palette::ice;
         return tint < 0.5f ? a.interpolatedWith (b, tint * 2.0f) : b.interpolatedWith (c, (tint - 0.5f) * 2.0f);
     }
 }
@@ -1613,7 +1613,7 @@ void GranulumEditor::paint (Graphics& g)
         const float cy = (float) gemsArea.getY() + gh * ((float) (i / 3) + 0.5f);
         const float lvl = jlimit (0.0f, 1.0f, (db - thresholds[i]) / 6.0f + 0.5f);
         auto c = Rectangle<float> (cx - gs * 0.5f, cy - gs * 0.5f, gs, gs);
-        g.setColour (Colour (0xff10303b));
+        g.setColour (Palette::deep.withAlpha (0.6f));
         g.fillEllipse (c.expanded (gs * 0.14f));
         drawLed (g, c, i < 5 ? Palette::accent : Palette::ice, Palette::track.brighter (0.15f), lvl);
     }
@@ -1664,9 +1664,9 @@ void GranulumEditor::paint (Graphics& g)
         else
         {
             const auto name = File::createFileWithoutCheckingPath (proc.getSampleName()).getFileNameWithoutExtension();
-            g.setColour (Palette::text);
+            g.setColour (Palette::ice);
             g.drawText (name, z.reduced (12.0f, 0.0f).withTrimmedBottom (z.getHeight() * 0.3f), Justification::centredLeft, true);
-            g.setColour (Palette::textDim);
+            g.setColour (Palette::accentSoft);
             g.setFont (uiFont (11.0f * sc, false, 0.05f));
             g.drawText (String (proc.getSampleLengthSeconds(), 2) + " s", z.reduced (12.0f, 0.0f).withTrimmedTop (z.getHeight() * 0.45f), Justification::centredLeft, false);
         }

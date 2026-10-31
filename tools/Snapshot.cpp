@@ -63,11 +63,43 @@ int main (int argc, char** argv)
     p.setPlayConfigDetails (0, 2, 44100.0, 441);
     p.prepareToPlay (44100.0, 441);
 
+    auto setP = [&p] (const char* id, float v) { if (auto* x = p.apvts.getParameter (id)) x->setValueNotifyingHost (x->convertTo0to1 (v)); };
+
+    // design variants: "Snapshot <dir> themes" renders the same playing scene in each palette
+    if (argc > 2 && String (argv[2]) == "themes")
+    {
+        std::array<float, granulum::kNumHarmonics> h {};
+        const float bars[] = { 1.0f, 0.55f, 0.3f, 0.62f, 0.12f, 0.4f, 0.0f, 0.28f, 0.08f, 0.2f, 0.0f, 0.15f, 0.05f, 0.1f, 0.0f, 0.06f };
+        for (size_t i = 0; i < std::size (bars); ++i) h[i] = bars[i];
+        p.setHarmonics (h);
+        p.rebuildNow();
+        String err;
+        p.loadSample (makeTestSample(), err);
+        setP (ParamID::osc2Vol, 0.5f);
+        setP (ParamID::chord, 3.0f);
+        setP (ParamID::grainOn, 1.0f);
+        setP (ParamID::bloom, 0.5f);  setP (ParamID::smear, 0.45f); setP (ParamID::scatter, 0.6f);
+        setP (ParamID::shimmer, 0.45f); setP (ParamID::drift, 0.5f); setP (ParamID::density, 0.55f);
+        setP (ParamID::filterOn, 1.0f); setP (ParamID::cutoff, 1800.0f); setP (ParamID::revOn, 1.0f); setP (ParamID::distOn, 1.0f);
+        p.setModulation (GranulumProcessor::modIndexOf (ParamID::cutoff), 0, 0.3f);
+        p.setModulation (GranulumProcessor::modIndexOf (ParamID::smear), 1, 0.25f);
+        p.keyboardState.noteOn (1, 52, 0.9f);
+        const int first = argc > 3 ? String (argv[3]).getIntValue() : 1;
+        const int last  = argc > 4 ? String (argv[4]).getIntValue() : 4;
+        for (int t = first; t <= last; ++t)
+        {
+            Palette::applyTheme (t);
+            std::unique_ptr<AudioProcessorEditor> e (p.createEditor());
+            e->setSize (1080, 800);
+            run (p, dynamic_cast<GranulumEditor*> (e.get()), 80);
+            save (*e, outDir, ("theme-" + String (t) + ".png").toRawUTF8());
+        }
+        return 0;
+    }
+
     std::unique_ptr<AudioProcessorEditor> base (p.createEditor());
     auto* ed = dynamic_cast<GranulumEditor*> (base.get());
     base->setSize (1080, 800);
-
-    auto setP = [&p] (const char* id, float v) { if (auto* x = p.apvts.getParameter (id)) x->setValueNotifyingHost (x->convertTo0to1 (v)); };
 
     // 0) INIT: how the plugin opens
     p.rebuildNow();
