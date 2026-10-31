@@ -1074,10 +1074,10 @@ void HarmonicEditor::paint (Graphics& g)
             str.startNewSubPath (x, bar.getBottom());
             str.quadraticTo (x + vib, bar.getCentreY(), x, bar.getY());
             const auto sc = shattered ? sandLight : col;
-            g.setColour (sc.withAlpha (0.22f));
-            g.strokePath (str, PathStrokeType (5.0f, PathStrokeType::curved, PathStrokeType::rounded));
+            g.setColour (sc.withAlpha (0.20f));
+            g.strokePath (str, PathStrokeType (6.0f, PathStrokeType::curved, PathStrokeType::rounded));
             g.setColour (sc);
-            g.strokePath (str, PathStrokeType (2.2f, PathStrokeType::curved, PathStrokeType::rounded));
+            g.strokePath (str, PathStrokeType (3.2f, PathStrokeType::curved, PathStrokeType::rounded));
             if (shattered)
                 for (auto& c : crystals)
                 {
@@ -1086,9 +1086,9 @@ void HarmonicEditor::paint (Graphics& g)
                     g.setColour (Colour (0xfffff3dc).withAlpha (fa));
                     g.fillEllipse (x + (c.dx - 0.5f) * 5.0f - 1.4f, bar.getBottom() - bar.getHeight() * c.y - 1.4f, 2.8f, 2.8f);
                 }
-            const float hr = jmin (4.2f, bw * 0.24f);
+            // bright tip instead of a ball: just a clean stick
             g.setColour ((shattered ? Colour (0xfffff3dc) : Palette::ice));
-            g.fillEllipse (x - hr, bar.getY() - hr, hr * 2.0f, hr * 2.0f);
+            g.fillRoundedRectangle (x - 1.6f, bar.getY() - 1.0f, 3.2f, jmin (6.0f, bar.getHeight() + 1.0f), 1.6f);
         }
         else if (barStyle == 1)
         {
@@ -2209,7 +2209,6 @@ GranulumEditor::GranulumEditor (GranulumProcessor& p)
     add (smallKnobs, ParamID::position, "Position", Knob::Size::Small);
     add (smallKnobs, ParamID::density,  "Density",  Knob::Size::Small);
     add (smallKnobs, ParamID::gmix,     "Mix",      Knob::Size::Small);
-    add (smallKnobs, ParamID::evolve,   "Evolve",   Knob::Size::Small);
 
     add (osc1Knobs, ParamID::osc1Vol,  "Vol",  Knob::Size::Small);
     add (osc1Knobs, ParamID::osc1Oct,  "Oct",  Knob::Size::Small);
@@ -2243,7 +2242,6 @@ GranulumEditor::GranulumEditor (GranulumProcessor& p)
     heroKnobs[3]->slider.setTooltip ("SHIMMER: some grains sparkle an octave (or a twelfth) up, some play backwards.");
     heroKnobs[4]->slider.setTooltip ("DRIFT: pitch, position and pan slowly wander. The sound breathes.");
     heroKnobs[5]->slider.setTooltip ("CHIME: every grain rings tuned resonances. Low = soft glassy overtones, high = long metallic bells.");
-    smallKnobs[5]->slider.setTooltip ("EVOLVE: after each note the granular cloud grows in over this time.");
     osc3Knobs[1]->slider.setTooltip ("COLOR: left = darker, right = brighter");
     for (auto& k : osc3Knobs) k->setCompact (true);
     for (auto& k : osc2Knobs) k->setCompact (true);

@@ -331,7 +331,7 @@ private:
     std::atomic<float>* pOsc1On {};   std::atomic<float>* pOsc2On {};
     std::atomic<float>* pOsc1Grain {}; std::atomic<float>* pOsc2Grain {};
     std::atomic<float>* pChord {};
-    std::atomic<float>* pGrainOn {};  std::atomic<float>* pEvolve {};
+    std::atomic<float>* pGrainOn {};
     std::atomic<float>* pFilterOn {}; std::atomic<float>* pFtype {};
     std::atomic<float>* pDistOn {};   std::atomic<float>* pDistType {};
     std::atomic<float>* pRevOn {};

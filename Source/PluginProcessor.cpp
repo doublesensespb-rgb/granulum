@@ -287,7 +287,6 @@ AudioProcessorValueTreeState::ParameterLayout GranulumProcessor::createLayout()
     ps.push_back (std::make_unique<P> (ParameterID { ParamID::density, 1 }, "Density", NormalisableRange<float> (0.0f, 1.0f), 0.4f,
                                        A().withStringFromValueFunction ([] (float v, int) { return fmt (3.0f * std::pow (60.0f, v), 0, " /s"); })));
     ps.push_back (std::make_unique<P> (ParameterID { ParamID::gmix, 1 },    "Grain Mix", NormalisableRange<float> (0.0f, 1.0f), 1.0f, pct));
-    ps.push_back (std::make_unique<P> (ParameterID { ParamID::evolve, 1 },  "Evolve",  skewed (0.0f, 8.0f, 1.5f), 0.0f, secFmt));
     ps.push_back (std::make_unique<P> (ParameterID { ParamID::chime, 1 },   "Chime",   NormalisableRange<float> (0.0f, 1.0f), 0.0f, pct));
 
     // FILTER (key-tracked from C3 under the hood)
@@ -372,7 +371,6 @@ GranulumProcessor::GranulumProcessor()
     pOsc2Grain = apvts.getRawParameterValue (ParamID::osc2Grain);
     pChord     = apvts.getRawParameterValue (ParamID::chord);
     pGrainOn   = apvts.getRawParameterValue (ParamID::grainOn);
-    pEvolve    = apvts.getRawParameterValue (ParamID::evolve);
     pFilterOn  = apvts.getRawParameterValue (ParamID::filterOn);
     pFtype     = apvts.getRawParameterValue (ParamID::ftype);
     pDistOn    = apvts.getRawParameterValue (ParamID::distOn);
@@ -644,7 +642,7 @@ granulum::Params GranulumProcessor::voiceParams (const float* v, int osc) const
     p.position = v[mtPosition];
     p.density  = v[mtDensity];
     p.mix      = v[mtGmix];
-    p.evolve   = pEvolve->load();
+    p.evolve   = 0.0f;   // EVOLVE knob removed
     p.mono     = pMono->load() > 0.5f;
     p.portaMs  = v[mtPorta];
 
