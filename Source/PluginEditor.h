@@ -192,6 +192,11 @@ private:
     int lastBar = -1, lastPill = -1;
     float lastValue = 0.0f, time = 0.0f;
     bool erasing = false, editing = false, pillMode = false, pillValue = true;
+    struct Crystal { float bar = 0, dx = 0, y = 0, vy = 0, age = 0, life = 1, size = 2, rot = 0, spin = 0; bool white = false; };
+    std::vector<Crystal> crystals;
+    juce::Random rng;
+public:
+    int rowStyle = 0;   // 0 = pearl beads, 1 = glowing line (design preview)
 };
 
 // Slim stereo peak meter with a red zone, peak hold and a CLIP flag (click to reset)
@@ -366,6 +371,7 @@ public:
     void filesDropped (const juce::StringArray& files, int, int) override;
 
     GrainField& grainField() { return field; }
+    HarmonicEditor& harmonicEditor() { return harmonics; }
     GranulumLook& lookAndFeel() { return look; }
     void selectFx (int i);
 

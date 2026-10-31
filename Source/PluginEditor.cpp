@@ -809,12 +809,40 @@ HarmonicEditor::HarmonicEditor (GranulumProcessor& p) : proc (p)
     h = proc.getHarmonics();
     mask = proc.getGrainMask();
     setMouseCursor (MouseCursor::CrosshairCursor);
-    startTimerHz (24);
+    startTimerHz (30);
 }
 
 void HarmonicEditor::timerCallback()
 {
-    time += 1.0f / 24.0f;
+    const float dt = 1.0f / 30.0f;
+    time += dt;
+    {
+        const bool grains = grainsActive();
+        for (int k = 0; k < granulum::kNumHarmonics; ++k)
+        {
+            if (! grains || ! ((mask >> k) & 1u) || h[(size_t) k] < 0.01f) continue;
+            if (rng.nextFloat() < dt * 14.0f)
+            {
+                Crystal c;
+                c.bar = (float) k;
+                c.dx = 0.15f + 0.7f * rng.nextFloat();            // across the bar width
+                c.y = rng.nextFloat() * 0.6f;                     // fraction of the bar height
+                c.vy = 0.25f + 0.35f * rng.nextFloat();            // bar heights per second
+                c.life = 0.8f + 1.0f * rng.nextFloat();
+                c.size = 1.2f + 1.1f * rng.nextFloat();
+                c.white = rng.nextFloat() < 0.35f;
+                if (crystals.size() < 260) crystals.push_back (c);
+            }
+        }
+        for (auto& c : crystals)
+        {
+            c.age += dt;
+            c.y += c.vy * dt;
+            c.dx = jlimit (0.1f, 0.9f, c.dx + std::sin (time * 2.0f + c.life * 7.0f) * 0.004f);
+        }
+        crystals.erase (std::remove_if (crystals.begin(), crystals.end(), [] (const Crystal& c)
+                        { return c.age >= c.life || c.y > 0.98f; }), crystals.end());
+    }
     if (! editing)
     {
         const auto now = proc.getHarmonics();
@@ -832,7 +860,7 @@ bool HarmonicEditor::grainsActive() const
         && s.getRawParameterValue (ParamID::osc1On)->load() > 0.5f;
 }
 
-static constexpr float kGrainLabelW = 40.0f;
+static constexpr float kGrainLabelW = 46.0f;
 
 Rectangle<float> HarmonicEditor::barArea() const
 {
@@ -901,8 +929,8 @@ void HarmonicEditor::mouseMove (const MouseEvent& e)
     }
     else if (e.position.x < barArea().getX())
     {
-        setTooltip ("GRAIN row: gold = this harmonic is granulated, dark = it stays clean & mono.\nKeep the lowest ones clean for a solid sub.");
-        setMouseCursor (MouseCursor::NormalCursor);
+        setTooltip ("GRAIN: click to switch all harmonics into the grains or out of them.\nLit bead = granulated, empty = clean & mono. Keep the lowest ones clean for a solid sub.");
+        setMouseCursor (e.position.y >= pillRow().getY() - 6.0f ? MouseCursor::PointingHandCursor : MouseCursor::NormalCursor);
     }
     else
     {
@@ -913,6 +941,14 @@ void HarmonicEditor::mouseMove (const MouseEvent& e)
 
 void HarmonicEditor::mouseDown (const MouseEvent& e)
 {
+    if (e.position.x < barArea().getX() && e.position.y >= pillRow().getY() - 6.0f)
+    {
+        // GRAIN button: all beads on <-> all off
+        mask = (mask & 0xffffu) != 0 ? 0u : 0xffffu;
+        proc.setGrainMask (mask);
+        repaint();
+        return;
+    }
     if (e.position.y >= pillRow().getY() - 3.0f && e.position.x >= barArea().getX())
     {
         pillMode = true;
@@ -978,13 +1014,14 @@ void HarmonicEditor::paint (Graphics& g)
     for (int k = 0; k < granulum::kNumHarmonics; ++k)
     {
         auto slot = Rectangle<float> (a.getX() + bw * (float) k, a.getY(), bw, a.getHeight()).reduced (bw * 0.12f, 0.0f);
-        g.setColour (Palette::track.withAlpha (0.85f));
+        const bool shattered = grains && ((mask >> k) & 1u);
+        // granulated harmonics sit on a slightly warmer, sandy background
+        g.setColour (shattered ? Palette::track.interpolatedWith (Colour (0xffc9ae84), 0.16f) : Palette::track.withAlpha (0.85f));
         g.fillRoundedRectangle (slot, 3.0f);
         const float v = h[(size_t) k];
         if (v <= 0.001f) continue;
         auto bar = slot.withTop (slot.getBottom() - slot.getHeight() * v);
         const auto col = active ? Palette::accent : Palette::accentSoft.withAlpha (0.35f);
-        const bool shattered = grains && ((mask >> k) & 1u);
 
         if (! shattered)
         {
@@ -998,63 +1035,95 @@ void HarmonicEditor::paint (Graphics& g)
         }
         else
         {
-            // granulated harmonic: the bar breaks into glittering slanted shards
-            g.setColour (col.withAlpha (0.10f));
-            g.fillRoundedRectangle (bar.expanded (2.0f, 2.0f), 4.0f);
-            const float segH = 5.0f, gap = 2.0f;
-            int idx = 0;
-            for (float y = bar.getBottom(); y > bar.getY() + 0.5f; y -= segH + gap, ++idx)
+            // granulated harmonic: the bar stays whole, warm sand light slowly flows up through it
+            g.setColour (Colour (0xffead9b8).withAlpha (0.12f));
+            g.fillRoundedRectangle (bar.expanded (3.0f, 3.0f), 5.0f);
+            Graphics::ScopedSaveState ss (g);
+            Path clipPath; clipPath.addRoundedRectangle (bar, 3.0f);
+            g.reduceClipRegion (clipPath);
+            // one soft wave of light climbs every granulated bar together, bottom to top, in the same time
+            const float span = jmax (1.0f, bar.getHeight());
+            const float head = std::fmod (time * 0.45f, 1.4f) - 0.2f;            // -0.2 .. 1.2, same for all bars
+            for (float y = bar.getY(); y < bar.getBottom(); y += 1.5f)
             {
-                const float top = jmax (bar.getY(), y - segH);
-                const uint32 hs = (uint32) ((k + 1) * 7919 + idx * 104729);
-                const float tw = 0.5f + 0.5f * std::sin (time * (2.0f + (float) (hs % 5)) + (float) (hs % 13));
-                const float off = ((float) ((hs >> 3) % 7) - 3.0f) * 0.35f;
-                const float t = 1.0f - (y - bar.getY()) / jmax (1.0f, bar.getHeight());
-                const auto c = col.interpolatedWith (Palette::ice, 0.15f + 0.6f * t * tw);
-                Path shard;
-                const float x0 = bar.getX() + off, x1 = bar.getRight() + off;
-                shard.startNewSubPath (x0, y);
-                shard.lineTo (x1, y - 1.6f);
-                shard.lineTo (x1, top);
-                shard.lineTo (x0, top + 1.6f);
-                shard.closeSubPath();
-                g.setColour (c.withAlpha (0.55f + 0.45f * tw));
-                g.fillPath (shard);
+                const float t = (bar.getBottom() - y) / span;                         // 0 bottom .. 1 top of THIS bar
+                const float d = (t - head) / 0.22f;
+                const float w = 0.25f + 0.75f * std::exp (-d * d);
+                const Colour sandLight (0xffead9b8);
+                g.setColour (Palette::accent.interpolatedWith (sandLight, 0.10f + 0.85f * w * w));
+                g.fillRect (bar.getX(), y, bar.getWidth(), 1.5f);
             }
+            // micro grains drifting up inside the bar (clipped to it)
+            for (auto& c : crystals)
+            {
+                if ((int) c.bar != k) continue;
+                const float lt = c.age / c.life;
+                const float fa = jmin (1.0f, c.age * 5.0f) * (1.0f - lt);
+                const float cx = bar.getX() + bar.getWidth() * c.dx;
+                const float cy = bar.getBottom() - bar.getHeight() * c.y;
+                g.setColour ((c.white ? Colours::white : Colour (0xfff7ecd6)).withAlpha (0.85f * fa));
+                g.fillEllipse (cx - c.size * 0.5f, cy - c.size * 0.5f, c.size, c.size);
+            }
+            g.setColour (Colours::white.withAlpha (0.75f));
+            g.fillRect (bar.withHeight (jmin (2.0f, bar.getHeight())));
         }
     }
 
-    // ---- the gold GRAIN row: the plugin's signature feature ----
+    // ---- GRAIN row: which harmonics are granulated (pearl, matches the shimmer on the bars) ----
     {
         auto row = pillRow();
         const float alpha = active ? (grains ? 1.0f : 0.4f) : 0.25f;
-        g.setColour (Palette::gold.withAlpha (alpha));
-        g.setFont (uiFont (10.0f, true, 0.14f));
-        g.drawText ("GRAIN", Rectangle<float> (r.getX() + 6.0f, row.getY() - 2.0f, kGrainLabelW, row.getHeight() + 4.0f), Justification::centredLeft, false);
+        const Colour pearl (0xfff1e4cb), pearlShade (0xffc9ae84);   // sand pearl, same light as the bars
+        // GRAIN button: toggles all beads
+        const auto btn = Rectangle<float> (r.getX() + 4.0f, row.getY() - 3.0f, kGrainLabelW - 4.0f, row.getHeight() + 6.0f);
+        g.setColour (pearlShade.withAlpha (0.22f * alpha));
+        g.fillRoundedRectangle (btn, 5.0f);
+        g.setColour (pearlShade.withAlpha (0.7f * alpha));
+        g.drawRoundedRectangle (btn.reduced (0.5f), 5.0f, 1.0f);
+        g.setColour (pearl.withAlpha (alpha));
+        g.setFont (uiFont (9.5f, true, 0.12f));
+        g.drawText ("GRAIN", btn, Justification::centred, false);
 
         for (int k = 0; k < granulum::kNumHarmonics; ++k)
         {
-            auto pill = Rectangle<float> (row.getX() + bw * (float) k, row.getY(), bw, row.getHeight()).reduced (bw * 0.16f, 0.0f);
+            const auto cell = Rectangle<float> (row.getX() + bw * (float) k, row.getY(), bw, row.getHeight());
             const bool on = (mask >> k) & 1u;
-            if (on)
+            if (rowStyle == 0)
             {
-                g.setColour (Palette::gold.withAlpha (0.22f * alpha));
-                g.fillRoundedRectangle (pill.expanded (2.0f), 5.0f);
-                g.setGradientFill (ColourGradient (Palette::gold.withAlpha (alpha), 0, pill.getY(), Palette::goldDeep.withAlpha (alpha), 0, pill.getBottom(), false));
-                g.fillRoundedRectangle (pill, 4.0f);
-                // tiny shard mark
-                Path d;
-                const auto c = pill.getCentre();
-                d.addQuadrilateral (c.x, c.y - 3.2f, c.x + 2.2f, c.y, c.x, c.y + 3.2f, c.x - 2.2f, c.y);
-                g.setColour (Palette::screen.withAlpha (0.7f * alpha));
-                g.fillPath (d);
+                // little lamp: lit = warm sand light, off = dark lamp
+                const auto c = cell.getCentre();
+                const float rad = jmin (4.5f, bw * 0.28f);
+                const auto dot = Rectangle<float> (rad * 2.0f, rad * 2.0f).withCentre (c);
+                if (on)
+                {
+                    g.setGradientFill (ColourGradient (Colours::white.withAlpha (alpha), c.x - rad * 0.35f, c.y - rad * 0.45f,
+                                                       pearlShade.withAlpha (alpha), c.x + rad, c.y + rad, true));
+                    g.fillEllipse (dot);
+                }
+                else
+                {
+                    g.setColour (Palette::track.brighter (0.25f).withAlpha (alpha));
+                    g.fillEllipse (dot);
+                    g.setColour (Colours::black.withAlpha (0.25f * alpha));
+                    g.drawEllipse (dot.reduced (0.4f), 0.8f);
+                }
             }
             else
             {
-                g.setColour (Palette::track);
-                g.fillRoundedRectangle (pill, 4.0f);
-                g.setColour (Palette::gold.withAlpha (0.35f * alpha));
-                g.drawRoundedRectangle (pill.reduced (0.5f), 4.0f, 1.0f);
+                // glowing line
+                auto line = cell.reduced (bw * 0.14f, 0.0f).withSizeKeepingCentre (cell.getWidth() - bw * 0.28f, 3.0f);
+                if (on)
+                {
+                    g.setColour (pearl.withAlpha (0.25f * alpha));
+                    g.fillRoundedRectangle (line.expanded (2.0f, 3.0f), 4.0f);
+                    g.setColour (pearl.withAlpha (alpha));
+                    g.fillRoundedRectangle (line, 1.5f);
+                }
+                else
+                {
+                    g.setColour (pearlShade.withAlpha (0.25f * alpha));
+                    g.fillRoundedRectangle (line.withSizeKeepingCentre (line.getWidth(), 1.5f), 1.0f);
+                }
             }
         }
     }

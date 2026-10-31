@@ -157,6 +157,34 @@ int main (int argc, char** argv)
     run (p, ed, 90);
     save (*base, outDir, "ui-playing.png");
 
+    // design preview: "Snapshot <dir> grainrow" -> animation frames of the OSC 1 panel in both GRAIN row styles
+    if (argc > 2 && String (argv[2]) == "grainrow")
+    {
+        p.keyboardState.noteOff (1, 52, 0.0f);
+        setP (ParamID::osc1On, 1.0f);
+        std::array<float, granulum::kNumHarmonics> hh {};
+        const float bb[] = { 1.0f, 0.55f, 0.3f, 0.62f, 0.12f, 0.4f, 0.0f, 0.28f, 0.08f, 0.2f, 0.0f, 0.15f, 0.05f, 0.1f, 0.0f, 0.06f };
+        for (size_t i = 0; i < std::size (bb); ++i) hh[i] = bb[i];
+        p.setHarmonics (hh);
+        p.setGrainMask (0xfffcu);
+        auto& he = ed->harmonicEditor();
+        const auto area = he.getBoundsInParent().expanded (6, 4).withTrimmedTop (-30).withRight (he.getBoundsInParent().getRight() + 160);
+        for (int style = 0; style < 1; ++style)
+        {
+            he.rowStyle = style;
+            for (int f = 0; f < 76; ++f)
+            {
+                MessageManager::getInstance()->runDispatchLoopUntil (42);
+                auto img = base->createComponentSnapshot (area, true, 2.0f);
+                PNGImageFormat png;
+                auto file = outDir.getChildFile ("row" + String (style) + "_" + String (f).paddedLeft ('0', 2) + ".png");
+                FileOutputStream os (file);
+                png.writeImageToStream (img, os);
+            }
+        }
+        return 0;
+    }
+
     // 3) the chord popup on its own
     {
         setP (ParamID::chord, 5.0f);   // MAJ9

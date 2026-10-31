@@ -16,7 +16,7 @@ juce_add_binary_data(GranulumData HEADER_NAME BinaryData.h NAMESPACE BinaryData 
 set_target_properties(GranulumData PROPERTIES POSITION_INDEPENDENT_CODE ON)
 
 juce_add_plugin(Granulum
-    COMPANY_NAME "Granulum Audio"
+    COMPANY_NAME "Thematic"
     PLUGIN_MANUFACTURER_CODE Grnm
     PLUGIN_CODE Grn1
     FORMATS VST3 AU Standalone
