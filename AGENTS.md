@@ -64,7 +64,7 @@ Key facts:
 
 ## 4. Build pipeline (no local Windows/Mac needed)
 
-`.github/workflows/build.yml` runs on every push to `main`:
+`.github/workflows/build.yml` runs ONLY when started manually (`gh workflow run build.yml`). Never start a build before the owner has approved all pending changes and said to build:
 1. `windows` job (windows-latest, MSVC): builds VST3 + Standalone + Snapshot, renders `ui-*.png`, zips `Granulum-Windows.zip`.
 2. `mac` job (macos-latest, Xcode): universal arm64+x86_64 VST3 + AU + Standalone, ad-hoc codesign, `Granulum-macOS.zip`.
 3. `publish` job: force-pushes zips + PNGs to the `builds` branch.

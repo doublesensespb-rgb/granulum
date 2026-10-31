@@ -1,8 +1,7 @@
 name: Build
 
+# Builds run only when started by hand (gh workflow run build.yml), after the owner approves the changes.
 on:
-  push:
-    branches: [main]
   workflow_dispatch:
 
 permissions:
