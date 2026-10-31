@@ -35,15 +35,15 @@ jobs:
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force out | Out-Null
-          Copy-Item -Recurse "build/Granulum_artefacts/Release/VST3/Granulum.vst3" out/
-          Copy-Item "build/Granulum_artefacts/Release/Standalone/Granulum.exe" out/
-          Compress-Archive -Path out/* -DestinationPath Granulum-Windows.zip -Force
+          Copy-Item -Recurse "build/Granulum_artefacts/Release/VST3/GRAIN FORM.vst3" out/
+          Copy-Item "build/Granulum_artefacts/Release/Standalone/GRAIN FORM.exe" out/
+          Compress-Archive -Path out/* -DestinationPath GRAIN-FORM-Windows.zip -Force
 
       - uses: actions/upload-artifact@v4
         with:
           name: win
           path: |
-            Granulum-Windows.zip
+            GRAIN-FORM-Windows.zip
             shots/*.png
 
   mac:
@@ -63,26 +63,26 @@ jobs:
       - name: Package
         run: |
           mkdir out
-          cp -R build/Granulum_artefacts/Release/VST3/Granulum.vst3 out/
-          cp -R build/Granulum_artefacts/Release/AU/Granulum.component out/
-          cp -R build/Granulum_artefacts/Release/Standalone/Granulum.app out/
+          cp -R "build/Granulum_artefacts/Release/VST3/GRAIN FORM.vst3" out/
+          cp -R "build/Granulum_artefacts/Release/AU/GRAIN FORM.component" out/
+          cp -R "build/Granulum_artefacts/Release/Standalone/GRAIN FORM.app" out/
           for b in out/*; do codesign --force --deep --sign - "$b"; done
-          lipo -info out/Granulum.vst3/Contents/MacOS/Granulum
+          lipo -info "out/GRAIN FORM.vst3/Contents/MacOS/GRAIN FORM"
           cat > out/README.txt <<'TXT'
-          Granulum for macOS (Apple Silicon + Intel)
+          GRAIN FORM for macOS (Apple Silicon + Intel)
 
-          1. Copy Granulum.vst3      to  /Library/Audio/Plug-Ins/VST3/
-             Copy Granulum.component to  /Library/Audio/Plug-Ins/Components/
+          1. Copy "GRAIN FORM.vst3"      to  /Library/Audio/Plug-Ins/VST3/
+             Copy "GRAIN FORM.component" to  /Library/Audio/Plug-Ins/Components/
           2. Open Terminal and run (removes the "downloaded from internet" block):
-             sudo xattr -dr com.apple.quarantine /Library/Audio/Plug-Ins/VST3/Granulum.vst3 /Library/Audio/Plug-Ins/Components/Granulum.component
+             sudo xattr -dr com.apple.quarantine "/Library/Audio/Plug-Ins/VST3/GRAIN FORM.vst3" "/Library/Audio/Plug-Ins/Components/GRAIN FORM.component"
           3. Rescan plugins in your DAW.
           TXT
-          ditto -c -k --sequesterRsrc out Granulum-macOS.zip
+          ditto -c -k --sequesterRsrc out GRAIN-FORM-macOS.zip
 
       - uses: actions/upload-artifact@v4
         with:
           name: mac
-          path: Granulum-macOS.zip
+          path: GRAIN-FORM-macOS.zip
 
   publish:
     needs: [windows, mac]

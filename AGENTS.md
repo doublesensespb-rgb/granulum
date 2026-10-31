@@ -1,11 +1,11 @@
-# Granulum — guide for AI agents working on this repo
+# GRAIN FORM (repo: granulum) — guide for AI agents working on this repo
 
 Read this whole file before changing anything. It describes the product, the code, the build
 pipeline and how the owner wants to work.
 
 ## 1. Product
 
-Granulum is a commercial VST3/AU instrument plugin ("GRANULIZER") by Andrey Ulyanov (Thematic),
+GRAIN FORM ("ADDITIVE GRANULAR"; formerly Granulum) is a commercial VST3/AU instrument plugin by Andrey Ulyanov (Thematic),
 a producer and game sound designer. He uses FL Studio on Windows. Goal: a simple-looking plugin
 that gives "wow" results through granular synthesis.
 

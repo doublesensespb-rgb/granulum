@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.22)
-project(Granulum VERSION 0.3.0)
+project(Granulum VERSION 0.5.0)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -21,8 +21,8 @@ juce_add_plugin(Granulum
     PLUGIN_CODE Grn1
     FORMATS VST3 AU Standalone
     AU_MAIN_TYPE kAudioUnitType_MusicDevice
-    BUNDLE_ID com.granulum.granulum
-    PRODUCT_NAME "Granulum"
+    BUNDLE_ID com.grainform.grainform
+    PRODUCT_NAME "GRAIN FORM"
     IS_SYNTH TRUE
     NEEDS_MIDI_INPUT TRUE
     NEEDS_MIDI_OUTPUT FALSE

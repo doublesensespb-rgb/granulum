@@ -2197,10 +2197,10 @@ void GranulumEditor::paint (Graphics& g)
 
     g.setColour (Palette::text);
     g.setFont (uiFont (40.0f * sc, false, 0.04f));
-    g.drawText ("GRANULUM", titleArea.withHeight ((int) (46 * sc)), Justification::bottomLeft);
+    g.drawText ("GRAIN FORM", titleArea.withHeight ((int) (46 * sc)), Justification::bottomLeft);
     g.setColour (Palette::textDim);
     g.setFont (uiFont (16.0f * sc, false, 0.3f));
-    g.drawText ("GRANULIZER", titleArea.withTrimmedTop ((int) (49 * sc)), Justification::topLeft);
+    g.drawText ("ADDITIVE GRANULAR", titleArea.withTrimmedTop ((int) (49 * sc)), Justification::topLeft);
 
     for (auto fr : { screenFrame, lfoFrame })
     {

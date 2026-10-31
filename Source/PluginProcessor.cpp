@@ -1083,11 +1083,11 @@ std::shared_ptr<const WaveformPeaks> GranulumProcessor::getNoisePeaks (int index
 }
 
 // ===========================================================================
-// Presets: plain XML files in Documents/Granulum/Presets
+// Presets: plain XML files in Documents/GRAIN FORM/Presets
 
 File GranulumProcessor::presetFolder()
 {
-    auto f = File::getSpecialLocation (File::userDocumentsDirectory).getChildFile ("Granulum").getChildFile ("Presets");
+    auto f = File::getSpecialLocation (File::userDocumentsDirectory).getChildFile ("GRAIN FORM").getChildFile ("Presets");
     f.createDirectory();
     return f;
 }
