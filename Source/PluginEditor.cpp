@@ -121,11 +121,51 @@ void GranulumLook::drawButtonBackground (Graphics& g, Button& b, const Colour&, 
     const float rad = 6.0f;
     if (b.getToggleState())
     {
-        g.setColour (Palette::accent.withAlpha (0.22f));
-        g.fillRoundedRectangle (r.expanded (2.0f), rad + 2.0f);
-        g.setColour (Palette::accent.interpolatedWith (Colours::white, over ? 0.2f : 0.0f));
-        g.fillRoundedRectangle (r, rad);
-        return;
+        switch (toggleStyle)
+        {
+            case 1:   // muted teal plate
+                g.setColour (Colour (0xff2f8a93).interpolatedWith (Colours::white, over ? 0.08f : 0.0f));
+                g.fillRoundedRectangle (r, rad);
+                g.setColour (Colours::white.withAlpha (0.10f));
+                g.drawRoundedRectangle (r.reduced (0.5f), rad, 1.0f);
+                return;
+            case 2:   // dark plate + thin teal outline
+                g.setColour (Palette::screen.withAlpha (0.85f));
+                g.fillRoundedRectangle (r, rad);
+                g.setColour (Palette::accent.withAlpha (over ? 0.95f : 0.75f));
+                g.drawRoundedRectangle (r.reduced (0.6f), rad, 1.2f);
+                return;
+            case 3:   // frosted: lighter grey-teal plate, soft inner light
+                g.setGradientFill (ColourGradient (Colour (0xff5d8f99), 0, r.getY(), Colour (0xff4a7a85), 0, r.getBottom(), false));
+                g.fillRoundedRectangle (r, rad);
+                g.setColour (Palette::ice.withAlpha (0.35f));
+                g.drawRoundedRectangle (r.reduced (0.6f), rad, 1.0f);
+                return;
+            case 4:   // deep petrol with a quiet teal glow line underneath
+                g.setColour (Colour (0xff24606b));
+                g.fillRoundedRectangle (r, rad);
+                g.setColour (Palette::accent.withAlpha (0.7f));
+                g.fillRoundedRectangle (r.withTop (r.getBottom() - 2.0f).reduced (rad, 0.0f), 1.0f);
+                return;
+            case 5:   // between bright and muted, closer to muted
+            case 6:
+            {
+                const auto c = Colour (0xff2f8a93).interpolatedWith (Palette::accent, toggleStyle == 5 ? 0.30f : 0.42f);
+                g.setColour (c.withAlpha (0.18f));
+                g.fillRoundedRectangle (r.expanded (1.5f), rad + 1.5f);
+                g.setColour (c.interpolatedWith (Colours::white, over ? 0.08f : 0.0f));
+                g.fillRoundedRectangle (r, rad);
+                g.setColour (Colours::white.withAlpha (0.12f));
+                g.drawRoundedRectangle (r.reduced (0.5f), rad, 1.0f);
+                return;
+            }
+            default:
+                g.setColour (Palette::accent.withAlpha (0.22f));
+                g.fillRoundedRectangle (r.expanded (2.0f), rad + 2.0f);
+                g.setColour (Palette::accent.interpolatedWith (Colours::white, over ? 0.2f : 0.0f));
+                g.fillRoundedRectangle (r, rad);
+                return;
+        }
     }
     g.setColour (down ? Palette::button.darker (0.2f) : over ? Palette::buttonHi : Palette::button);
     g.fillRoundedRectangle (r, rad);
@@ -136,7 +176,9 @@ void GranulumLook::drawButtonBackground (Graphics& g, Button& b, const Colour&, 
 void GranulumLook::drawButtonText (Graphics& g, TextButton& b, bool over, bool)
 {
     g.setFont (uiFont (b.getHeight() < 30 ? 11.5f : 13.5f, false, 0.08f));
-    g.setColour (b.getToggleState() ? Palette::screen : (over ? Colours::white : Palette::text));
+    const auto onText = toggleStyle == 0 ? Palette::screen : toggleStyle == 2 ? Palette::accent.brighter (0.2f)
+                      : toggleStyle >= 5 ? Colours::white : Palette::ice;
+    g.setColour (b.getToggleState() ? onText : (over ? Colours::white : Palette::text));
     g.drawText (b.getButtonText(), b.getLocalBounds(), Justification::centred, false);
 }
 

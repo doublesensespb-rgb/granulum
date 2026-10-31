@@ -59,6 +59,7 @@ class GranulumLook final : public juce::LookAndFeel_V4
 public:
     GranulumLook();
     static inline bool flatKnobs = true;
+    static inline int toggleStyle = 5;   // pressed/on buttons: teal between bright and muted (owner choice)
     void drawRotarySlider (juce::Graphics&, int x, int y, int w, int h, float pos,
                            float start, float end, juce::Slider&) override;
     void drawButtonBackground (juce::Graphics&, juce::Button&, const juce::Colour&, bool over, bool down) override;

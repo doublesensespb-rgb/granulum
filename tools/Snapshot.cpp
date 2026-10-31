@@ -201,6 +201,24 @@ int main (int argc, char** argv)
         return 0;
     }
 
+    // design preview: "Snapshot <dir> toggles" -> pressed-button colour variants
+    if (argc > 2 && String (argv[2]) == "toggles")
+    {
+        setP (ParamID::delayOn, 1.0f); setP (ParamID::osc1On, 1.0f); setP (ParamID::chord, 3.0f);
+        ed->selectFx (1);
+        for (int st = 0; st < 7; ++st)
+        {
+            GranulumLook::toggleStyle = st;
+            base->repaint();
+            MessageManager::getInstance()->runDispatchLoopUntil (80);
+            auto img = base->createComponentSnapshot (base->getLocalBounds(), true, 1.0f);
+            PNGImageFormat png;
+            FileOutputStream os (outDir.getChildFile ("tg" + String (st) + ".png"));
+            png.writeImageToStream (img, os);
+        }
+        return 0;
+    }
+
     // design preview: "Snapshot <dir> digits" -> routing digits in every style
     if (argc > 2 && String (argv[2]) == "digits")
     {
