@@ -15,7 +15,7 @@ Signal flow:
 OSC 1 (ADD: 16 drawable harmonic bars, optional chord) ─> GRANULAR ─> own FX chain ┐
 OSC 2 (SAMPLE: dropped WAV, loops when grains are off)  ─> GRANULAR ─> own FX chain ┼─> OUTPUT
 OSC 3 (NOISE: 10 built-in noises, no key tracking)      ─> GRANULAR ─> own FX chain ┘
-FX chain = FILTER -> DISTORTION -> DELAY -> REVERB; "1 2 3" buttons choose which OSCs each block processes.
+FX chain = FILTER 1 -> FILTER 2 -> DISTORTION -> DELAY -> REVERB (filters: LP12, LP24, HP, BP, NOTCH, COMB, VOWEL); "1 2 3" buttons choose which OSCs each block processes.
 ```
 
 Every block and both oscillators have an on/off lamp. 3 LFOs (default triangle) with 4-point drawable shapes can be

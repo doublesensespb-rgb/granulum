@@ -45,6 +45,10 @@ namespace ParamID
     inline constexpr const char* cutoff    = "cutoff";
     inline constexpr const char* reso      = "reso";
     inline constexpr const char* ftype     = "ftype";
+    inline constexpr const char* filter2On = "filter2On";
+    inline constexpr const char* cutoff2   = "cutoff2";
+    inline constexpr const char* reso2     = "reso2";
+    inline constexpr const char* ftype2    = "ftype2";
     // DISTORTION
     inline constexpr const char* distOn    = "distOn";
     inline constexpr const char* distType  = "distType";
@@ -80,13 +84,14 @@ static constexpr int kMaxMods = 48;
 static constexpr int kLfoTable = 512;
 static constexpr int kLfoPoints = 4;
 static constexpr int kNumOscs = 3;
-static constexpr const char* kRouteBlocks[4] = { "filter", "dist", "delay", "rev" };
+static constexpr int kNumRouteBlocks = 5;
+static constexpr const char* kRouteBlocks[kNumRouteBlocks] = { "filter", "dist", "delay", "rev", "filter2" };
 
 enum ModTarget
 {
     mtOsc1Vol, mtOsc1Oct, mtOsc1Semi, mtOsc2Vol, mtOsc2Oct, mtOsc2Semi, mtOsc3Vol, mtOsc3Color,
     mtBloom, mtSmear, mtScatter, mtShimmer, mtDrift, mtChime, mtSize, mtSpeed, mtPosition, mtDensity, mtGmix,
-    mtCutoff, mtReso,
+    mtCutoff, mtReso, mtCutoff2, mtReso2,
     mtDistDrive, mtDistTone, mtDistMix, mtDelayTime, mtDelayFb, mtDelayTone, mtDelayMix, mtRevMix, mtRevSize, mtRevLowCut,
     mtPorta, mtOutput,
     mtLfo1Rate, mtLfo2Rate, mtLfo3Rate,
@@ -144,6 +149,38 @@ private:
     int count[2] {};
 };
 
+// Multi-mode filter: LP12, LP24, HP, BP, NOTCH (TPT state-variable), COMB (tuned feedback comb), VOWEL (3 formants)
+class FilterUnit
+{
+public:
+    enum Type { LP12, LP24, HP, BP, Notch, Comb, Vowel };
+    static const juce::StringArray& typeNames();
+    void prepare (double sampleRate);
+    void reset();
+    void process (float* L, float* R, int n, int type, float cutoffHz, float q);
+private:
+    struct Svf
+    {
+        float ic1 = 0, ic2 = 0;
+        float a1 = 0, a2 = 0, a3 = 0, k = 1;
+        void set (float fc, float Q, double sr);
+        inline void tick (float x, float& lp, float& bp, float& hp)
+        {
+            const float v3 = x - ic2;
+            const float v1 = a1 * ic1 + a2 * v3;
+            const float v2 = ic2 + a2 * ic1 + a3 * v3;
+            ic1 = 2.0f * v1 - ic1;
+            ic2 = 2.0f * v2 - ic2;
+            lp = v2; bp = v1; hp = x - k * v1 - v2;
+        }
+    };
+    double sr = 44100.0;
+    Svf s1[2], s2[2], fm[3][2];
+    std::vector<float> comb[2];
+    int combW = 0;
+    float combLp[2] {};
+};
+
 // Stereo delay with tone filter in the feedback loop and optional ping-pong
 class Delay
 {
@@ -161,7 +198,7 @@ private:
 // One effect chain per oscillator, so every block can choose which oscillators it processes
 struct FxChain
 {
-    juce::dsp::StateVariableTPTFilter<float> filter;
+    FilterUnit filter, filter2;
     Distortion distortion;
     Delay delay;
     juce::dsp::Reverb reverb;
@@ -333,11 +370,12 @@ private:
     std::atomic<float>* pChord {};
     std::atomic<float>* pGrainOn {};
     std::atomic<float>* pFilterOn {}; std::atomic<float>* pFtype {};
+    std::atomic<float>* pFilter2On {}; std::atomic<float>* pFtype2 {};
     std::atomic<float>* pDistOn {};   std::atomic<float>* pDistType {};
     std::atomic<float>* pRevOn {};
     std::atomic<float>* pOsc3On {}; std::atomic<float>* pOsc3Type {}; std::atomic<float>* pOsc3Grain {};
     std::atomic<float>* pDelayOn {}; std::atomic<float>* pDelaySync {}; std::atomic<float>* pDelayDiv {}; std::atomic<float>* pDelayPing {};
-    std::array<std::array<std::atomic<float>*, kNumOscs>, 4> pRoute {};
+    std::array<std::array<std::atomic<float>*, kNumOscs>, kNumRouteBlocks> pRoute {};
     std::atomic<float>* pMono {};
     std::array<std::atomic<float>*, kNumLfos> pLfoSync {}, pLfoDiv {}, pLfoMode {}, pLfoRise {}, pLfoOn {};
 

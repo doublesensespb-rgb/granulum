@@ -126,6 +126,8 @@ int main (int argc, char** argv)
     setP (ParamID::chime, 0.55f);
     p.setGrainMask (0xfffcu);            // harmonics 1-2 clean & mono
     setP (ParamID::lfo (1, "On").toRawUTF8(), 0.0f);   // LFO 2 switched off (routings kept)
+    setP (ParamID::filter2On, 1.0f);
+    setP (ParamID::ftype, 1.0f);       // LOW PASS 24
     setP (ParamID::delayOn, 1.0f);
     setP (ParamID::route ("delay", 0).toRawUTF8(), 0.0f);
     ed->selectFx (1);

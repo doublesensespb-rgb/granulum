@@ -238,6 +238,7 @@ class LfoTab final : public juce::Component, public juce::SettableTooltipClient
 public:
     LfoTab (GranulumProcessor&, int index);
     void paint (juce::Graphics&) override;
+    void mouseMove (const juce::MouseEvent&) override;
     void mouseDown (const juce::MouseEvent&) override;
     void mouseDrag (const juce::MouseEvent&) override;
     void mouseUp (const juce::MouseEvent&) override;
@@ -301,6 +302,7 @@ public:
     FxTab (GranulumProcessor&, const char* onParam, const juce::String& name);
     void paint (juce::Graphics&) override;
     void mouseDown (const juce::MouseEvent&) override;
+    void mouseMove (const juce::MouseEvent&) override;
     std::function<void()> onSelect;
     bool selected = false;
     static inline int style = 2;   // 0 filled buttons, 1 text + underline, 2 soft segmented, 3 outline
@@ -379,6 +381,7 @@ public:
     HarmonicEditor& harmonicEditor() { return harmonics; }
     GranulumLook& lookAndFeel() { return look; }
     void selectFx (int i);
+    void selectFilter (int i);
 
 private:
     void timerCallback() override;
@@ -401,29 +404,30 @@ private:
     using ComboAtt  = juce::AudioProcessorValueTreeState::ComboBoxAttachment;
 
     Lamp osc1Lamp { "OSC 1", "ADDITIVE" }, osc2Lamp { "OSC 2", "SAMPLE" }, osc3Lamp { "OSC 3", "NOISE" };
-    Lamp grainLamp { "GRANULAR" }, filterLamp { "FILTER" };
-    std::unique_ptr<ButtonAtt> osc1LampA, osc2LampA, osc3LampA, grainLampA, filterLampA;
+    Lamp grainLamp { "GRANULAR" };
+    std::unique_ptr<ButtonAtt> osc1LampA, osc2LampA, osc3LampA, grainLampA;
 
     juce::TextButton initButton { "INIT" }, randomButton { "RANDOM ALL" }, loadButton { "LOAD" }, chordButton { "CHORD: OFF" };
-    juce::TextButton rndGrains { "RANDOM" }, rndFilter { "RANDOM" }, rndFx { "RANDOM" }, rndBars { "RANDOM" };
+    juce::TextButton rndGrains { "RANDOM" }, rndFx { "RANDOM" }, rndBars { "RANDOM" };
     juce::TextButton osc1Grain { "GRAIN" }, osc2Grain { "GRAIN" }, osc3Grain { "GRAIN" };
     juce::TextButton polyButton { "POLY" }, monoButton { "MONO" };
     juce::TextButton delaySync { "SYNC" }, delayPing { "PING-PONG" };
     std::unique_ptr<ButtonAtt> osc1GrainA, osc2GrainA, osc3GrainA, delaySyncA, delayPingA;
-    juce::ComboBox filterType, distType, delayDiv;
-    std::unique_ptr<ComboAtt> filterTypeA, distTypeA, delayDivA;
+    juce::ComboBox filterType, filterType2, distType, delayDiv;
+    std::unique_ptr<ComboAtt> filterTypeA, filterType2A, distTypeA, delayDivA;
     juce::MidiKeyboardComponent keyboard;
     std::unique_ptr<juce::FileChooser> chooser;
     juce::TooltipWindow tooltips { this, 600 };
 
-    std::vector<std::unique_ptr<Knob>> heroKnobs, smallKnobs, osc1Knobs, osc2Knobs, osc3Knobs, filterKnobs,
+    std::vector<std::unique_ptr<Knob>> heroKnobs, smallKnobs, osc1Knobs, osc2Knobs, osc3Knobs, filterKnobs, filter2Knobs,
                                        distKnobs, delayKnobs, revKnobs, globalKnobs;
     std::vector<Knob*> allKnobs;
 
     // effects: tabs + routing
     std::array<std::unique_ptr<FxTab>, 3> fxTabs;
-    std::array<std::unique_ptr<RouteButtons>, 4> routes;   // filter, dist, delay, reverb
-    int selectedFx = 0;
+    std::array<std::unique_ptr<RouteButtons>, kNumRouteBlocks> routes;   // filter, dist, delay, reverb, filter 2
+    std::array<std::unique_ptr<FxTab>, 2> filterTabs;
+    int selectedFx = 0, selectedFilter = 0;
     int hoverOsc = -1;
 
     struct LfoControls

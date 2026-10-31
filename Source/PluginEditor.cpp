@@ -1591,6 +1591,12 @@ void LfoTab::paint (Graphics& g)
     }
 }
 
+void LfoTab::mouseMove (const MouseEvent& e)
+{
+    // over the light: plain arrow (it's a switch); elsewhere: the grab hand (drag onto a knob)
+    setMouseCursor (e.position.x < 26.0f ? MouseCursor::NormalCursor : MouseCursor::DraggingHandCursor);
+}
+
 void LfoTab::mouseDown (const MouseEvent& e)
 {
     dragging = false;
@@ -2098,6 +2104,11 @@ void FxTab::paint (Graphics& g)
     g.drawText (name, Rectangle<float> (gx + 15.0f, r.getY(), tw + 2.0f, r.getHeight()), Justification::centredLeft, false);
 }
 
+void FxTab::mouseMove (const MouseEvent& e)
+{
+    setMouseCursor (e.position.x < 28.0f ? MouseCursor::NormalCursor : MouseCursor::PointingHandCursor);
+}
+
 void FxTab::mouseDown (const MouseEvent& e)
 {
     if (e.position.x < 28.0f)
@@ -2338,6 +2349,8 @@ GranulumEditor::GranulumEditor (GranulumProcessor& p)
 
     add (filterKnobs, ParamID::cutoff, "Cutoff");
     add (filterKnobs, ParamID::reso,   "Reso");
+    add (filter2Knobs, ParamID::cutoff2, "Cutoff");
+    add (filter2Knobs, ParamID::reso2,   "Reso");
 
     add (distKnobs,  ParamID::distDrive, "Drive",    Knob::Size::Small);
     add (distKnobs,  ParamID::distTone,  "Tone",     Knob::Size::Small);
@@ -2364,13 +2377,12 @@ GranulumEditor::GranulumEditor (GranulumProcessor& p)
     for (auto& k : osc2Knobs) k->setCompact (true);
 
     // lamps
-    for (auto* l : { &osc1Lamp, &osc2Lamp, &osc3Lamp, &grainLamp, &filterLamp }) addAndMakeVisible (*l);
+    for (auto* l : { &osc1Lamp, &osc2Lamp, &osc3Lamp, &grainLamp }) addAndMakeVisible (*l);
     osc1Lamp.fontSize = osc2Lamp.fontSize = osc3Lamp.fontSize = 13.5f;
     osc1LampA   = std::make_unique<ButtonAtt> (s, ParamID::osc1On,   osc1Lamp);
     osc2LampA   = std::make_unique<ButtonAtt> (s, ParamID::osc2On,   osc2Lamp);
     osc3LampA   = std::make_unique<ButtonAtt> (s, ParamID::osc3On,   osc3Lamp);
     grainLampA  = std::make_unique<ButtonAtt> (s, ParamID::grainOn,  grainLamp);
-    filterLampA = std::make_unique<ButtonAtt> (s, ParamID::filterOn, filterLamp);
 
     for (auto* b : { &osc1Grain, &osc2Grain, &osc3Grain, &delaySync, &delayPing })
     {
@@ -2392,11 +2404,26 @@ GranulumEditor::GranulumEditor (GranulumProcessor& p)
     polyButton.onClick = [this] { if (auto* x = proc.apvts.getParameter (ParamID::mono)) x->setValueNotifyingHost (0.0f); };
     monoButton.onClick = [this] { if (auto* x = proc.apvts.getParameter (ParamID::mono)) x->setValueNotifyingHost (1.0f); };
 
-    filterType.addItemList ({ "LOW PASS", "BAND PASS", "HIGH PASS" }, 1);
+    filterType.addItemList (FilterUnit::typeNames(), 1);
+    filterType2.addItemList (FilterUnit::typeNames(), 1);
     distType.addItemList (Distortion::typeNames(), 1);
     delayDiv.addItemList (GranulumProcessor::divisionNames(), 1);
-    for (auto* c : { &filterType, &distType, &delayDiv }) addAndMakeVisible (*c);
-    filterTypeA = std::make_unique<ComboAtt> (s, ParamID::ftype, filterType);
+    for (auto* c : { &filterType, &filterType2, &distType, &delayDiv }) addAndMakeVisible (*c);
+    filterTypeA  = std::make_unique<ComboAtt> (s, ParamID::ftype, filterType);
+    filterType2A = std::make_unique<ComboAtt> (s, ParamID::ftype2, filterType2);
+    filterType.setTooltip ("COMB rings at the played note. VOWEL: CUTOFF morphs A-E-I-O-U, RESO sharpens it.");
+    filterType2.setTooltip ("COMB rings at the played note. VOWEL: CUTOFF morphs A-E-I-O-U, RESO sharpens it.");
+    filter2Knobs[0]->slider.setTooltip ("Cutoff follows the note you play (set at C3).");
+    {
+        const char* fOn[2] = { ParamID::filterOn, ParamID::filter2On };
+        const char* fName[2] = { "FILTER 1", "FILTER 2" };
+        for (int i = 0; i < 2; ++i)
+        {
+            filterTabs[(size_t) i] = std::make_unique<FxTab> (proc, fOn[i], fName[i]);
+            filterTabs[(size_t) i]->onSelect = [this, i] { selectFilter (i); };
+            addAndMakeVisible (*filterTabs[(size_t) i]);
+        }
+    }
     distTypeA   = std::make_unique<ComboAtt> (s, ParamID::distType, distType);
     delayDivA   = std::make_unique<ComboAtt> (s, ParamID::delayDiv, delayDiv);
     filterKnobs[0]->slider.setTooltip ("Cutoff follows the note you play (set at C3). The readout shows the note where it cuts.");
@@ -2410,8 +2437,8 @@ GranulumEditor::GranulumEditor (GranulumProcessor& p)
         fxTabs[(size_t) i]->onSelect = [this, i] { selectFx (i); };
         addAndMakeVisible (*fxTabs[(size_t) i]);
     }
-    const char* routeNames[4] = { "FILTER", "DISTORTION", "DELAY", "REVERB" };
-    for (int b = 0; b < 4; ++b)
+    const char* routeNames[kNumRouteBlocks] = { "FILTER 1", "DISTORTION", "DELAY", "REVERB", "FILTER 2" };
+    for (int b = 0; b < kNumRouteBlocks; ++b)
     {
         routes[(size_t) b] = std::make_unique<RouteButtons> (proc, kRouteBlocks[b], routeNames[b]);
         routes[(size_t) b]->onHover = [this] (int o) { setHoverOsc (o); };
@@ -2425,9 +2452,8 @@ GranulumEditor::GranulumEditor (GranulumProcessor& p)
     addAndMakeVisible (presetBar);
     presetBar.onLoaded = [this] { lfoEditor.setLfo (selectedLfo); };
 
-    for (auto* b : { &rndGrains, &rndFilter, &rndFx, &rndBars, &randomButton, &initButton, &loadButton, &chordButton }) addAndMakeVisible (*b);
+    for (auto* b : { &rndGrains, &rndFx, &rndBars, &randomButton, &initButton, &loadButton, &chordButton }) addAndMakeVisible (*b);
     rndGrains.onClick    = [this] { proc.randomizeSection (0); };
-    rndFilter.onClick    = [this] { proc.randomizeSection (1); };
     rndFx.onClick        = [this] { proc.randomizeSection (2); };
     rndBars.onClick      = [this] { proc.randomizeSection (3); };
     randomButton.onClick = [this] { proc.randomize(); };
@@ -2496,6 +2522,7 @@ GranulumEditor::GranulumEditor (GranulumProcessor& p)
     setResizeLimits (864, 640, 1620, 1200);
     setSize (1080, 800);
     selectFx (0);
+    selectFilter (0);
     startTimerHz (30);
     timerCallback();
 }
@@ -2533,6 +2560,19 @@ void GranulumEditor::selectFx (int i)
     delayDiv.setVisible (i == 1);
     for (int b = 1; b < 4; ++b) routes[(size_t) b]->setVisible (b - 1 == i);
     resized();
+    repaint();
+}
+
+void GranulumEditor::selectFilter (int i)
+{
+    selectedFilter = i;
+    for (int t = 0; t < 2; ++t) { filterTabs[(size_t) t]->selected = (t == i); filterTabs[(size_t) t]->repaint(); }
+    for (auto& k : filterKnobs)  k->setVisible (i == 0);
+    for (auto& k : filter2Knobs) k->setVisible (i == 1);
+    filterType.setVisible (i == 0);
+    filterType2.setVisible (i == 1);
+    routes[0]->setVisible (i == 0);
+    routes[4]->setVisible (i == 1);
     repaint();
 }
 
@@ -2586,7 +2626,7 @@ void GranulumEditor::timerCallback()
     auto dimK = [] (std::vector<std::unique_ptr<Knob>>& ks, bool on) { for (auto& k : ks) k->setAlpha (on ? 1.0f : 0.38f); };
     auto on = [&s] (const char* id) { return s.getRawParameterValue (id)->load() > 0.5f; };
     const bool o1 = on (ParamID::osc1On), o2 = on (ParamID::osc2On), o3 = on (ParamID::osc3On);
-    const bool gOn = on (ParamID::grainOn), fOn = on (ParamID::filterOn);
+    const bool gOn = on (ParamID::grainOn), fOn = on (ParamID::filterOn), f2On = on (ParamID::filter2On);
     const bool dOn = on (ParamID::distOn), lOn = on (ParamID::delayOn), rOn = on (ParamID::revOn);
     dimK (osc1Knobs, o1); dim ({ &harmonics, &chordButton, &rndBars }, o1);
     dimK (osc2Knobs, o2);
@@ -2595,7 +2635,9 @@ void GranulumEditor::timerCallback()
     dim ({ &osc2Grain }, o2 && gOn);
     dim ({ &osc3Grain }, o3 && gOn);
     dimK (heroKnobs, gOn); dimK (smallKnobs, gOn); dim ({ &rndGrains }, gOn);
-    dimK (filterKnobs, fOn); dim ({ &filterType, &rndFilter, routes[0].get() }, fOn);
+    dimK (filterKnobs, fOn); dim ({ &filterType, routes[0].get() }, fOn);
+    dimK (filter2Knobs, f2On); dim ({ &filterType2, routes[4].get() }, f2On);
+    for (auto& t : filterTabs) t->repaint();
     dimK (distKnobs, dOn);  dim ({ &distType, routes[1].get() }, dOn);
     dimK (delayKnobs, lOn); dim ({ &delaySync, &delayPing, &delayDiv, routes[2].get() }, lOn);
     dimK (revKnobs, rOn);   dim ({ routes[3].get() }, rOn);
@@ -2716,6 +2758,14 @@ void GranulumEditor::paint (Graphics& g)
     g.setColour (Palette::text);
     g.setFont (uiFont (14.5f * sc, false, 0.08f));
     g.drawText ("EFFECTS", fxLabel, Justification::centredLeft, false);
+    if (FxTab::style == 2 && filterTabs[0] != nullptr)
+    {
+        auto seg = filterTabs[0]->getBounds().getUnion (filterTabs[1]->getBounds()).toFloat();
+        g.setColour (Palette::screen.withAlpha (0.7f));
+        g.fillRoundedRectangle (seg, 8.0f);
+        g.setColour (Colours::white.withAlpha (0.05f));
+        g.drawRoundedRectangle (seg.reduced (0.5f), 8.0f, 1.0f);
+    }
     if (FxTab::style == 2 && fxTabs[0] != nullptr)
     {
         auto seg = fxTabs[0]->getBounds().getUnion (fxTabs[2]->getBounds()).toFloat();
@@ -2857,7 +2907,12 @@ void GranulumEditor::resized()
         left.setBounds (area.getX(), area.getY(), area.getWidth() - S (80), S (26));
     };
     headerRow (grainArea,  grainLamp,  rndGrains);
-    headerRow (filterArea, filterLamp, rndFilter);
+    {
+        auto tabs = filterArea.withHeight (S (30));
+        const int tw = tabs.getWidth() / 2;
+        filterTabs[0]->setBounds (tabs.removeFromLeft (tw));
+        filterTabs[1]->setBounds (tabs);
+    }
     rndFx.setBounds (fxArea.getRight() - S (74), fxArea.getY(), S (74), S (26));
     fxLabel = { fxArea.getX(), fxArea.getY(), fxArea.getWidth() - S (80), S (26) };
 
@@ -2879,10 +2934,13 @@ void GranulumEditor::resized()
         auto f = filterArea.withTrimmedTop (S (32));
         auto row1 = f.removeFromTop ((int) (f.getHeight() * 0.64f));
         layoutRow (filterKnobs, row1);
+        layoutRow (filter2Knobs, row1);
         auto row2 = f.withSizeKeepingCentre (f.getWidth(), S (28));
         routes[0]->setBounds (row2.removeFromRight (S (66)));
+        routes[4]->setBounds (routes[0]->getBounds());
         row2.removeFromRight (S (6));
         filterType.setBounds (row2);
+        filterType2.setBounds (row2);
     }
     {
         auto e = fxArea.withTrimmedTop (S (32));

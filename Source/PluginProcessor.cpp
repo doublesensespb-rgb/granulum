@@ -23,7 +23,7 @@ namespace
         ParamID::osc3Vol, ParamID::osc3Color,
         ParamID::bloom, ParamID::smear, ParamID::scatter, ParamID::shimmer, ParamID::drift, ParamID::chime,
         ParamID::gsize, ParamID::speed, ParamID::position, ParamID::density, ParamID::gmix,
-        ParamID::cutoff, ParamID::reso,
+        ParamID::cutoff, ParamID::reso, ParamID::cutoff2, ParamID::reso2,
         ParamID::distDrive, ParamID::distTone, ParamID::distMix,
         ParamID::delayTime, ParamID::delayFb, ParamID::delayTone, ParamID::delayMix,
         ParamID::revMix, ParamID::revSize, ParamID::revLowCut,
@@ -93,6 +93,129 @@ void Distortion::process (float* L, float* R, int n, int type, float drive, floa
             dcX[c] = y; dcY[c] = d;
             lp[c] = (1.0f - a) * d + a * lp[c];
             x[i] = x[i] * (1.0f - mix) + lp[c] * mix;
+        }
+    }
+}
+
+// ===========================================================================
+// FilterUnit
+
+const StringArray& FilterUnit::typeNames()
+{
+    static const StringArray s { "LOW PASS 12", "LOW PASS 24", "HIGH PASS", "BAND PASS", "NOTCH", "COMB", "VOWEL" };
+    return s;
+}
+
+void FilterUnit::Svf::set (float fc, float Q, double sampleRate)
+{
+    const float g = std::tan (MathConstants<float>::pi * jlimit (10.0f, (float) sampleRate * 0.45f, fc) / (float) sampleRate);
+    k = 1.0f / jmax (0.3f, Q);
+    a1 = 1.0f / (1.0f + g * (g + k));
+    a2 = g * a1;
+    a3 = g * a2;
+}
+
+void FilterUnit::prepare (double sampleRate)
+{
+    sr = sampleRate;
+    for (auto& c : comb) c.assign ((size_t) (sr / 15.0) + 4, 0.0f);
+    reset();
+}
+
+void FilterUnit::reset()
+{
+    for (auto* arr : { s1, s2 }) for (int c = 0; c < 2; ++c) { arr[c].ic1 = arr[c].ic2 = 0.0f; }
+    for (auto& f : fm) for (auto& c : f) c.ic1 = c.ic2 = 0.0f;
+    for (auto& c : comb) std::fill (c.begin(), c.end(), 0.0f);
+    combW = 0; combLp[0] = combLp[1] = 0.0f;
+}
+
+void FilterUnit::process (float* L, float* R, int n, int type, float fc, float q)
+{
+    float* ch[2] = { L, R };
+    switch (type)
+    {
+        case LP12: case HP: case BP: case Notch:
+        {
+            for (auto& s : s1) s.set (fc, q, sr);
+            for (int c = 0; c < 2; ++c)
+                for (int i = 0; i < n; ++i)
+                {
+                    float lp, bp, hp;
+                    s1[c].tick (ch[c][i], lp, bp, hp);
+                    ch[c][i] = type == LP12 ? lp : type == HP ? hp : type == BP ? bp * s1[c].k : lp + hp;
+                }
+            break;
+        }
+        case LP24:
+        {
+            // two stages; the resonance sits on the second one, the first stays gentle
+            for (auto& s : s1) s.set (fc, 0.54f, sr);
+            for (auto& s : s2) s.set (fc, q * 1.3f, sr);
+            for (int c = 0; c < 2; ++c)
+                for (int i = 0; i < n; ++i)
+                {
+                    float lp, bp, hp, lp2;
+                    s1[c].tick (ch[c][i], lp, bp, hp);
+                    s2[c].tick (lp, lp2, bp, hp);
+                    ch[c][i] = lp2;
+                }
+            break;
+        }
+        case Comb:
+        {
+            // feedback comb tuned to the cutoff (which follows the note): metallic, string-like ringing
+            const int size = (int) comb[0].size();
+            const float d = jlimit (2.0f, (float) size - 2.0f, (float) (sr / jmax (15.0f, fc)));
+            const float fb = jlimit (0.3f, 0.97f, 0.55f + 0.045f * q);
+            const float damp = 0.25f;
+            for (int i = 0; i < n; ++i)
+            {
+                float rp = (float) combW - d;
+                if (rp < 0.0f) rp += (float) size;
+                const int i0 = (int) rp;
+                const float fr = rp - (float) i0;
+                const int i1 = (i0 + 1) % size;
+                for (int c = 0; c < 2; ++c)
+                {
+                    const float del = comb[c][(size_t) i0] + (comb[c][(size_t) i1] - comb[c][(size_t) i0]) * fr;
+                    combLp[c] = del + (combLp[c] - del) * damp;
+                    const float y = ch[c][i] + combLp[c] * fb;
+                    comb[c][(size_t) combW] = y;
+                    ch[c][i] = y * (1.0f - fb) * 1.6f;
+                }
+                if (++combW >= size) combW = 0;
+            }
+            break;
+        }
+        default:
+        {
+            // VOWEL: cutoff morphs A -> E -> I -> O -> U, resonance sharpens the formants
+            static const float table[5][3] = { { 800, 1150, 2900 }, { 400, 1600, 2700 }, { 270, 2140, 2950 },
+                                               { 450, 800, 2830 }, { 325, 700, 2530 } };
+            const float pos = jlimit (0.0f, 3.999f, std::log (jmax (80.0f, fc) / 80.0f) / std::log (100.0f) * 4.0f);
+            const int a = (int) pos;
+            const float t = pos - (float) a;
+            const float gains[3] = { 1.0f, 0.6f, 0.35f };
+            const float fq = 4.0f + 2.0f * q;
+            for (int f = 0; f < 3; ++f)
+            {
+                const float hz = table[a][f] + (table[a + 1][f] - table[a][f]) * t;
+                for (auto& s : fm[f]) s.set (hz, fq, sr);
+            }
+            for (int c = 0; c < 2; ++c)
+                for (int i = 0; i < n; ++i)
+                {
+                    float out = 0.0f;
+                    for (int f = 0; f < 3; ++f)
+                    {
+                        float lp, bp, hp;
+                        fm[f][c].tick (ch[c][i], lp, bp, hp);
+                        out += bp * gains[f];
+                    }
+                    ch[c][i] = out * 1.0f;
+                }
+            break;
         }
     }
 }
@@ -295,7 +418,15 @@ AudioProcessorValueTreeState::ParameterLayout GranulumProcessor::createLayout()
                                        A().withStringFromValueFunction ([] (float v, int) { return hzWithNote (v); })));
     ps.push_back (std::make_unique<P> (ParameterID { ParamID::reso, 1 }, "Resonance", skewed (0.5f, 10.0f, 1.5f), 0.707f,
                                        A().withStringFromValueFunction ([] (float v, int) { return fmt (v, 2, ""); })));
-    ps.push_back (std::make_unique<AudioParameterChoice> (ParameterID { ParamID::ftype, 1 }, "Filter Type", StringArray { "Low Pass", "Band Pass", "High Pass" }, 0));
+    ps.push_back (std::make_unique<AudioParameterChoice> (ParameterID { ParamID::ftype, 1 }, "Filter Type", FilterUnit::typeNames(), 0));
+
+    // FILTER 2 (same engine, own settings)
+    ps.push_back (std::make_unique<B> (ParameterID { ParamID::filter2On, 1 }, "Filter 2 On", false));
+    ps.push_back (std::make_unique<P> (ParameterID { ParamID::cutoff2, 1 }, "Cutoff 2", skewed (20.0f, 20000.0f, 1000.0f), 800.0f,
+                                       A().withStringFromValueFunction ([] (float v, int) { return hzWithNote (v); })));
+    ps.push_back (std::make_unique<P> (ParameterID { ParamID::reso2, 1 }, "Resonance 2", skewed (0.5f, 10.0f, 1.5f), 0.707f,
+                                       A().withStringFromValueFunction ([] (float v, int) { return fmt (v, 2, ""); })));
+    ps.push_back (std::make_unique<AudioParameterChoice> (ParameterID { ParamID::ftype2, 1 }, "Filter 2 Type", FilterUnit::typeNames(), 6));
 
     // DISTORTION
     ps.push_back (std::make_unique<B> (ParameterID { ParamID::distOn, 1 }, "Distortion On", false));
@@ -373,6 +504,8 @@ GranulumProcessor::GranulumProcessor()
     pGrainOn   = apvts.getRawParameterValue (ParamID::grainOn);
     pFilterOn  = apvts.getRawParameterValue (ParamID::filterOn);
     pFtype     = apvts.getRawParameterValue (ParamID::ftype);
+    pFilter2On = apvts.getRawParameterValue (ParamID::filter2On);
+    pFtype2    = apvts.getRawParameterValue (ParamID::ftype2);
     pDistOn    = apvts.getRawParameterValue (ParamID::distOn);
     pDistType  = apvts.getRawParameterValue (ParamID::distType);
     pRevOn     = apvts.getRawParameterValue (ParamID::revOn);
@@ -383,7 +516,7 @@ GranulumProcessor::GranulumProcessor()
     pDelaySync = apvts.getRawParameterValue (ParamID::delaySync);
     pDelayDiv  = apvts.getRawParameterValue (ParamID::delayDiv);
     pDelayPing = apvts.getRawParameterValue (ParamID::delayPing);
-    for (int b = 0; b < 4; ++b)
+    for (int b = 0; b < kNumRouteBlocks; ++b)
         for (int o = 0; o < kNumOscs; ++o)
             pRoute[(size_t) b][(size_t) o] = apvts.getRawParameterValue (ParamID::route (kRouteBlocks[b], o));
     pMono      = apvts.getRawParameterValue (ParamID::mono);
@@ -425,7 +558,8 @@ void GranulumProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
     dsp::ProcessSpec spec { sampleRate, (uint32) jmax (kChunk, samplesPerBlock), 2 };
     for (auto& c : chains)
     {
-        c.filter.prepare (spec); c.filter.reset();
+        c.filter.prepare (sampleRate);
+        c.filter2.prepare (sampleRate);
         c.reverb.prepare (spec); c.reverb.reset();
         c.revCut.prepare (spec); c.revCut.reset();
         c.revCut.setType (dsp::StateVariableTPTFilterType::highpass);
@@ -813,8 +947,12 @@ void GranulumProcessor::processChunk (int from, int len)
 
     // ---- shared block settings ----
     const float note = engineAdd.lastNote.load (std::memory_order_relaxed);
-    const float cut = jlimit (20.0f, (float) (sr * 0.45), v[mtCutoff] * std::exp2 ((note - 60.0f) / 12.0f));
+    const float keyMul = std::exp2 ((note - 60.0f) / 12.0f);
+    const float cut  = jlimit (20.0f, (float) (sr * 0.45), v[mtCutoff]  * keyMul);
+    const float cut2 = jlimit (20.0f, (float) (sr * 0.45), v[mtCutoff2] * keyMul);
     keyCutoff.store (cut, std::memory_order_relaxed);
+    const bool filter2On = pFilter2On->load() > 0.5f;
+    const int ft2 = (int) pFtype2->load();
     const bool filterOn = pFilterOn->load() > 0.5f, distOn = pDistOn->load() > 0.5f && v[mtDistMix] > 0.001f;
     const bool delayOn = pDelayOn->load() > 0.5f, revOn = pRevOn->load() > 0.5f;
     const int ft = (int) pFtype->load();
@@ -849,14 +987,9 @@ void GranulumProcessor::processChunk (int from, int len)
         dsp::ProcessContextReplacing<float> ctx (blk);
 
         if (filterOn && routed (0))
-        {
-            c.filter.setType (ft == 0 ? dsp::StateVariableTPTFilterType::lowpass
-                            : ft == 1 ? dsp::StateVariableTPTFilterType::bandpass
-                                      : dsp::StateVariableTPTFilterType::highpass);
-            c.filter.setCutoffFrequency (cut);
-            c.filter.setResonance (v[mtReso]);
-            c.filter.process (ctx);
-        }
+            c.filter.process (L, R, len, ft, cut, v[mtReso]);
+        if (filter2On && routed (4))
+            c.filter2.process (L, R, len, ft2, cut2, v[mtReso2]);
         if (distOn && routed (1))
             c.distortion.process (L, R, len, (int) pDistType->load(), v[mtDistDrive], v[mtDistTone], v[mtDistMix]);
         if (delayOn && routed (2))
@@ -1186,10 +1319,14 @@ void GranulumProcessor::randomizeSection (int section)
     }
     else if (section == 1)
     {
-        const int type = r.nextInt (3);
+        const int type = r.nextInt (2);                         // LP12 / LP24 for filter 1
         set (ParamID::ftype,  (float) type);
-        set (ParamID::cutoff, type == 0 ? 300.0f * std::pow (20.0f, r.nextFloat()) : type == 1 ? 400.0f * std::pow (6.0f, r.nextFloat()) : 80.0f * std::pow (10.0f, r.nextFloat()));
+        set (ParamID::cutoff, 300.0f * std::pow (20.0f, r.nextFloat()));
         set (ParamID::reso,   0.6f * std::pow (5.0f, r.nextFloat()));
+        const int t2 = 2 + r.nextInt (5);                       // HP .. VOWEL for filter 2
+        set (ParamID::ftype2,  (float) t2);
+        set (ParamID::cutoff2, 150.0f * std::pow (30.0f, r.nextFloat()));
+        set (ParamID::reso2,   0.6f * std::pow (6.0f, r.nextFloat()));
     }
     else if (section == 2)
     {
