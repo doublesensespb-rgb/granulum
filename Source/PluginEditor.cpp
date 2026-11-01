@@ -862,8 +862,24 @@ void GrainField::mouseUp (const MouseEvent&)
 // ============================================================================
 // Additive bars (16, wide) + gold GRAIN row
 
+static File settingsFile()
+{
+    return File::getSpecialLocation (File::userApplicationDataDirectory).getChildFile ("GRAIN FORM").getChildFile ("settings.xml");
+}
+
+void HarmonicEditor::rememberHintSeen()
+{
+    auto f = settingsFile();
+    f.getParentDirectory().createDirectory();
+    XmlElement x ("GRAINFORM");
+    x.setAttribute ("selectHintSeen", 1);
+    x.writeTo (f);
+}
+
 HarmonicEditor::HarmonicEditor (GranulumProcessor& p) : proc (p)
 {
+    if (auto x = parseXML (settingsFile()))
+        showHint = x->getIntAttribute ("selectHintSeen", 0) == 0;
     h = proc.getHarmonics();
     mask = proc.getGrainMask();
     setMouseCursor (MouseCursor::CrosshairCursor);
@@ -874,6 +890,7 @@ void HarmonicEditor::timerCallback()
 {
     const float dt = 1.0f / 30.0f;
     time += dt;
+    introT += dt;
     {
         const bool grains = grainsActive();
         for (int k = 0; k < granulum::kNumHarmonics; ++k)
@@ -981,17 +998,20 @@ void HarmonicEditor::mouseMove (const MouseEvent& e)
     {
         const int b = barAt (e.position.x);
         const bool on = (mask >> b) & 1u;
+        hoverBar = b;
         setTooltip ("Harmonic " + String (b + 1) + (on ? ":  GRAIN ON.  Click to keep it clean & mono."
                                                        : ":  CLEAN & MONO.  Click to send it into the grains."));
         setMouseCursor (MouseCursor::PointingHandCursor);
     }
     else if (e.position.x < barArea().getX())
     {
-        setTooltip ("GRAIN: click to switch all harmonics into the grains or out of them.\nLit bead = granulated, empty = clean & mono. Keep the lowest ones clean for a solid sub.");
-        setMouseCursor (e.position.y >= pillRow().getY() - 6.0f ? MouseCursor::PointingHandCursor : MouseCursor::NormalCursor);
+        hoverBar = -1;
+        setTooltip ("SELECT: lit dot = this harmonic turns into grains, empty = it stays clean & mono.\nKeep the lowest ones clean for a solid sub.");
+        setMouseCursor (MouseCursor::NormalCursor);
     }
     else
     {
+        hoverBar = -1;
         setTooltip ("Draw the harmonics with the mouse. Right button erases.\nGold dots below: which harmonics go into the grains.");
         setMouseCursor (MouseCursor::CrosshairCursor);
     }
@@ -999,14 +1019,6 @@ void HarmonicEditor::mouseMove (const MouseEvent& e)
 
 void HarmonicEditor::mouseDown (const MouseEvent& e)
 {
-    if (e.position.x < barArea().getX() && e.position.y >= pillRow().getY() - 6.0f)
-    {
-        // GRAIN button: all beads on <-> all off
-        mask = (mask & 0xffffu) != 0 ? 0u : 0xffffu;
-        proc.setGrainMask (mask);
-        repaint();
-        return;
-    }
     if (e.position.y >= pillRow().getY() - 3.0f && e.position.x >= barArea().getX())
     {
         pillMode = true;
@@ -1015,6 +1027,7 @@ void HarmonicEditor::mouseDown (const MouseEvent& e)
         const int b = barAt (e.position.x);
         pillValue = ! ((mask >> b) & 1u);
         applyPill (b);
+        if (showHint) { showHint = false; rememberHintSeen(); }
         return;
     }
     pillMode = false;
@@ -1030,6 +1043,8 @@ void HarmonicEditor::mouseDrag (const MouseEvent& e)
     if (pillMode) applyPill (barAt (e.position.x));
     else          applyMouse (e, false);
 }
+
+void HarmonicEditor::mouseExit (const MouseEvent&) { hoverBar = -1; }
 
 void HarmonicEditor::mouseUp (const MouseEvent&) { editing = false; lastBar = -1; lastPill = -1; pillMode = false; }
 
@@ -1073,6 +1088,11 @@ void HarmonicEditor::paint (Graphics& g)
     {
         auto slot = Rectangle<float> (a.getX() + bw * (float) k, a.getY(), bw, a.getHeight()).reduced (bw * 0.12f, 0.0f);
         const bool shattered = grains && ((mask >> k) & 1u);
+        if (hoverBar == k)
+        {
+            g.setColour (Colour (0xfff1e4cb).withAlpha (0.10f));
+            g.fillRoundedRectangle (slot.expanded (bw * 0.08f, 2.0f), 4.0f);
+        }
         // granulated harmonics sit on a slightly warmer, sandy background
         if (barStyle == 5)
         {
@@ -1276,15 +1296,11 @@ void HarmonicEditor::paint (Graphics& g)
         auto row = pillRow();
         const float alpha = active ? (grains ? 1.0f : 0.4f) : 0.25f;
         const Colour pearl (0xfff1e4cb), pearlShade (0xffc9ae84);   // sand pearl, same light as the bars
-        // GRAIN button: toggles all beads
-        const auto btn = Rectangle<float> (r.getX() + 4.0f, row.getY() - 3.0f, kGrainLabelW - 4.0f, row.getHeight() + 6.0f);
-        g.setColour (pearlShade.withAlpha (0.22f * alpha));
-        g.fillRoundedRectangle (btn, 5.0f);
-        g.setColour (pearlShade.withAlpha (0.7f * alpha));
-        g.drawRoundedRectangle (btn.reduced (0.5f), 5.0f, 1.0f);
-        g.setColour (pearl.withAlpha (alpha));
-        g.setFont (uiFont (9.5f, true, 0.12f));
-        g.drawText ("GRAIN", btn, Justification::centred, false);
+        // quiet label: SELECT (echoes SELECTIVE GRANULATION), not a button
+        g.setColour (pearl.withAlpha (0.85f * alpha));
+        g.setFont (uiFont (9.5f, true, 0.18f));
+        g.drawText ("SELECT", Rectangle<float> (r.getX() + 5.0f, row.getY() - 3.0f, kGrainLabelW, row.getHeight() + 6.0f), Justification::centredLeft, false);
+        const float introX = introT < 1.8f ? (introT / 1.4f) : -1.0f;      // one light wave across the dots on open
 
         for (int k = 0; k < granulum::kNumHarmonics; ++k)
         {
@@ -1293,9 +1309,18 @@ void HarmonicEditor::paint (Graphics& g)
             if (rowStyle == 2)
             {
                 const auto c = cell.getCentre();
-                const float rad = 2.8f;
-                if (on) { g.setColour (pearl.withAlpha (alpha)); g.fillEllipse (Rectangle<float> (rad * 2.0f, rad * 2.0f).withCentre (c)); }
-                else    { g.setColour (pearlShade.withAlpha (0.55f * alpha)); g.drawEllipse (Rectangle<float> (rad * 2.0f, rad * 2.0f).withCentre (c), 1.0f); }
+                const bool hot = hoverBar == k;
+                const float pos = (float) k / (float) (granulum::kNumHarmonics - 1);
+                const float wave = introX >= 0.0f ? std::exp (-std::pow ((pos - introX) / 0.08f, 2.0f)) : 0.0f;
+                const float rad = (hot ? 4.0f : 2.8f) + 1.4f * wave;
+                const auto d = Rectangle<float> (rad * 2.0f, rad * 2.0f).withCentre (c);
+                if (wave > 0.02f || hot)
+                {
+                    g.setColour (pearl.withAlpha ((0.25f * wave + (hot ? 0.18f : 0.0f)) * alpha));
+                    g.fillEllipse (d.expanded (3.0f));
+                }
+                if (on) { g.setColour (pearl.interpolatedWith (Colours::white, wave).withAlpha (alpha)); g.fillEllipse (d); }
+                else    { g.setColour (pearlShade.withAlpha ((hot ? 0.9f : 0.55f) * alpha)); g.drawEllipse (d, hot ? 1.3f : 1.0f); }
             }
             else if (rowStyle == 0)
             {
@@ -1335,6 +1360,29 @@ void HarmonicEditor::paint (Graphics& g)
                 }
             }
         }
+    }
+
+    if (showHint && active)
+    {
+        // first-run hint: disappears after the first click on a dot, never comes back
+        const auto row = pillRow();
+        const String txt ("Click the dots: choose which harmonics turn into grains");
+        const auto f = uiFont (10.0f, false, 0.04f);
+        const float w = (float) GlyphArrangement::getStringWidthInt (f, txt) + 20.0f;
+        auto plate = Rectangle<float> (w, 20.0f).withCentre ({ row.getCentreX(), row.getY() - 15.0f });
+        plate.setX (jmax (r.getX() + 4.0f, plate.getX()));
+        const float pulse = 0.85f + 0.15f * std::sin (time * 3.0f);
+        g.setColour (Palette::deep.withAlpha (0.88f));
+        g.fillRoundedRectangle (plate, 6.0f);
+        g.setColour (Colour (0xfff1e4cb).withAlpha (0.55f * pulse));
+        g.drawRoundedRectangle (plate.reduced (0.5f), 6.0f, 1.0f);
+        Path arrow;
+        arrow.addTriangle (plate.getCentreX() - 5.0f, plate.getBottom(), plate.getCentreX() + 5.0f, plate.getBottom(), plate.getCentreX(), plate.getBottom() + 5.0f);
+        g.setColour (Palette::deep.withAlpha (0.88f));
+        g.fillPath (arrow);
+        g.setColour (Colour (0xfff1e4cb).withAlpha (pulse));
+        g.setFont (f);
+        g.drawText (txt, plate, Justification::centred, false);
     }
 
     if (! active)
@@ -2050,8 +2098,10 @@ void FxTab::paint (Graphics& g)
         }
     };
 
-    const auto font = uiFont (12.5f, selected, 0.16f);
-    const float tw = (float) GlyphArrangement::getStringWidthInt (font, name);
+    // layout is measured with the bold font in every state, so the light and the name never move when a tab is selected
+    const float fs = getWidth() < 100 ? 11.5f : 12.5f;
+    const auto font = uiFont (fs, selected, 0.16f);
+    const float tw = (float) GlyphArrangement::getStringWidthInt (uiFont (fs, true, 0.16f), name);
     const float groupW = tw + 15.0f;
     const float gx = r.getCentreX() - groupW * 0.5f;
 

@@ -178,8 +178,14 @@ public:
     void mouseDown (const juce::MouseEvent&) override;
     void mouseDrag (const juce::MouseEvent&) override;
     void mouseUp (const juce::MouseEvent&) override;
+    void mouseExit (const juce::MouseEvent&) override;
+
+    int hoverBar = -1;          // public so the snapshot tool can show the hover look
+    bool showHint = true;       // first-run hint over the dots
+    float introT = 0.0f;        // time since open, drives the one-off light wave
 
 private:
+    void rememberHintSeen();
     void timerCallback() override;
     juce::Rectangle<float> barArea() const;
     juce::Rectangle<float> pillRow() const;

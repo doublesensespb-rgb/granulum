@@ -203,6 +203,27 @@ int main (int argc, char** argv)
         return 0;
     }
 
+    // design preview: "Snapshot <dir> select" -> intro wave over the dots, first-run hint, hover look
+    if (argc > 2 && String (argv[2]) == "select")
+    {
+        setP (ParamID::osc1On, 1.0f); setP (ParamID::grainOn, 1.0f);
+        p.setGrainMask (0xfffcu);
+        auto& he = ed->harmonicEditor();
+        he.showHint = true;
+        he.introT = 0.0f;
+        const auto area = he.getBoundsInParent().expanded (6, 4).withTrimmedTop (-30).withRight (he.getBoundsInParent().getRight() + 160);
+        for (int f = 0; f < 90; ++f)
+        {
+            he.hoverBar = f >= 55 ? 6 : -1;
+            MessageManager::getInstance()->runDispatchLoopUntil (40);
+            auto img = base->createComponentSnapshot (area, true, 2.0f);
+            PNGImageFormat png;
+            FileOutputStream os (outDir.getChildFile ("sel" + String (f).paddedLeft ('0', 2) + ".png"));
+            png.writeImageToStream (img, os);
+        }
+        return 0;
+    }
+
     // design preview: "Snapshot <dir> toggles" -> pressed-button colour variants
     if (argc > 2 && String (argv[2]) == "toggles")
     {
