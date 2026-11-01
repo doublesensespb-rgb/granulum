@@ -66,11 +66,11 @@ void GranulumLook::drawRotarySlider (Graphics& g, int x, int y, int w, int h, fl
     if (flatKnobs)
     {
         // flat, quiet knob: a plain disc with one pointer line
-        auto b = Rectangle<int> (x, y, w, h).toFloat().reduced (5.0f);
+        auto b = Rectangle<int> (x, y, w, h).toFloat().reduced (h < 50 ? 1.5f : 5.0f);
         const float r = jmin (b.getWidth(), b.getHeight()) * 0.5f;
         const auto c = b.getCentre();
         const float angle = start + pos * (end - start);
-        const float br = r * 0.78f;
+        const float br = r * (h < 50 ? 0.9f : 0.78f);
         g.setColour (s.isMouseOverOrDragging() ? Palette::knob.brighter (0.12f) : Palette::knob);
         g.fillEllipse (Rectangle<float> (br * 2.0f, br * 2.0f).withCentre (c));
         const auto p1 = c.getPointOnCircumference (br * 0.12f, angle);
@@ -1922,7 +1922,7 @@ static float envTime (float w, float maxMs, float maxW) { return 5.0f * std::exp
 AmpEditor::Geo AmpEditor::geometry() const
 {
     Geo g;
-    g.a = getLocalBounds().toFloat().reduced (12.0f, 10.0f).withTrimmedBottom (10.0f);
+    g.a = getLocalBounds().toFloat().reduced (12.0f, 9.0f);
     g.maxW = g.a.getWidth() * 0.27f;
     g.plateau = g.a.getWidth() * 0.17f;
     const float top = g.a.getY(), bot = g.a.getBottom(), h = g.a.getHeight();
@@ -1977,10 +1977,7 @@ void AmpEditor::paint (Graphics& g)
     g.setFont (uiFont (9.5f, true, 0.1f));
     g.setColour (Palette::textDim.withAlpha (0.8f));
     const float ly = geo.a.getBottom() + 1.0f;
-    g.drawText ("A", Rectangle<float> (geo.p0.x, ly, geo.p1.x - geo.p0.x, 10.0f), Justification::centred, false);
-    g.drawText ("D", Rectangle<float> (geo.p1.x, ly, geo.p2.x - geo.p1.x, 10.0f), Justification::centred, false);
-    g.drawText ("S", Rectangle<float> (geo.p2.x, ly, geo.p3.x - geo.p2.x, 10.0f), Justification::centred, false);
-    g.drawText ("R", Rectangle<float> (geo.p3.x, ly, geo.p4.x - geo.p3.x, 10.0f), Justification::centred, false);
+    (void) ly;
     g.setFont (uiFont (10.5f, false, 0.1f));
     g.drawText ("VOLUME", r.reduced (10.0f, 5.0f), Justification::topRight, false);
 
@@ -2737,10 +2734,11 @@ GranulumEditor::GranulumEditor (GranulumProcessor& p)
     addChildComponent (ampEditor);
     addAndMakeVisible (ampTab);
     ampTab.onSelect = [this] { selectLfo (3); };
-    for (auto [id, nm] : { std::pair<const char*, const char*> { ParamID::ampA, "Attack" }, { ParamID::ampD, "Decay" },
-                           { ParamID::ampS, "Sustain" }, { ParamID::ampR, "Release" } })
+    for (auto [id, nm] : { std::pair<const char*, const char*> { ParamID::ampA, "A" }, { ParamID::ampD, "D" },
+                           { ParamID::ampS, "S" }, { ParamID::ampR, "R" } })
     {
         ampKnobs.push_back (std::make_unique<Knob> (proc, id, nm, Knob::Size::Small));
+        ampKnobs.back()->setCompact (true);     // value pops up while turning
         addChildComponent (*ampKnobs.back());
     }
     lfoEditor.setTooltip ("Drag the points. Drag the small rings to bend a segment, double-click a ring to straighten it.");
@@ -3253,11 +3251,13 @@ void GranulumEditor::resized()
         lf.removeFromRight (S (18));
 
         lfoEditor.setBounds (lf.removeFromLeft (S (330)));
-        ampEditor.setBounds (lfoEditor.getBounds());
         {
-            auto ak = lf.withTrimmedLeft (S (14));
-            const int kw = ak.getWidth() / 4;
-            for (auto& k : ampKnobs) k->setBounds (ak.removeFromLeft (kw).withSizeKeepingCentre (kw, jmin (ak.getHeight(), S (86))));
+            // ADSR: the curve on top, the four knobs right under their letters
+            auto box = lfoEditor.getBounds().withRight (voiceArea.getX() - S (18));   // ADSR uses the whole strip
+            auto knobRow = box.removeFromBottom (S (54));
+            ampEditor.setBounds (box.withTrimmedBottom (S (2)));
+            const int kw = knobRow.getWidth() / 4;
+            for (auto& k : ampKnobs) k->setBounds (knobRow.removeFromLeft (kw));
         }
         lf.removeFromLeft (S (14));
         auto col1 = lf.removeFromLeft (S (112));
