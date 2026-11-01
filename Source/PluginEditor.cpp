@@ -1872,6 +1872,190 @@ void LfoEditor::paint (Graphics& g)
     g.drawText (rate, r.reduced (10.0f, 5.0f), Justification::topRight, false);
 }
 
+
+// ============================================================================
+// AMP tab + ADSR editor
+
+void AmpTab::paint (Graphics& g)
+{
+    auto r = getLocalBounds().toFloat().reduced (1.0f);
+    const auto col = Palette::accent;
+    g.setColour (selected ? Palette::button : Palette::field);
+    g.fillRoundedRectangle (r, 6.0f);
+    if (selected)
+    {
+        g.setColour (col);
+        g.drawRoundedRectangle (r.reduced (0.5f), 6.0f, 1.2f);
+    }
+    // speaker icon
+    const float cx = r.getX() + 13.0f, cy = r.getCentreY();
+    Path sp;
+    sp.startNewSubPath (cx - 5.0f, cy - 2.0f);
+    sp.lineTo (cx - 2.5f, cy - 2.0f); sp.lineTo (cx + 1.0f, cy - 5.0f); sp.lineTo (cx + 1.0f, cy + 5.0f);
+    sp.lineTo (cx - 2.5f, cy + 2.0f); sp.lineTo (cx - 5.0f, cy + 2.0f); sp.closeSubPath();
+    g.setColour (col.withAlpha (selected ? 1.0f : 0.7f));
+    g.fillPath (sp);
+    Path wave;
+    wave.addCentredArc (cx + 1.5f, cy, 4.5f, 4.5f, 0.0f, 0.6f, 2.55f, true);
+    g.strokePath (wave, PathStrokeType (1.2f));
+    g.setColour (selected ? Colours::white : Palette::text);
+    g.setFont (uiFont (13.0f, true, 0.08f));
+    g.drawText ("AMP", r.withTrimmedLeft (24.0f), Justification::centredLeft, false);
+}
+
+AmpEditor::AmpEditor (GranulumProcessor& p) : proc (p)
+{
+    setTooltip ("AMP envelope = the volume of every note.\nDrag the points: attack peak, decay / sustain corner, release end.");
+    startTimerHz (60);
+}
+
+float AmpEditor::value (const char* id) const { return proc.apvts.getRawParameterValue (id)->load(); }
+
+void AmpEditor::setValue (const char* id, float v)
+{
+    if (auto* p = proc.apvts.getParameter (id)) p->setValueNotifyingHost (p->convertTo0to1 (v));
+}
+
+static float envSeg (float ms, float maxMs, float maxW) { return jmax (4.0f, maxW * std::log1p (ms / 5.0f) / std::log1p (maxMs / 5.0f)); }
+static float envTime (float w, float maxMs, float maxW) { return 5.0f * std::expm1 (jlimit (0.0f, 1.0f, w / maxW) * std::log1p (maxMs / 5.0f)); }
+
+AmpEditor::Geo AmpEditor::geometry() const
+{
+    Geo g;
+    g.a = getLocalBounds().toFloat().reduced (12.0f, 10.0f).withTrimmedBottom (10.0f);
+    g.maxW = g.a.getWidth() * 0.27f;
+    g.plateau = g.a.getWidth() * 0.17f;
+    const float top = g.a.getY(), bot = g.a.getBottom(), h = g.a.getHeight();
+    g.p0 = { g.a.getX(), bot };
+    g.p1 = { g.p0.x + envSeg (value (ParamID::ampA), 10000.0f, g.maxW), top };
+    g.p2 = { g.p1.x + envSeg (value (ParamID::ampD), 10000.0f, g.maxW), top + (1.0f - value (ParamID::ampS)) * h };
+    g.p3 = { g.p2.x + g.plateau, g.p2.y };
+    g.p4 = { g.p3.x + envSeg (value (ParamID::ampR), 10000.0f, g.maxW), bot };
+    return g;
+}
+
+void AmpEditor::paint (Graphics& g)
+{
+    auto r = getLocalBounds().toFloat();
+    g.setColour (Palette::screen);
+    g.fillRoundedRectangle (r, 8.0f);
+    const auto geo = geometry();
+    const auto col = Palette::accent;
+
+    g.setColour (Colours::white.withAlpha (0.05f));
+    g.drawHorizontalLine ((int) geo.a.getBottom(), geo.a.getX(), geo.a.getRight());
+
+    // curve: linear-ish attack, exponential decay and release
+    Path p;
+    p.startNewSubPath (geo.p0);
+    p.quadraticTo ({ geo.p0.x + (geo.p1.x - geo.p0.x) * 0.55f, geo.p1.y + (geo.p0.y - geo.p1.y) * 0.25f }, geo.p1);
+    auto expSeg = [&p] (Point<float> a, Point<float> b)
+    {
+        for (int i = 1; i <= 24; ++i)
+        {
+            const float t = (float) i / 24.0f;
+            const float k = (1.0f - std::exp (-4.0f * t)) / (1.0f - std::exp (-4.0f));
+            p.lineTo (a.x + (b.x - a.x) * t, a.y + (b.y - a.y) * k);
+        }
+    };
+    expSeg (geo.p1, geo.p2);
+    p.lineTo (geo.p3);
+    expSeg (geo.p3, geo.p4);
+
+    Path fill (p);
+    fill.lineTo (geo.p4.x, geo.a.getBottom());
+    fill.lineTo (geo.p0);
+    fill.closeSubPath();
+    g.setGradientFill (ColourGradient (col.withAlpha (0.26f), 0, geo.a.getY(), col.withAlpha (0.02f), 0, geo.a.getBottom(), false));
+    g.fillPath (fill);
+    g.setColour (col.withAlpha (0.25f));
+    g.strokePath (p, PathStrokeType (4.0f, PathStrokeType::curved, PathStrokeType::rounded));
+    g.setColour (col);
+    g.strokePath (p, PathStrokeType (1.8f, PathStrokeType::curved, PathStrokeType::rounded));
+
+    // A D S R under their segments
+    g.setFont (uiFont (9.5f, true, 0.1f));
+    g.setColour (Palette::textDim.withAlpha (0.8f));
+    const float ly = geo.a.getBottom() + 1.0f;
+    g.drawText ("A", Rectangle<float> (geo.p0.x, ly, geo.p1.x - geo.p0.x, 10.0f), Justification::centred, false);
+    g.drawText ("D", Rectangle<float> (geo.p1.x, ly, geo.p2.x - geo.p1.x, 10.0f), Justification::centred, false);
+    g.drawText ("S", Rectangle<float> (geo.p2.x, ly, geo.p3.x - geo.p2.x, 10.0f), Justification::centred, false);
+    g.drawText ("R", Rectangle<float> (geo.p3.x, ly, geo.p4.x - geo.p3.x, 10.0f), Justification::centred, false);
+    g.setFont (uiFont (10.5f, false, 0.1f));
+    g.drawText ("VOLUME", r.reduced (10.0f, 5.0f), Justification::topRight, false);
+
+    // handles
+    const Point<float> hs[3] = { geo.p1, geo.p2, geo.p4 };
+    for (int i = 0; i < 3; ++i)
+    {
+        const bool hot = hover == i || dragging == i;
+        g.setColour (col.withAlpha (0.3f));
+        g.fillEllipse (Rectangle<float> (hot ? 18.0f : 14.0f, hot ? 18.0f : 14.0f).withCentre (hs[i]));
+        g.setColour (Colours::white);
+        g.fillEllipse (Rectangle<float> (7.0f, 7.0f).withCentre (hs[i]));
+    }
+
+    // live dot: where the newest note is on its envelope right now
+    const int st = proc.engineAdd.vizStage.load();
+    const float lv = proc.engineAdd.vizEnv.load();
+    if (st > 0)
+    {
+        const float S = value (ParamID::ampS);
+        Point<float> d;
+        if (st == 1)      d = { geo.p0.x + (geo.p1.x - geo.p0.x) * lv, geo.a.getBottom() - geo.a.getHeight() * lv };
+        else if (st == 2) d = { geo.p1.x + (geo.p2.x - geo.p1.x) * jlimit (0.0f, 1.0f, (1.0f - lv) / jmax (0.001f, 1.0f - S)), geo.a.getBottom() - geo.a.getHeight() * lv };
+        else if (st == 3) d = { (geo.p2.x + geo.p3.x) * 0.5f, geo.a.getBottom() - geo.a.getHeight() * lv };
+        else              d = { geo.p3.x + (geo.p4.x - geo.p3.x) * jlimit (0.0f, 1.0f, std::log (jmax (0.001f, lv) / jmax (0.001f, S)) / std::log (0.001f / jmax (0.001f, S))),
+                                geo.a.getBottom() - geo.a.getHeight() * lv };
+        g.setColour (col.withAlpha (0.35f));
+        g.fillEllipse (Rectangle<float> (14.0f, 14.0f).withCentre (d));
+        g.setColour (Colours::white);
+        g.fillEllipse (Rectangle<float> (5.0f, 5.0f).withCentre (d));
+    }
+}
+
+void AmpEditor::mouseMove (const MouseEvent& e)
+{
+    const auto geo = geometry();
+    const Point<float> hs[3] = { geo.p1, geo.p2, geo.p4 };
+    int h = -1;
+    for (int i = 0; i < 3; ++i) if (hs[i].getDistanceFrom (e.position) < 12.0f) h = i;
+    if (h != hover) { hover = h; setMouseCursor (h >= 0 ? MouseCursor::DraggingHandCursor : MouseCursor::NormalCursor); }
+}
+
+void AmpEditor::mouseDown (const MouseEvent& e)
+{
+    mouseMove (e);
+    dragging = hover;
+    const char* ids[3][2] = { { ParamID::ampA, nullptr }, { ParamID::ampD, ParamID::ampS }, { ParamID::ampR, nullptr } };
+    if (dragging >= 0)
+        for (auto* id : ids[dragging]) if (id != nullptr) if (auto* p = proc.apvts.getParameter (id)) p->beginChangeGesture();
+}
+
+void AmpEditor::mouseDrag (const MouseEvent& e)
+{
+    if (dragging < 0) return;
+    const auto geo = geometry();
+    if (dragging == 0)
+        setValue (ParamID::ampA, jlimit (0.5f, 10000.0f, envTime (e.position.x - geo.p0.x, 10000.0f, geo.maxW)));
+    else if (dragging == 1)
+    {
+        setValue (ParamID::ampD, jlimit (1.0f, 10000.0f, envTime (e.position.x - geo.p1.x, 10000.0f, geo.maxW)));
+        setValue (ParamID::ampS, jlimit (0.0f, 1.0f, (geo.a.getBottom() - e.position.y) / geo.a.getHeight()));
+    }
+    else
+        setValue (ParamID::ampR, jlimit (5.0f, 10000.0f, envTime (e.position.x - geo.p3.x, 10000.0f, geo.maxW)));
+    repaint();
+}
+
+void AmpEditor::mouseUp (const MouseEvent&)
+{
+    const char* ids[3][2] = { { ParamID::ampA, nullptr }, { ParamID::ampD, ParamID::ampS }, { ParamID::ampR, nullptr } };
+    if (dragging >= 0)
+        for (auto* id : ids[dragging]) if (id != nullptr) if (auto* p = proc.apvts.getParameter (id)) p->endChangeGesture();
+    dragging = -1;
+}
+
 // ============================================================================
 // Lamp
 
@@ -2365,7 +2549,7 @@ void NoisePicker::mouseDown (const MouseEvent& e)
 
 GranulumEditor::GranulumEditor (GranulumProcessor& p)
     : AudioProcessorEditor (&p), proc (p), field (p), harmonics (p), noisePicker (p), meterView (p), presetBar (p),
-      keyboard (p.keyboardState, MidiKeyboardComponent::horizontalKeyboard), lfoEditor (p)
+      keyboard (p.keyboardState, MidiKeyboardComponent::horizontalKeyboard), lfoEditor (p), ampEditor (p)
 {
     setLookAndFeel (&look);
     auto& s = proc.apvts;
@@ -2550,6 +2734,15 @@ GranulumEditor::GranulumEditor (GranulumProcessor& p)
         lfoControls[(size_t) l] = std::move (c);
     }
     addAndMakeVisible (lfoEditor);
+    addChildComponent (ampEditor);
+    addAndMakeVisible (ampTab);
+    ampTab.onSelect = [this] { selectLfo (3); };
+    for (auto [id, nm] : { std::pair<const char*, const char*> { ParamID::ampA, "Attack" }, { ParamID::ampD, "Decay" },
+                           { ParamID::ampS, "Sustain" }, { ParamID::ampR, "Release" } })
+    {
+        ampKnobs.push_back (std::make_unique<Knob> (proc, id, nm, Knob::Size::Small));
+        addChildComponent (*ampKnobs.back());
+    }
     lfoEditor.setTooltip ("Drag the points. Drag the small rings to bend a segment, double-click a ring to straighten it.");
 
     keyboard.setColour (MidiKeyboardComponent::whiteNoteColourId, Palette::whiteKey);
@@ -2586,6 +2779,13 @@ GranulumEditor::~GranulumEditor()
 void GranulumEditor::selectLfo (int i)
 {
     selectedLfo = i;
+    const bool amp = i == 3;
+    ampTab.selected = amp;
+    ampTab.repaint();
+    ampEditor.setVisible (amp);
+    lfoEditor.setVisible (! amp);
+    for (auto& k : ampKnobs) k->setVisible (amp);
+    repaint();
     for (int l = 0; l < kNumLfos; ++l)
     {
         lfoTabs[(size_t) l]->selected = (l == i);
@@ -2595,7 +2795,7 @@ void GranulumEditor::selectLfo (int i)
                                  (Component*) c.rate.get(), (Component*) c.rise.get() })
             comp->setVisible (l == i);
     }
-    lfoEditor.setLfo (i);
+    if (! amp) lfoEditor.setLfo (i);
 }
 
 void GranulumEditor::selectFx (int i)
@@ -2716,7 +2916,7 @@ void GranulumEditor::timerCallback()
         for (auto& t : lfoTabs) t->repaint();
     }
     for (auto* k : allKnobs) k->tick();
-    lfoTabs[(size_t) selectedLfo]->repaint();
+    if (selectedLfo < kNumLfos) lfoTabs[(size_t) selectedLfo]->repaint();
 
     meter    = jmax (proc.outputLevel.load(), meter * 0.85f);
     activity = jmax ((float) proc.vizEngine().vizCount.load() / 20.0f, activity * 0.8f);
@@ -2831,9 +3031,12 @@ void GranulumEditor::paint (Graphics& g)
     if (selectedFx == 1 && proc.apvts.getRawParameterValue (ParamID::delaySync)->load() > 0.5f)
         g.drawText ("TIME", distTypeLabel, Justification::centredLeft, false);
 
-    g.drawText ("SHAPE",    lfoPresetLabel, Justification::centredLeft, false);
-    g.drawText ("MODE",     lfoModeLabel,   Justification::centredLeft, false);
-    g.drawText ("DIVISION", lfoDivLabel,    Justification::centredLeft, false);
+    if (selectedLfo < kNumLfos)
+    {
+        g.drawText ("SHAPE",    lfoPresetLabel, Justification::centredLeft, false);
+        g.drawText ("MODE",     lfoModeLabel,   Justification::centredLeft, false);
+        g.drawText ("DIVISION", lfoDivLabel,    Justification::centredLeft, false);
+    }
     g.setColour (Colours::white.withAlpha (0.08f));
     g.drawVerticalLine (voiceArea.getX() - 9, (float) voiceArea.getY(), (float) voiceArea.getBottom());
     g.setColour (Palette::label);
@@ -3039,15 +3242,23 @@ void GranulumEditor::resized()
     {
         auto lf = lfoFrame.reduced (S (14), S (10));
         auto tabs = lf.removeFromLeft (S (100));
-        const int th = (tabs.getHeight() - S (8)) / kNumLfos;
+        const int gapT = S (5);
+        const int th = (tabs.getHeight() - gapT * kNumLfos) / (kNumLfos + 1);
         for (int l = 0; l < kNumLfos; ++l)
-            lfoTabs[(size_t) l]->setBounds (tabs.getX(), tabs.getY() + l * (th + S (8)), tabs.getWidth(), th);
+            lfoTabs[(size_t) l]->setBounds (tabs.getX(), tabs.getY() + l * (th + gapT), tabs.getWidth(), th);
+        ampTab.setBounds (tabs.getX(), tabs.getY() + kNumLfos * (th + gapT), tabs.getWidth(), th);
         lf.removeFromLeft (S (12));
 
         voiceArea = lf.removeFromRight (S (180));
         lf.removeFromRight (S (18));
 
         lfoEditor.setBounds (lf.removeFromLeft (S (330)));
+        ampEditor.setBounds (lfoEditor.getBounds());
+        {
+            auto ak = lf.withTrimmedLeft (S (14));
+            const int kw = ak.getWidth() / 4;
+            for (auto& k : ampKnobs) k->setBounds (ak.removeFromLeft (kw).withSizeKeepingCentre (kw, jmin (ak.getHeight(), S (86))));
+        }
         lf.removeFromLeft (S (14));
         auto col1 = lf.removeFromLeft (S (112));
         lf.removeFromLeft (S (10));

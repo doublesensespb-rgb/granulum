@@ -356,6 +356,37 @@ private:
     juce::Rectangle<int> body;
 };
 
+// AMP tab in the LFO strip: speaker icon + "AMP"
+class AmpTab final : public juce::Component, public juce::SettableTooltipClient
+{
+public:
+    AmpTab() { setTooltip ("AMP: the volume envelope of every note (Attack, Decay, Sustain, Release)"); setMouseCursor (juce::MouseCursor::PointingHandCursor); }
+    void paint (juce::Graphics&) override;
+    void mouseDown (const juce::MouseEvent&) override { if (onSelect) onSelect(); }
+    std::function<void()> onSelect;
+    bool selected = false;
+};
+
+// ADSR drawn as a curve; drag the three points (attack peak, decay/sustain corner, release end)
+class AmpEditor final : public juce::Component, public juce::SettableTooltipClient, private juce::Timer
+{
+public:
+    explicit AmpEditor (GranulumProcessor&);
+    void paint (juce::Graphics&) override;
+    void mouseMove (const juce::MouseEvent&) override;
+    void mouseDown (const juce::MouseEvent&) override;
+    void mouseDrag (const juce::MouseEvent&) override;
+    void mouseUp (const juce::MouseEvent&) override;
+private:
+    void timerCallback() override { repaint(); }
+    struct Geo { juce::Point<float> p0, p1, p2, p3, p4; juce::Rectangle<float> a; float maxW = 0, plateau = 0; };
+    Geo geometry() const;
+    float value (const char* id) const;
+    void setValue (const char* id, float v);
+    GranulumProcessor& proc;
+    int dragging = -1, hover = -1;
+};
+
 // Block on/off: LED + title, click toggles
 class Lamp final : public juce::Button
 {
@@ -390,6 +421,7 @@ public:
     GranulumLook& lookAndFeel() { return look; }
     void selectFx (int i);
     void selectFilter (int i);
+    void showAmp() { selectLfo (3); }
 
 private:
     void timerCallback() override;
@@ -449,7 +481,10 @@ private:
     std::array<std::unique_ptr<LfoTab>, kNumLfos> lfoTabs;
     std::array<std::unique_ptr<LfoControls>, kNumLfos> lfoControls;
     LfoEditor lfoEditor;
-    int selectedLfo = 0;
+    AmpTab ampTab;
+    AmpEditor ampEditor;
+    std::vector<std::unique_ptr<Knob>> ampKnobs;
+    int selectedLfo = 0;     // 0..2 = LFO, 3 = AMP
 
     juce::Rectangle<int> titleArea, gemsArea, screenFrame, osc1Area, osc2Area, osc3Area, dropZone,
                          grainArea, filterArea, fxArea, ledArea, lfoFrame, voiceArea, fxContent,

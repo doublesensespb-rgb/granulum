@@ -140,6 +140,13 @@ int main()
     auto k2 = run (kt, { { 0, 70 }, { 0.8, -70 } }, 1.0, sine);
     check (std::abs (freqAt (k1.L, 0.2, 0.7) - freqAt (k2.L, 0.2, 0.7)) < 1.0, "keyTrack off ignores the note");
 
+    // ADSR: slow attack starts quiet, decays to the sustain level, release lets it ring then ends
+    Params env = clean; env.attackMs = 400; env.decayMs = 200; env.sustain = 0.4f; env.releaseMs = 500;
+    auto en = run (env, { { 0, 45 }, { 1.2, -45 } }, 2.0, sine);
+    const double eA = rms (en.L, 0.02, 0.08), eP = rms (en.L, 0.38, 0.42), eS = rms (en.L, 0.9, 1.1), eR = rms (en.L, 1.3, 1.4);
+    printf ("adsr: start %.3f peak %.3f sustain %.3f release %.3f left %d\n", eA, eP, eS, eR, en.left);
+    check (eA < eP * 0.4 && std::abs (eS / eP - 0.4) < 0.1 && eR > 0.001 && eR < eS && en.left == 0, "AMP envelope: attack, decay to sustain, release");
+
     printf (ok ? "ALL OK\n" : "FAILED\n");
     return ok ? 0 : 1;
 }

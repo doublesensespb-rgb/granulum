@@ -107,6 +107,12 @@ struct Params
     std::array<int, 5> chord { 0, 0, 0, 0, 0 };
     int chordSize = 1;
 
+    // AMP envelope (ADSR)
+    float attackMs  = 5.0f;
+    float decayMs   = 300.0f;
+    float sustain   = 1.0f;
+    float releaseMs = 300.0f;
+
     // voicing
     bool  mono    = true;
     float portaMs = 0.0f;
@@ -168,6 +174,8 @@ public:
     std::array<GrainEvent, kEventRing> events {};
     std::atomic<uint32_t> eventWrite { 0 };
     std::atomic<float> lastNote { 60.0f };
+    std::atomic<float> vizEnv { 0.0f };      // AMP envelope level of the newest voice (UI dot)
+    std::atomic<int>   vizStage { 0 };       // 0 off, 1 attack, 2 decay, 3 sustain, 4 release
 
     void prepare (double hostSampleRate)
     {
@@ -291,8 +299,11 @@ public:
         const float* srcL     = hasSample ? sample->channels[0].data() : nullptr;
         const float* srcR     = hasSample ? (sample->numChannels() > 1 ? sample->channels[1].data() : srcL) : nullptr;
 
-        const float attackInc  = 1.0f / (0.003f * (float) sr);
-        const float releaseDec = 1.0f / ((0.15f + (p.grainOn ? 1.2f * p.chime * p.chime : 0.0f)) * (float) sr);
+        const float attackInc  = 1.0f / (std::max (0.0005f, p.attackMs * 0.001f) * (float) sr);
+        const float sus        = std::clamp (p.sustain, 0.0f, 1.0f);
+        const float decayDec   = (1.0f - sus) / (std::max (0.001f, p.decayMs * 0.001f) * (float) sr);
+        const float releaseSec = std::max (p.releaseMs * 0.001f, p.grainOn ? 0.15f + 1.2f * p.chime * p.chime : 0.0f);
+        const float releaseCoef = (float) std::exp (-6.907755 / (std::max (0.003f, releaseSec) * sr));   // -60 dB over RELEASE
 
         const bool chimeOn = p.grainOn && p.chime > 0.001f;
         const float chimeT   = std::clamp ((p.chime - 0.55f) / 0.45f, 0.0f, 1.0f); // harmonic -> bell
@@ -335,12 +346,21 @@ public:
                 if (v.stage == Stage::Attack)
                 {
                     v.env += attackInc;
-                    if (v.env >= 1.0f) { v.env = 1.0f; v.stage = Stage::Sustain; }
+                    if (v.env >= 1.0f) { v.env = 1.0f; v.stage = Stage::Decay; }
+                }
+                else if (v.stage == Stage::Decay)
+                {
+                    v.env -= decayDec;
+                    if (v.env <= sus) { v.env = sus; v.stage = Stage::Sustain; }
+                }
+                else if (v.stage == Stage::Sustain)
+                {
+                    v.env += (sus - v.env) * 0.002f;   // follows SUSTAIN live, without clicks
                 }
                 else if (v.stage == Stage::Release)
                 {
-                    v.env -= releaseDec;
-                    if (v.env <= 0.0f)
+                    v.env *= releaseCoef;
+                    if (v.env <= 0.001f)
                     {
                         v.env = 0.0f; v.stage = Stage::Off; v.active = false;
                         for (auto& g : v.grains) g.active = false;
@@ -459,7 +479,7 @@ public:
     }
 
 private:
-    enum class Stage { Off, Attack, Sustain, Release };
+    enum class Stage { Off, Attack, Decay, Sustain, Release };
 
     struct Voice
     {
@@ -628,6 +648,12 @@ private:
     void publishViz (int N, bool hasSample, const Params& p)
     {
         if (hasSample) lastNumFrames = N;
+        {
+            const Voice* newest = nullptr;
+            for (auto& v : voices) if (v.active && (newest == nullptr || v.startStamp > newest->startStamp)) newest = &v;
+            vizEnv.store (newest ? newest->env : 0.0f, std::memory_order_relaxed);
+            vizStage.store (newest ? (int) newest->stage : 0, std::memory_order_relaxed);
+        }
         int n = 0, h = 0;
         for (auto& v : voices)
         {

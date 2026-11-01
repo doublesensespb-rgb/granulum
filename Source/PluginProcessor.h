@@ -71,6 +71,11 @@ namespace ParamID
     inline constexpr const char* revLowCut = "revLowCut";
     // VOICE / global
     inline constexpr const char* mono      = "mono";
+    // AMP envelope
+    inline constexpr const char* ampA      = "ampA";
+    inline constexpr const char* ampD      = "ampD";
+    inline constexpr const char* ampS      = "ampS";
+    inline constexpr const char* ampR      = "ampR";
     inline constexpr const char* porta     = "porta";
     inline constexpr const char* output    = "output";
     // LFOs: "lfo1Rate", "lfo1Sync", "lfo1Div", "lfo1Mode", "lfo1Rise" ...
@@ -377,6 +382,7 @@ private:
     std::atomic<float>* pDelayOn {}; std::atomic<float>* pDelaySync {}; std::atomic<float>* pDelayDiv {}; std::atomic<float>* pDelayPing {};
     std::array<std::array<std::atomic<float>*, kNumOscs>, kNumRouteBlocks> pRoute {};
     std::atomic<float>* pMono {};
+    std::atomic<float>* pAmpA {}; std::atomic<float>* pAmpD {}; std::atomic<float>* pAmpS {}; std::atomic<float>* pAmpR {};
     std::array<std::atomic<float>*, kNumLfos> pLfoSync {}, pLfoDiv {}, pLfoMode {}, pLfoRise {}, pLfoOn {};
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (GranulumProcessor)

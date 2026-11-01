@@ -203,6 +203,18 @@ int main (int argc, char** argv)
         return 0;
     }
 
+    // design preview: "Snapshot <dir> amp" -> AMP tab with an ADSR, a note playing
+    if (argc > 2 && String (argv[2]) == "amp")
+    {
+        setP (ParamID::osc1On, 1.0f);
+        setP (ParamID::ampA, 120.0f); setP (ParamID::ampD, 600.0f); setP (ParamID::ampS, 0.55f); setP (ParamID::ampR, 1500.0f);
+        ed->showAmp();
+        p.keyboardState.noteOn (1, 48, 0.9f);
+        run (p, ed, 30);
+        save (*base, outDir, "amp-ui.png");
+        return 0;
+    }
+
     // design preview: "Snapshot <dir> select" -> intro wave over the dots, first-run hint, hover look
     if (argc > 2 && String (argv[2]) == "select")
     {

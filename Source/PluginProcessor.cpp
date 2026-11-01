@@ -459,6 +459,13 @@ AudioProcessorValueTreeState::ParameterLayout GranulumProcessor::createLayout()
             ps.push_back (std::make_unique<B> (ParameterID { ParamID::route (block, o), 1 },
                                                String (block) + " gets Osc " + String (o + 1), true));
 
+    // AMP envelope
+    auto msFmt = A().withStringFromValueFunction ([] (float v, int) { return v < 1000.0f ? fmt (v, v < 10.0f ? 1 : 0, " ms") : fmt (v / 1000.0f, 2, " s"); });
+    ps.push_back (std::make_unique<P> (ParameterID { ParamID::ampA, 1 }, "Amp Attack",  skewed (0.5f, 10000.0f, 300.0f), 5.0f, msFmt));
+    ps.push_back (std::make_unique<P> (ParameterID { ParamID::ampD, 1 }, "Amp Decay",   skewed (1.0f, 10000.0f, 500.0f), 300.0f, msFmt));
+    ps.push_back (std::make_unique<P> (ParameterID { ParamID::ampS, 1 }, "Amp Sustain", NormalisableRange<float> (0.0f, 1.0f), 1.0f, pct));
+    ps.push_back (std::make_unique<P> (ParameterID { ParamID::ampR, 1 }, "Amp Release", skewed (5.0f, 10000.0f, 600.0f), 300.0f, msFmt));
+
     // VOICE / global
     ps.push_back (std::make_unique<B> (ParameterID { ParamID::mono, 1 }, "Mono", false));
     ps.push_back (std::make_unique<P> (ParameterID { ParamID::porta, 1 }, "Portamento", skewed (0.0f, 3000.0f, 200.0f), 0.0f,
@@ -520,6 +527,10 @@ GranulumProcessor::GranulumProcessor()
         for (int o = 0; o < kNumOscs; ++o)
             pRoute[(size_t) b][(size_t) o] = apvts.getRawParameterValue (ParamID::route (kRouteBlocks[b], o));
     pMono      = apvts.getRawParameterValue (ParamID::mono);
+    pAmpA      = apvts.getRawParameterValue (ParamID::ampA);
+    pAmpD      = apvts.getRawParameterValue (ParamID::ampD);
+    pAmpS      = apvts.getRawParameterValue (ParamID::ampS);
+    pAmpR      = apvts.getRawParameterValue (ParamID::ampR);
     for (int l = 0; l < kNumLfos; ++l)
     {
         pLfoSync[(size_t) l] = apvts.getRawParameterValue (ParamID::lfo (l, "Sync"));
@@ -779,6 +790,10 @@ granulum::Params GranulumProcessor::voiceParams (const float* v, int osc) const
     p.evolve   = 0.0f;   // EVOLVE knob removed
     p.mono     = pMono->load() > 0.5f;
     p.portaMs  = v[mtPorta];
+    p.attackMs  = pAmpA->load();
+    p.decayMs   = pAmpD->load();
+    p.sustain   = pAmpS->load();
+    p.releaseMs = pAmpR->load();
 
     const bool grainBlock = pGrainOn->load() > 0.5f;
     if (osc == 0)
