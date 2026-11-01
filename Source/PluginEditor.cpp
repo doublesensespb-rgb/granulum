@@ -1737,8 +1737,16 @@ int LfoEditor::hitTest (Point<float> m, bool& isHandle) const
     return best;
 }
 
+Rectangle<float> LfoEditor::removeRect() const
+{
+    return { 8.0f, 5.0f, 74.0f, 17.0f };
+}
+
 void LfoEditor::mouseMove (const MouseEvent& e)
 {
+    const bool overRemove = proc.countModulations (lfo) > 0 && removeRect().contains (e.position);
+    if (overRemove != hoverRemove) { hoverRemove = overRemove; repaint(); }
+    if (overRemove) { setMouseCursor (MouseCursor::PointingHandCursor); return; }
     bool h = false;
     const int i = hitTest (e.position, h);
     if (i != hoverIndex || h != hoverHandle)
@@ -1752,6 +1760,16 @@ void LfoEditor::mouseExit (const MouseEvent&) { hoverIndex = -1; }
 
 void LfoEditor::mouseDown (const MouseEvent& e)
 {
+    if (proc.countModulations (lfo) > 0 && removeRect().contains (e.position))
+    {
+        // REMOVE: takes this LFO off every knob (unlike the light, which only pauses it)
+        for (int t = 0; t < kNumModTargets; ++t)
+            if (proc.hasModulation (t, lfo)) proc.removeModulation (t, lfo);
+        hoverRemove = false;
+        dragIndex = -1;
+        repaint();
+        return;
+    }
     pts = proc.getLfoPoints (lfo);
     dragIndex = hitTest (e.position, dragHandle);
     dragStart = e.position;
@@ -1870,6 +1888,17 @@ void LfoEditor::paint (Graphics& g)
     g.setColour (Palette::textDim);
     g.setFont (uiFont (10.5f, false, 0.05f));
     g.drawText (rate, r.reduced (10.0f, 5.0f), Justification::topRight, false);
+
+    // REMOVE: only when this LFO is routed somewhere
+    if (const int n = proc.countModulations (lfo); n > 0)
+    {
+        const auto rr = removeRect();
+        g.setColour ((hoverRemove ? Palette::buttonHi : Palette::field).withAlpha (hoverRemove ? 0.95f : 0.7f));
+        g.fillRoundedRectangle (rr, 5.0f);
+        g.setColour (hoverRemove ? Colours::white : Palette::textDim);
+        g.setFont (uiFont (9.5f, true, 0.12f));
+        g.drawText (String::fromUTF8 ("\xc3\x97 REMOVE ") + String (n), rr, Justification::centred, false);
+    }
 }
 
 
@@ -1899,8 +1928,7 @@ void AmpTab::paint (Graphics& g)
     g.drawText ("ADSR", tr, Justification::centredLeft, false);
     const float w = (float) GlyphArrangement::getStringWidthInt (f, "ADSR") + 5.0f;
     g.setFont (uiFont (10.0f, false, 0.08f));
-    g.setColour (Palette::textDim.withAlpha (on ? 0.85f : 0.4f));
-    g.drawText ("amp", tr.withTrimmedLeft (w), Justification::centredLeft, false);
+    g.drawText ("amp", tr.withTrimmedLeft (w), Justification::centredLeft, false);   // same colour as ADSR
 }
 
 void AmpTab::mouseMove (const MouseEvent& e)

@@ -203,6 +203,15 @@ int main (int argc, char** argv)
         return 0;
     }
 
+    // design preview: "Snapshot <dir> remove" -> LFO 1 screen with its REMOVE button (normal + hover)
+    if (argc > 2 && String (argv[2]) == "remove")
+    {
+        p.setModulation (GranulumProcessor::modIndexOf (ParamID::bloom), 0, 0.4f);
+        run (p, ed, 10);
+        save (*base, outDir, "remove-ui.png");
+        return 0;
+    }
+
     // design preview: "Snapshot <dir> amp" -> AMP tab with an ADSR, a note playing
     if (argc > 2 && String (argv[2]) == "amp")
     {

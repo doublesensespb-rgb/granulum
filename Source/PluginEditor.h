@@ -276,6 +276,10 @@ private:
     juce::Rectangle<float> area() const;
     juce::Point<float> toScreen (float x, float y) const;
     juce::Point<float> handlePos (int seg) const;
+    juce::Rectangle<float> removeRect() const;
+public:
+    bool hoverRemove = false;   // public for the snapshot preview
+private:
     int hitTest (juce::Point<float>, bool& isHandle) const;
 
     GranulumProcessor& proc;
