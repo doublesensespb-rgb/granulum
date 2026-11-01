@@ -428,6 +428,7 @@ public:
     void selectFx (int i);
     void selectFilter (int i);
     void showAmp() { selectLfo (3); }
+    static inline int removeStyle = 0;   // 0 = SYNC | CLEAR halves, 1 = SYNC + small X
 
 private:
     void timerCallback() override;

@@ -3362,9 +3362,23 @@ void GranulumEditor::resized()
             c.div.setBounds (divBox);
             {
                 auto sb = syncBox;
-                c.sync.setBounds (sb.removeFromLeft (sb.getWidth() * 45 / 100));
-                sb.removeFromLeft (S (4));
-                c.remove.setBounds (sb);
+                if (removeStyle == 0)
+                {
+                    // two equal halves: SYNC | CLEAR
+                    const int half = (sb.getWidth() - S (4)) / 2;
+                    c.sync.setBounds (sb.removeFromLeft (half));
+                    sb.removeFromLeft (S (4));
+                    c.remove.setBounds (sb);
+                    c.remove.setButtonText ("CLEAR");
+                }
+                else
+                {
+                    // SYNC wide + a small square X
+                    c.remove.setBounds (sb.removeFromRight (sb.getHeight()));
+                    sb.removeFromRight (S (4));
+                    c.sync.setBounds (sb);
+                    c.remove.setButtonText (String::fromUTF8 ("\xc3\x97"));
+                }
             }
             c.rate->setBounds (rateCol.withSizeKeepingCentre (rateCol.getWidth(), jmin (rateCol.getHeight(), S (86))));
             c.rise->setBounds (riseCol.withSizeKeepingCentre (riseCol.getWidth(), jmin (riseCol.getHeight(), S (86))));
