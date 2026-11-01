@@ -2762,7 +2762,7 @@ GranulumEditor::GranulumEditor (GranulumProcessor& p)
         c->mode.addItemList ({ "FREE", "RETRIG", "ENV" }, 1);
         c->sync.setClickingTogglesState (true);
         c->sync.setTooltip ("Lock the LFO to the project tempo");
-        c->remove.setTooltip ("Take this LFO off every knob it modulates");
+        c->remove.setTooltip ("Removes this LFO from every knob it modulates");
         c->remove.onClick = [this, l]
         {
             for (int t = 0; t < kNumModTargets; ++t)
@@ -3361,24 +3361,10 @@ void GranulumEditor::resized()
             c.mode.setBounds (modeBox);
             c.div.setBounds (divBox);
             {
-                auto sb = syncBox;
-                if (removeStyle == 0)
-                {
-                    // two equal halves: SYNC | CLEAR
-                    const int half = (sb.getWidth() - S (4)) / 2;
-                    c.sync.setBounds (sb.removeFromLeft (half));
-                    sb.removeFromLeft (S (4));
-                    c.remove.setBounds (sb);
-                    c.remove.setButtonText ("CLEAR");
-                }
-                else
-                {
-                    // SYNC wide + a small square X
-                    c.remove.setBounds (sb.removeFromRight (sb.getHeight()));
-                    sb.removeFromRight (S (4));
-                    c.sync.setBounds (sb);
-                    c.remove.setButtonText (String::fromUTF8 ("\xc3\x97"));
-                }
+                // REMOVE LINKS takes the whole row; SYNC becomes a small toggle on the DIVISION title line
+                c.remove.setBounds (syncBox);
+                c.remove.setButtonText ("REMOVE LINKS");
+                c.sync.setBounds (lfoDivLabel.withLeft (lfoDivLabel.getRight() - S (44)).withHeight (S (17)).translated (0, -S (2)));
             }
             c.rate->setBounds (rateCol.withSizeKeepingCentre (rateCol.getWidth(), jmin (rateCol.getHeight(), S (86))));
             c.rise->setBounds (riseCol.withSizeKeepingCentre (riseCol.getWidth(), jmin (riseCol.getHeight(), S (86))));
