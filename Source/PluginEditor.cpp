@@ -2104,6 +2104,7 @@ void FxTab::paint (Graphics& g)
     const float tw = (float) GlyphArrangement::getStringWidthInt (uiFont (fs, true, 0.16f), name);
     const float groupW = tw + 15.0f;
     const float gx = r.getCentreX() - groupW * 0.5f;
+    ledX = style == 0 ? 14.0f : gx + 3.5f;     // remembered for the click zone
 
     if (style == 1)
     {
@@ -2156,12 +2157,12 @@ void FxTab::paint (Graphics& g)
 
 void FxTab::mouseMove (const MouseEvent& e)
 {
-    setMouseCursor (e.position.x < 28.0f ? MouseCursor::NormalCursor : MouseCursor::PointingHandCursor);
+    setMouseCursor (overLed (e.position) ? MouseCursor::NormalCursor : MouseCursor::PointingHandCursor);
 }
 
 void FxTab::mouseDown (const MouseEvent& e)
 {
-    if (e.position.x < 28.0f)
+    if (overLed (e.position))
     {
         param->beginChangeGesture();
         param->setValueNotifyingHost (param->getValue() > 0.5f ? 0.0f : 1.0f);

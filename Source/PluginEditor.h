@@ -315,6 +315,8 @@ public:
 private:
     juce::RangedAudioParameter* param;
     juce::String name;
+    float ledX = 14.0f;   // where the light is drawn; clicks within ~12 px of it switch the effect
+    bool overLed (juce::Point<float> p) const { return std::abs (p.x - ledX) < 12.0f; }
 };
 
 // Header preset browser: < NAME > SAVE
