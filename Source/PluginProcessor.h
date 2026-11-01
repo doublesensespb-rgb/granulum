@@ -164,6 +164,8 @@ public:
     void prepare (double sampleRate);
     void reset();
     void process (float* L, float* R, int n, int type, float cutoffHz, float q);
+    // magnitude (linear) of this filter at frequency hz, for the filter view
+    static float response (int type, float hz, float cutoffHz, float q, double sampleRate);
 private:
     struct Svf
     {
@@ -306,6 +308,11 @@ public:
     std::atomic<float> peakL { 0.0f }, peakR { 0.0f };   // max since the UI last read them (UI swaps in 0)
     std::atomic<bool>  clipped { false };                 // set when the output hit 0 dBFS; the UI clears it
     std::atomic<float> keyCutoff { 20000.0f };
+    // filter view (UI): key-tracked + modulated cutoff/reso of both filters, and a ring of the filter input
+    std::atomic<float> keyCutoff2 { 20000.0f }, viewReso1 { 0.707f }, viewReso2 { 0.707f };
+    static constexpr int kScopeSize = 4096;
+    std::array<float, kScopeSize> scopeRing {};
+    std::atomic<int> scopeWrite { 0 };
 
     juce::AudioProcessorValueTreeState apvts;
     granulum::GrainEngine engineAdd, engineAddClean, engineSmp, engineNoise;

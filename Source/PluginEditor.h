@@ -257,6 +257,28 @@ private:
     bool dragging = false;
 };
 
+// Tiny filter view: response curve of the selected filter over a faint live spectrum of what comes in.
+// Drag left/right = CUTOFF, up/down = RESO.
+class FilterScope final : public juce::Component, public juce::SettableTooltipClient, private juce::Timer
+{
+public:
+    explicit FilterScope (GranulumProcessor&);
+    void paint (juce::Graphics&) override;
+    void mouseDown (const juce::MouseEvent&) override;
+    void mouseDrag (const juce::MouseEvent&) override;
+    void mouseUp (const juce::MouseEvent&) override;
+    int which = 0;   // 0 = FILTER 1, 1 = FILTER 2
+private:
+    void timerCallback() override;
+    float xToHz (float x) const;
+    GranulumProcessor& proc;
+    juce::dsp::FFT fft { 11 };
+    std::array<float, 4096> fftData {};
+    std::array<float, 1024> specDb {};
+    float dragCut = 0, dragRes = 0;
+    juce::Point<float> dragStart;
+};
+
 // 4-point drawable LFO envelope: drag points, drag the round handles on each segment to bend it
 class LfoEditor final : public juce::Component, public juce::SettableTooltipClient, private juce::Timer
 {
@@ -450,9 +472,9 @@ private:
     using ButtonAtt = juce::AudioProcessorValueTreeState::ButtonAttachment;
     using ComboAtt  = juce::AudioProcessorValueTreeState::ComboBoxAttachment;
 
+    FilterScope filterScope { proc };
     Lamp osc1Lamp { "OSC 1", "ADDITIVE" }, osc2Lamp { "OSC 2", "SAMPLE" }, osc3Lamp { "OSC 3", "NOISE" };
-    Lamp grainLamp { "GRANULAR" };
-    std::unique_ptr<ButtonAtt> osc1LampA, osc2LampA, osc3LampA, grainLampA;
+    std::unique_ptr<ButtonAtt> osc1LampA, osc2LampA, osc3LampA;
 
     juce::TextButton initButton { "INIT" }, randomButton { "RANDOM ALL" }, loadButton { "LOAD" }, chordButton { "CHORD: OFF" };
     juce::TextButton rndGrains { "RANDOM" }, rndFx { "RANDOM" }, rndBars { "RANDOM" };
@@ -495,7 +517,7 @@ private:
 
     juce::Rectangle<int> titleArea, gemsArea, screenFrame, osc1Area, osc2Area, osc3Area, dropZone,
                          grainArea, filterArea, fxArea, ledArea, lfoFrame, voiceArea, fxContent,
-                         lfoPresetLabel, lfoModeLabel, lfoDivLabel, distTypeLabel, fxLabel, adsrReadout;
+                         lfoPresetLabel, lfoModeLabel, lfoDivLabel, distTypeLabel, fxLabel, grainLabel, adsrReadout;
     float meter = 0.0f;
     float activity = 0.0f;
     uint32_t shownModVersion = 0;

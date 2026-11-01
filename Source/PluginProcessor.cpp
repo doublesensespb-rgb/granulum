@@ -1,3 +1,4 @@
+#include <complex>
 #include "PluginProcessor.h"
 #include "PluginEditor.h"
 #include "BinaryData.h"
@@ -128,6 +129,50 @@ void FilterUnit::reset()
     for (auto& f : fm) for (auto& c : f) c.ic1 = c.ic2 = 0.0f;
     for (auto& c : comb) std::fill (c.begin(), c.end(), 0.0f);
     combW = 0; combLp[0] = combLp[1] = 0.0f;
+}
+
+float FilterUnit::response (int type, float hz, float fc, float q, double sr)
+{
+    using C = std::complex<double>;
+    const double fcl = jlimit (10.0, sr * 0.45, (double) fc);
+    auto svf = [] (double f, double fcut, double Q, int out)   // analog SVF prototype
+    {
+        const C s (0.0, f / fcut);
+        const double k = 1.0 / jmax (0.3, Q);
+        const C d = s * s + k * s + 1.0;
+        switch (out) { case 0: return C (1.0) / d; case 1: return s * s / d; case 2: return k * s / d; case 4: return s / d; default: return (s * s + 1.0) / d; }
+    };
+    switch (type)
+    {
+        case LP12:  return (float) std::abs (svf (hz, fcl, q, 0));
+        case HP:    return (float) std::abs (svf (hz, fcl, q, 1));
+        case BP:    return (float) std::abs (svf (hz, fcl, q, 2));
+        case Notch: return (float) std::abs (svf (hz, fcl, q, 3));
+        case LP24:  return (float) (std::abs (svf (hz, fcl, 0.54, 0)) * std::abs (svf (hz, fcl, q * 1.3, 0)));
+        case Comb:
+        {
+            const double d = sr / jmax (15.0, fcl);
+            const double fb = jlimit (0.3, 0.97, 0.55 + 0.045 * q);
+            const double w = MathConstants<double>::twoPi * hz / sr;
+            const C z1 = std::polar (1.0, -w), zd = std::polar (1.0, -w * d);
+            const C damp = 0.75 / (1.0 - 0.25 * z1);
+            return (float) (std::abs ((1.0 - fb) * 1.6 / (1.0 - fb * damp * zd)));
+        }
+        default:
+        {
+            static const float table[5][3] = { { 800, 1150, 2900 }, { 400, 1600, 2700 }, { 270, 2140, 2950 },
+                                               { 450, 800, 2830 }, { 325, 700, 2530 } };
+            const float pos = jlimit (0.0f, 3.999f, std::log (jmax (80.0f, fc) / 80.0f) / std::log (100.0f) * 4.0f);
+            const int a = (int) pos;
+            const float t = pos - (float) a;
+            const double gains[3] = { 1.0, 0.6, 0.35 };
+            const double fq = 4.0 + 2.0 * q;
+            C sum;
+            for (int f = 0; f < 3; ++f)
+                sum += gains[f] * svf (hz, table[a][f] + (table[a + 1][f] - table[a][f]) * t, fq, 4);
+            return (float) (std::abs (sum) / fq);
+        }
+    }
 }
 
 void FilterUnit::process (float* L, float* R, int n, int type, float fc, float q)
@@ -383,7 +428,7 @@ AudioProcessorValueTreeState::ParameterLayout GranulumProcessor::createLayout()
         ps.push_back (std::make_unique<P> (ParameterID { o == 1 ? ParamID::osc1Vol : ParamID::osc2Vol, 1 }, n + "Volume", NormalisableRange<float> (0.0f, 1.0f), 0.8f, pct));
         ps.push_back (std::make_unique<P> (ParameterID { o == 1 ? ParamID::osc1Oct : ParamID::osc2Oct, 1 }, n + "Octave", NormalisableRange<float> (-3.0f, 3.0f, 1.0f), 0.0f, octFmt));
         ps.push_back (std::make_unique<P> (ParameterID { o == 1 ? ParamID::osc1Semi : ParamID::osc2Semi, 1 }, n + "Semi", NormalisableRange<float> (-12.0f, 12.0f, 1.0f), 0.0f, semiFmt));
-        ps.push_back (std::make_unique<B> (ParameterID { o == 1 ? ParamID::osc1Grain : ParamID::osc2Grain, 1 }, n + "Granular", true));
+        ps.push_back (std::make_unique<B> (ParameterID { o == 1 ? ParamID::osc1Grain : ParamID::osc2Grain, 1 }, n + "Granular", false));
     }
     ps.push_back (std::make_unique<AudioParameterChoice> (ParameterID { ParamID::chord, 1 }, "Chord", chordNames(), 0));
 
@@ -393,10 +438,10 @@ AudioProcessorValueTreeState::ParameterLayout GranulumProcessor::createLayout()
     ps.push_back (std::make_unique<AudioParameterChoice> (ParameterID { ParamID::osc3Type, 1 }, "Osc 3 Noise", noiseNames(), 0));
     ps.push_back (std::make_unique<P> (ParameterID { ParamID::osc3Color, 1 }, "Osc 3 Color", NormalisableRange<float> (-1.0f, 1.0f), 0.0f,
                                        A().withStringFromValueFunction ([] (float v, int) { return std::abs (v) < 0.02f ? String ("NEUTRAL") : (v < 0 ? "DARK " : "BRIGHT ") + String (roundToInt (std::abs (v) * 100.0f)); })));
-    ps.push_back (std::make_unique<B> (ParameterID { ParamID::osc3Grain, 1 }, "Osc 3 Granular", true));
+    ps.push_back (std::make_unique<B> (ParameterID { ParamID::osc3Grain, 1 }, "Osc 3 Granular", false));
 
     // GRANULAR
-    ps.push_back (std::make_unique<B> (ParameterID { ParamID::grainOn, 1 }, "Granular On", false));
+    ps.push_back (std::make_unique<B> (ParameterID { ParamID::grainOn, 1 }, "Granular On (legacy)", true));
     ps.push_back (std::make_unique<P> (ParameterID { ParamID::bloom, 1 },   "Bloom",   NormalisableRange<float> (0.0f, 1.0f), 0.0f, pct));
     ps.push_back (std::make_unique<P> (ParameterID { ParamID::smear, 1 },   "Smear",   NormalisableRange<float> (0.0f, 1.0f), 0.0f, pct));
     ps.push_back (std::make_unique<P> (ParameterID { ParamID::scatter, 1 }, "Scatter", NormalisableRange<float> (0.0f, 1.0f), 0.0f, pct));
@@ -805,7 +850,7 @@ granulum::Params GranulumProcessor::voiceParams (const float* v, int osc) const
         p.attackMs = 0.0f; p.decayMs = 1.0f; p.sustain = 1.0f; p.releaseMs = 10.0f;
     }
 
-    const bool grainBlock = pGrainOn->load() > 0.5f;
+    const bool grainBlock = true;   // GRANULAR block has no on/off any more: each OSC's GRAIN button decides
     if (osc == 0)
     {
         p.transpose = v[mtOsc1Oct] * 12.0f + v[mtOsc1Semi];
@@ -976,6 +1021,9 @@ void GranulumProcessor::processChunk (int from, int len)
     const float cut  = jlimit (20.0f, (float) (sr * 0.45), v[mtCutoff]  * keyMul);
     const float cut2 = jlimit (20.0f, (float) (sr * 0.45), v[mtCutoff2] * keyMul);
     keyCutoff.store (cut, std::memory_order_relaxed);
+    keyCutoff2.store (cut2, std::memory_order_relaxed);
+    viewReso1.store (v[mtReso], std::memory_order_relaxed);
+    viewReso2.store (v[mtReso2], std::memory_order_relaxed);
     const bool filter2On = pFilter2On->load() > 0.5f;
     const int ft2 = (int) pFtype2->load();
     const bool filterOn = pFilterOn->load() > 0.5f, distOn = pDistOn->load() > 0.5f && v[mtDistMix] > 0.001f;
@@ -994,6 +1042,20 @@ void GranulumProcessor::processChunk (int from, int len)
 
     float* outL = work.getWritePointer (0) + from;
     float* outR = work.getWritePointer (1) + from;
+
+    // ---- filter view: what comes into the filters (all oscillators, mono) ----
+    {
+        int w = scopeWrite.load (std::memory_order_relaxed);
+        for (int i = 0; i < len; ++i)
+        {
+            float x = 0.0f;
+            for (int o = 0; o < kNumOscs; ++o)
+                x += bufs[o]->getSample (0, from + i) + bufs[o]->getSample (1, from + i);
+            scopeRing[(size_t) w] = 0.5f * x;
+            w = (w + 1) & (kScopeSize - 1);
+        }
+        scopeWrite.store (w, std::memory_order_release);
+    }
 
     // ---- every oscillator through the blocks it is routed to ----
     for (int o = 0; o < kNumOscs; ++o)
@@ -1428,6 +1490,15 @@ void GranulumProcessor::setStateInformation (const void* data, int sizeInBytes)
     const uint32_t gm = (uint32_t) (int) state.getProperty ("grainMask", 0xffff);
     apvts.replaceState (state);
     presetName = pn;
+
+    // Old sessions/presets had a GRANULAR on/off lamp. If it was off, keep them clean:
+    // switch every OSC's GRAIN off, then mark the (now hidden) block switch as on.
+    if (auto* gb = apvts.getParameter (ParamID::grainOn); gb != nullptr && gb->getValue() < 0.5f)
+    {
+        for (auto* id : { ParamID::osc1Grain, ParamID::osc2Grain, ParamID::osc3Grain })
+            if (auto* q = apvts.getParameter (id)) q->setValueNotifyingHost (0.0f);
+        gb->setValueNotifyingHost (1.0f);
+    }
     setGrainMask (gm);
 
     if (hs.size() == granulum::kNumHarmonics)

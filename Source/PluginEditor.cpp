@@ -509,7 +509,9 @@ void GrainField::simulate (float dt)
     auto& s = proc.apvts;
     const auto mv = [this] (int t) { return proc.modNorm[(size_t) t].load (std::memory_order_relaxed); };
     const float bloom = mv (mtBloom), smear = mv (mtSmear), scatter = mv (mtScatter), shimmer = mv (mtShimmer), drift = mv (mtDrift);
-    const bool grains = s.getRawParameterValue (ParamID::grainOn)->load() > 0.5f;
+    const bool grains = (  (s.getRawParameterValue (ParamID::osc1On)->load() > 0.5f && s.getRawParameterValue (ParamID::osc1Grain)->load() > 0.5f)
+                       || (s.getRawParameterValue (ParamID::osc2On)->load() > 0.5f && s.getRawParameterValue (ParamID::osc2Grain)->load() > 0.5f)
+                       || (s.getRawParameterValue (ParamID::osc3On)->load() > 0.5f && s.getRawParameterValue (ParamID::osc3Grain)->load() > 0.5f));
 
     // ---- envelope of the shown source ----
     auto peaks = proc.getPeaks();
@@ -663,7 +665,9 @@ void GrainField::paint (Graphics& g)
     auto& s = proc.apvts;
     const auto mv = [this] (int t) { return proc.modNorm[(size_t) t].load (std::memory_order_relaxed); };
     const float smear = mv (mtSmear), shimmer = mv (mtShimmer), bloom = mv (mtBloom);
-    const bool grainsOn = s.getRawParameterValue (ParamID::grainOn)->load() > 0.5f;
+    const bool grainsOn = (  (s.getRawParameterValue (ParamID::osc1On)->load() > 0.5f && s.getRawParameterValue (ParamID::osc1Grain)->load() > 0.5f)
+                       || (s.getRawParameterValue (ParamID::osc2On)->load() > 0.5f && s.getRawParameterValue (ParamID::osc2Grain)->load() > 0.5f)
+                       || (s.getRawParameterValue (ParamID::osc3On)->load() > 0.5f && s.getRawParameterValue (ParamID::osc3Grain)->load() > 0.5f));
 
     // faint dust
     for (auto& m : motes)
@@ -930,8 +934,7 @@ void HarmonicEditor::timerCallback()
 bool HarmonicEditor::grainsActive() const
 {
     auto& s = proc.apvts;
-    return s.getRawParameterValue (ParamID::grainOn)->load() > 0.5f
-        && s.getRawParameterValue (ParamID::osc1Grain)->load() > 0.5f
+    return s.getRawParameterValue (ParamID::osc1Grain)->load() > 0.5f
         && s.getRawParameterValue (ParamID::osc1On)->load() > 0.5f;
 }
 
@@ -1811,6 +1814,148 @@ void LfoEditor::mouseDoubleClick (const MouseEvent& e)
     }
 }
 
+// ============================================================================
+// FilterScope
+
+FilterScope::FilterScope (GranulumProcessor& p) : proc (p)
+{
+    specDb.fill (-120.0f);
+    setMouseCursor (MouseCursor::LeftRightResizeCursor);
+    setTooltip ("Filter view. Drag left/right = CUTOFF, up/down = RESO. Faint = what comes in, bright = what passes.");
+    startTimerHz (30);
+}
+
+float FilterScope::xToHz (float x) const
+{
+    const float t = jlimit (0.0f, 1.0f, x / jmax (1.0f, (float) getWidth()));
+    return 30.0f * std::pow (18000.0f / 30.0f, t);
+}
+
+void FilterScope::timerCallback()
+{
+    if (! isVisible() || getWidth() <= 0) return;
+    const int N = 2048;
+    const int w = proc.scopeWrite.load (std::memory_order_acquire);
+    for (int i = 0; i < N; ++i)
+    {
+        const float win = 0.5f - 0.5f * std::cos (MathConstants<float>::twoPi * (float) i / (float) (N - 1));
+        fftData[(size_t) i] = proc.scopeRing[(size_t) ((w - N + i) & (GranulumProcessor::kScopeSize - 1))] * win;
+    }
+    std::fill (fftData.begin() + N, fftData.end(), 0.0f);
+    fft.performFrequencyOnlyForwardTransform (fftData.data());
+
+    const double sr = proc.getSampleRate() > 0 ? proc.getSampleRate() : 44100.0;
+    const int cols = jmin ((int) specDb.size(), jmax (1, getWidth()));
+    for (int c = 0; c < cols; ++c)
+    {
+        const float f0 = xToHz ((float) c), f1 = xToHz ((float) c + 1.0f);
+        const int b0 = jlimit (1, N / 2 - 1, (int) (f0 / sr * N)), b1 = jlimit (b0, N / 2 - 1, (int) (f1 / sr * N));
+        float m = 0.0f;
+        for (int b = b0; b <= b1; ++b) m = jmax (m, fftData[(size_t) b]);
+        const float db = Decibels::gainToDecibels (m / (float) (N / 4), -120.0f);
+        auto& d = specDb[(size_t) c];
+        d = db > d ? d + (db - d) * 0.6f : jmax (db, d - 2.5f);
+    }
+    repaint();
+}
+
+void FilterScope::paint (Graphics& g)
+{
+    auto r = getLocalBounds().toFloat();
+    g.setColour (Palette::screen);
+    g.fillRoundedRectangle (r, 5.0f);
+    auto a = r.reduced (2.0f, 2.0f);
+
+    auto& s = proc.apvts;
+    const bool on   = s.getRawParameterValue (which == 0 ? ParamID::filterOn : ParamID::filter2On)->load() > 0.5f;
+    const int  type = (int) s.getRawParameterValue (which == 0 ? ParamID::ftype : ParamID::ftype2)->load();
+    const float fc  = (which == 0 ? proc.keyCutoff : proc.keyCutoff2).load (std::memory_order_relaxed);
+    const float q   = (which == 0 ? proc.viewReso1 : proc.viewReso2).load (std::memory_order_relaxed);
+    const double sr = proc.getSampleRate() > 0 ? proc.getSampleRate() : 44100.0;
+
+    // grid: 100 Hz, 1 kHz, 10 kHz
+    g.setColour (Colours::white.withAlpha (0.05f));
+    for (float hz : { 100.0f, 1000.0f, 10000.0f })
+        g.drawVerticalLine ((int) (a.getX() + a.getWidth() * std::log (hz / 30.0f) / std::log (600.0f)), a.getY(), a.getBottom());
+
+    const float top = 15.0f, bottom = -40.0f;                      // response dB range
+    auto yOfResp = [&] (float db) { return a.getY() + a.getHeight() * (top - jlimit (bottom, top, db)) / (top - bottom); };
+    auto yOfSpec = [&] (float db) { return a.getBottom() - a.getHeight() * jlimit (0.0f, 1.0f, (db + 78.0f) / 66.0f); };
+    g.setColour (Colours::white.withAlpha (0.06f));
+    g.drawHorizontalLine ((int) yOfResp (0.0f), a.getX(), a.getRight());
+
+    const int n = jmax (8, (int) a.getWidth());
+    Path inSpec, outSpec, curve;
+    inSpec.startNewSubPath (a.getX(), a.getBottom());
+    outSpec.startNewSubPath (a.getX(), a.getBottom());
+    float markX = -1.0f, markY = 0.0f;
+    for (int i = 0; i <= n; ++i)
+    {
+        const float x = a.getX() + (float) i;
+        const float hz = xToHz ((float) i * (float) getWidth() / (float) n);
+        const float resp = on ? Decibels::gainToDecibels (FilterUnit::response (type, hz, fc, q, sr), -100.0f) : 0.0f;
+        const float sp = specDb[(size_t) jlimit (0, (int) specDb.size() - 1, (int) (x))];
+        inSpec.lineTo (x, yOfSpec (sp));
+        outSpec.lineTo (x, yOfSpec (sp + resp));
+        const float y = yOfResp (resp);
+        if (i == 0) curve.startNewSubPath (x, y); else curve.lineTo (x, y);
+        if (markX < 0 && hz >= fc) { markX = x; markY = y; }
+    }
+    inSpec.lineTo (a.getRight(), a.getBottom()); inSpec.closeSubPath();
+    outSpec.lineTo (a.getRight(), a.getBottom()); outSpec.closeSubPath();
+
+    g.saveState();
+    g.reduceClipRegion (a.toNearestInt());
+    g.setColour (Palette::textDim.withAlpha (0.13f));
+    g.fillPath (inSpec);                                             // everything that comes in
+    if (on)
+    {
+        g.setColour (Palette::accent.withAlpha (0.30f));
+        g.fillPath (outSpec);                                        // what passes the filter
+    }
+    // soft glow under the curve
+    Path under (curve);
+    under.lineTo (a.getRight(), a.getBottom()); under.lineTo (a.getX(), a.getBottom()); under.closeSubPath();
+    g.setGradientFill (ColourGradient (Palette::accent.withAlpha (on ? 0.16f : 0.05f), 0, a.getY(),
+                                       Palette::accent.withAlpha (0.0f), 0, a.getBottom(), false));
+    g.fillPath (under);
+    g.setColour (on ? Palette::accent.brighter (0.25f) : Palette::textDim.withAlpha (0.35f));
+    g.strokePath (curve, PathStrokeType (1.4f, PathStrokeType::curved, PathStrokeType::rounded));
+    if (on && markX >= 0 && type != 6)
+    {
+        g.setColour (Colours::white.withAlpha (0.9f));
+        g.fillEllipse (Rectangle<float> (5.0f, 5.0f).withCentre ({ markX, jlimit (a.getY() + 2.5f, a.getBottom() - 2.5f, markY) }));
+    }
+    g.restoreState();
+}
+
+void FilterScope::mouseDown (const MouseEvent& e)
+{
+    auto& s = proc.apvts;
+    auto* c = s.getParameter (which == 0 ? ParamID::cutoff : ParamID::cutoff2);
+    auto* q = s.getParameter (which == 0 ? ParamID::reso : ParamID::reso2);
+    dragCut = c->getValue(); dragRes = q->getValue();
+    dragStart = e.position;
+    c->beginChangeGesture(); q->beginChangeGesture();
+}
+
+void FilterScope::mouseDrag (const MouseEvent& e)
+{
+    auto& s = proc.apvts;
+    auto* c = s.getParameter (which == 0 ? ParamID::cutoff : ParamID::cutoff2);
+    auto* q = s.getParameter (which == 0 ? ParamID::reso : ParamID::reso2);
+    const auto d = e.position - dragStart;
+    c->setValueNotifyingHost (jlimit (0.0f, 1.0f, dragCut + d.x / jmax (40.0f, (float) getWidth())));
+    q->setValueNotifyingHost (jlimit (0.0f, 1.0f, dragRes - d.y / 120.0f));
+}
+
+void FilterScope::mouseUp (const MouseEvent&)
+{
+    auto& s = proc.apvts;
+    s.getParameter (which == 0 ? ParamID::cutoff : ParamID::cutoff2)->endChangeGesture();
+    s.getParameter (which == 0 ? ParamID::reso : ParamID::reso2)->endChangeGesture();
+}
+
 void LfoEditor::paint (Graphics& g)
 {
     auto r = getLocalBounds().toFloat();
@@ -2654,12 +2799,12 @@ GranulumEditor::GranulumEditor (GranulumProcessor& p)
     for (auto& k : osc2Knobs) k->setCompact (true);
 
     // lamps
-    for (auto* l : { &osc1Lamp, &osc2Lamp, &osc3Lamp, &grainLamp }) addAndMakeVisible (*l);
+    for (auto* l : { &osc1Lamp, &osc2Lamp, &osc3Lamp }) addAndMakeVisible (*l);
+    addAndMakeVisible (filterScope);
     osc1Lamp.fontSize = osc2Lamp.fontSize = osc3Lamp.fontSize = 13.5f;
     osc1LampA   = std::make_unique<ButtonAtt> (s, ParamID::osc1On,   osc1Lamp);
     osc2LampA   = std::make_unique<ButtonAtt> (s, ParamID::osc2On,   osc2Lamp);
     osc3LampA   = std::make_unique<ButtonAtt> (s, ParamID::osc3On,   osc3Lamp);
-    grainLampA  = std::make_unique<ButtonAtt> (s, ParamID::grainOn,  grainLamp);
 
     for (auto* b : { &osc1Grain, &osc2Grain, &osc3Grain, &delaySync, &delayPing })
     {
@@ -2868,6 +3013,7 @@ void GranulumEditor::selectFilter (int i)
 {
     selectedFilter = i;
     for (int t = 0; t < 2; ++t) { filterTabs[(size_t) t]->selected = (t == i); filterTabs[(size_t) t]->repaint(); }
+    filterScope.which = i;
     for (auto& k : filterKnobs)  k->setVisible (i == 0);
     for (auto& k : filter2Knobs) k->setVisible (i == 1);
     filterType.setVisible (i == 0);
@@ -2927,14 +3073,15 @@ void GranulumEditor::timerCallback()
     auto dimK = [] (std::vector<std::unique_ptr<Knob>>& ks, bool on) { for (auto& k : ks) k->setAlpha (on ? 1.0f : 0.38f); };
     auto on = [&s] (const char* id) { return s.getRawParameterValue (id)->load() > 0.5f; };
     const bool o1 = on (ParamID::osc1On), o2 = on (ParamID::osc2On), o3 = on (ParamID::osc3On);
-    const bool gOn = on (ParamID::grainOn), fOn = on (ParamID::filterOn), f2On = on (ParamID::filter2On);
+    const bool gOn = (o1 && on (ParamID::osc1Grain)) || (o2 && on (ParamID::osc2Grain)) || (o3 && on (ParamID::osc3Grain));
+    const bool fOn = on (ParamID::filterOn), f2On = on (ParamID::filter2On);
     const bool dOn = on (ParamID::distOn), lOn = on (ParamID::delayOn), rOn = on (ParamID::revOn);
     dimK (osc1Knobs, o1); dim ({ &harmonics, &chordButton, &rndBars }, o1);
     dimK (osc2Knobs, o2);
     dimK (osc3Knobs, o3); dim ({ &noisePicker }, o3);
-    dim ({ &osc1Grain }, o1 && gOn);
-    dim ({ &osc2Grain }, o2 && gOn);
-    dim ({ &osc3Grain }, o3 && gOn);
+    dim ({ &osc1Grain }, o1);
+    dim ({ &osc2Grain }, o2);
+    dim ({ &osc3Grain }, o3);
     dimK (heroKnobs, gOn); dimK (smallKnobs, gOn); dim ({ &rndGrains }, gOn);
     dimK (filterKnobs, fOn); dim ({ &filterType, routes[0].get() }, fOn);
     dimK (filter2Knobs, f2On); dim ({ &filterType2, routes[4].get() }, f2On);
@@ -3063,6 +3210,7 @@ void GranulumEditor::paint (Graphics& g)
     g.setColour (Palette::text);
     g.setFont (uiFont (14.5f * sc, false, 0.08f));
     g.drawText ("EFFECTS", fxLabel, Justification::centredLeft, false);
+    g.drawText ("GRANULAR", grainLabel, Justification::centredLeft, false);
     if (FxTab::style == 2 && filterTabs[0] != nullptr)
     {
         auto seg = filterTabs[0]->getBounds().getUnion (filterTabs[1]->getBounds()).toFloat();
@@ -3228,12 +3376,8 @@ void GranulumEditor::resized()
     filterArea = blocks.removeFromLeft ((int) (colW * 1.85f)); blocks.removeFromLeft (gap);
     fxArea     = blocks;
 
-    auto headerRow = [&] (Rectangle<int> area, Component& left, Button& rnd)
-    {
-        rnd.setBounds (area.getRight() - S (74), area.getY(), S (74), S (26));
-        left.setBounds (area.getX(), area.getY(), area.getWidth() - S (80), S (26));
-    };
-    headerRow (grainArea,  grainLamp,  rndGrains);
+    rndGrains.setBounds (grainArea.getRight() - S (74), grainArea.getY(), S (74), S (26));
+    grainLabel = { grainArea.getX(), grainArea.getY(), grainArea.getWidth() - S (80), S (26) };
     {
         auto tabs = filterArea.withHeight (S (30));
         const int tw = tabs.getWidth() / 2;
@@ -3259,9 +3403,11 @@ void GranulumEditor::resized()
     }
     {
         auto f = filterArea.withTrimmedTop (S (32));
-        auto row1 = f.removeFromTop ((int) (f.getHeight() * 0.64f));
+        auto row1 = f.removeFromTop ((int) (f.getHeight() * 0.58f));
         layoutRow (filterKnobs, row1);
         layoutRow (filter2Knobs, row1);
+        f.removeFromTop (S (4));
+        filterScope.setBounds (f.removeFromTop (S (38)).reduced (S (4), 0));
         auto row2 = f.withSizeKeepingCentre (f.getWidth(), S (28));
         routes[0]->setBounds (row2.removeFromRight (S (66)));
         routes[4]->setBounds (routes[0]->getBounds());

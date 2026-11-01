@@ -77,7 +77,7 @@ int main (int argc, char** argv)
         p.loadSample (makeTestSample(), err);
         setP (ParamID::osc2Vol, 0.5f);
         setP (ParamID::chord, 3.0f);
-        setP (ParamID::grainOn, 1.0f);
+        setP (ParamID::grainOn, 1.0f); setP (ParamID::osc1Grain, 1.0f); setP (ParamID::osc2Grain, 1.0f); setP (ParamID::osc3Grain, 1.0f);
         setP (ParamID::bloom, 0.5f);  setP (ParamID::smear, 0.45f); setP (ParamID::scatter, 0.6f);
         setP (ParamID::shimmer, 0.45f); setP (ParamID::drift, 0.5f); setP (ParamID::density, 0.55f);
         setP (ParamID::filterOn, 1.0f); setP (ParamID::cutoff, 1800.0f); setP (ParamID::revOn, 1.0f); setP (ParamID::distOn, 1.0f);
@@ -113,7 +113,7 @@ int main (int argc, char** argv)
     p.setHarmonics (h);
     p.rebuildNow();
     setP (ParamID::chord, 3.0f);         // MAJ7
-    setP (ParamID::grainOn, 1.0f);
+    setP (ParamID::grainOn, 1.0f); setP (ParamID::osc1Grain, 1.0f); setP (ParamID::osc2Grain, 1.0f); setP (ParamID::osc3Grain, 1.0f);
     setP (ParamID::bloom, 0.55f);
     setP (ParamID::smear, 0.35f);
     setP (ParamID::scatter, 0.6f);
@@ -159,6 +159,18 @@ int main (int argc, char** argv)
     p.keyboardState.noteOn (1, 52, 0.9f);
     run (p, ed, 90);
     save (*base, outDir, "ui-playing.png");
+
+    // design preview: "Snapshot <dir> scope" -> filter view with a low, resonant cutoff
+    if (argc > 2 && String (argv[2]) == "scope")
+    {
+        p.setModulation (GranulumProcessor::modIndexOf (ParamID::cutoff), 0, 0.0f);
+        setP (ParamID::cutoff, 700.0f); setP (ParamID::reso, 4.5f);
+        run (p, ed, 40);
+        save (*base, outDir, "scope-lp.png");
+        setP (ParamID::ftype, 3.0f); setP (ParamID::cutoff, 1500.0f); setP (ParamID::reso, 2.5f);   // BAND PASS
+        run (p, ed, 40);
+        save (*base, outDir, "scope-bp.png");
+    }
 
     // design preview: "Snapshot <dir> grainrow" -> animation frames of the OSC 1 panel in both GRAIN row styles
     if (argc > 2 && String (argv[2]) == "grainrow")
@@ -232,7 +244,7 @@ int main (int argc, char** argv)
     // design preview: "Snapshot <dir> select" -> intro wave over the dots, first-run hint, hover look
     if (argc > 2 && String (argv[2]) == "select")
     {
-        setP (ParamID::osc1On, 1.0f); setP (ParamID::grainOn, 1.0f);
+        setP (ParamID::osc1On, 1.0f); setP (ParamID::grainOn, 1.0f); setP (ParamID::osc1Grain, 1.0f); setP (ParamID::osc2Grain, 1.0f); setP (ParamID::osc3Grain, 1.0f);
         p.setGrainMask (0xfffcu);
         auto& he = ed->harmonicEditor();
         he.showHint = true;
