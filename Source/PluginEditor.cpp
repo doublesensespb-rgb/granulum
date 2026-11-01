@@ -6,12 +6,22 @@ namespace
 {
     Font uiFont (float size, bool bold = false, float kerning = 0.0f)
     {
+        if (Palette::fontName.isNotEmpty())
+            return Font { FontOptions (Palette::fontName, size * 0.96f, bold ? Font::bold : Font::plain).withKerningFactor (kerning + 0.02f) };
         return Font { FontOptions (size, bold ? Font::bold : Font::plain).withKerningFactor (kerning) };
     }
 
     void drawLed (Graphics& g, Rectangle<float> c, Colour on, Colour off, float level)
     {
         level = jlimit (0.0f, 1.0f, level);
+        if (Palette::flatLed)
+        {
+            // flat: filled = on, thin ring = off
+            auto d = c.reduced (c.getWidth() * 0.12f);
+            if (level > 0.5f) { g.setColour (on); g.fillEllipse (d); }
+            else { g.setColour (Palette::textDim.withAlpha (0.8f)); g.drawEllipse (d.reduced (0.6f), 1.2f); }
+            return;
+        }
         const auto ctr = c.getCentre();
         const float r = c.getWidth() * 0.5f;
         if (level > 0.02f)
@@ -73,6 +83,11 @@ void GranulumLook::drawRotarySlider (Graphics& g, int x, int y, int w, int h, fl
         const float br = r * (h < 50 ? 0.9f : 0.78f);
         g.setColour (s.isMouseOverOrDragging() ? Palette::knob.brighter (0.12f) : Palette::knob);
         g.fillEllipse (Rectangle<float> (br * 2.0f, br * 2.0f).withCentre (c));
+        if (! Palette::knobRing.isTransparent())
+        {
+            g.setColour (Palette::knobRing);
+            g.drawEllipse (Rectangle<float> (br * 2.0f, br * 2.0f).withCentre (c).reduced (0.6f), 1.2f);
+        }
         const auto p1 = c.getPointOnCircumference (br * 0.12f, angle);
         const auto p2 = c.getPointOnCircumference (br * 0.78f, angle);
         g.setColour (Palette::track);
@@ -150,7 +165,8 @@ void GranulumLook::drawButtonBackground (Graphics& g, Button& b, const Colour&, 
             case 5:   // between bright and muted, closer to muted
             case 6:
             {
-                const auto c = Colour (0xff2f8a93).interpolatedWith (Palette::accent, toggleStyle == 5 ? 0.30f : 0.42f);
+                const auto c = Palette::theme >= 5 ? Palette::accent
+                             : Colour (0xff2f8a93).interpolatedWith (Palette::accent, toggleStyle == 5 ? 0.30f : 0.42f);
                 g.setColour (c.withAlpha (0.18f));
                 g.fillRoundedRectangle (r.expanded (1.5f), rad + 1.5f);
                 g.setColour (c.interpolatedWith (Colours::white, over ? 0.08f : 0.0f));
@@ -169,7 +185,7 @@ void GranulumLook::drawButtonBackground (Graphics& g, Button& b, const Colour&, 
     }
     g.setColour (down ? Palette::button.darker (0.2f) : over ? Palette::buttonHi : Palette::button);
     g.fillRoundedRectangle (r, rad);
-    g.setColour (Colours::white.withAlpha (0.06f));
+    g.setColour (Palette::edge);
     g.drawRoundedRectangle (r.reduced (0.5f), rad, 1.0f);
 }
 
@@ -178,7 +194,7 @@ void GranulumLook::drawButtonText (Graphics& g, TextButton& b, bool over, bool)
     g.setFont (uiFont (b.getHeight() < 30 ? 11.5f : 13.5f, false, 0.08f));
     const auto onText = toggleStyle == 0 ? Palette::screen : toggleStyle == 2 ? Palette::accent.brighter (0.2f)
                       : toggleStyle >= 5 ? Colours::white : Palette::ice;
-    g.setColour (b.getToggleState() ? onText : (over ? Colours::white : Palette::text));
+    g.setColour (b.getToggleState() ? onText : (over ? Palette::hi : Palette::text));
     g.drawText (b.getButtonText(), b.getLocalBounds(), Justification::centred, false);
 }
 
@@ -187,7 +203,7 @@ void GranulumLook::drawComboBox (Graphics& g, int w, int h, bool, int, int, int,
     auto r = Rectangle<float> (0, 0, (float) w, (float) h).reduced (1.5f);
     g.setColour (Palette::field.withAlpha (box.isEnabled() ? 1.0f : 0.5f));
     g.fillRoundedRectangle (r, 6.0f);
-    g.setColour (Colours::white.withAlpha (0.10f));
+    g.setColour (Palette::theme >= 5 ? Palette::edge : Colours::white.withAlpha (0.10f));
     g.drawRoundedRectangle (r.reduced (0.5f), 6.0f, 1.0f);
     Path arrow;
     const float ax = r.getRight() - 12.0f, ay = r.getCentreY();
@@ -1624,7 +1640,7 @@ void LfoTab::paint (Graphics& g)
         g.drawEllipse (ledR.reduced (0.5f), 1.2f);
     }
 
-    g.setColour ((selected ? Colours::white : Palette::text).withAlpha (on ? 1.0f : 0.45f));
+    g.setColour ((selected ? Palette::hi : Palette::text).withAlpha (on ? 1.0f : 0.45f));
     g.setFont (uiFont (13.0f, true, 0.08f));
     g.drawText ("LFO " + String (index + 1), r.withTrimmedLeft (24.0f), Justification::centredLeft, false);
 
@@ -2068,7 +2084,7 @@ void AmpTab::paint (Graphics& g)
 
     const auto f = uiFont (13.0f, true, 0.08f);
     g.setFont (f);
-    g.setColour ((selected ? Colours::white : Palette::text).withAlpha (on ? 1.0f : 0.45f));
+    g.setColour ((selected ? Palette::hi : Palette::text).withAlpha (on ? 1.0f : 0.45f));
     auto tr = r.withTrimmedLeft (24.0f);
     g.drawText ("ADSR", tr, Justification::centredLeft, false);
     const float w = (float) GlyphArrangement::getStringWidthInt (f, "ADSR") + 5.0f;
@@ -2254,7 +2270,7 @@ void Lamp::paintButton (Graphics& g, bool over, bool)
              Palette::accent, Palette::ledOff.darker (0.3f), on ? 1.0f : 0.0f);
     const auto f = uiFont (fontSize, false, 0.08f);
     g.setFont (f);
-    g.setColour (on ? (over ? Colours::white : Palette::text) : Palette::textDim.withAlpha (over ? 0.9f : 0.6f));
+    g.setColour (on ? (over ? Palette::hi : Palette::text) : Palette::textDim.withAlpha (over ? 0.9f : 0.6f));
     auto tr = r.withTrimmedLeft (21.0f);
     g.drawText (getButtonText(), tr, Justification::centredLeft, false);
     if (sub.isNotEmpty())
@@ -2321,7 +2337,7 @@ struct RouteButtons::Digit final : public Button
             if (index == 0 || true)
             {
                 auto seg = r.expanded (1.5f, 0.0f);
-                g.setColour (Palette::screen.withAlpha (0.7f));
+                g.setColour (Palette::theme >= 5 ? Palette::field : Palette::screen.withAlpha (0.7f));
                 g.fillRect (seg);
             }
             if (on)
@@ -2576,7 +2592,7 @@ void PresetBar::paint (Graphics& g)
     g.fillRoundedRectangle (r, 6.0f);
     g.setColour (Colours::white.withAlpha (0.06f));
     g.drawRoundedRectangle (r.reduced (0.5f), 6.0f, 1.0f);
-    g.setColour (Palette::text);
+    g.setColour (Palette::theme >= 5 ? Palette::onScreen : Palette::text);
     g.setFont (uiFont (13.0f, false, 0.08f));
     g.drawText (proc.getPresetName().toUpperCase(), r.reduced (10.0f, 0.0f), Justification::centred, true);
     g.setColour (Palette::textDim);
@@ -3147,6 +3163,7 @@ void GranulumEditor::paint (Graphics& g)
         g.fillRoundedRectangle (fr.toFloat().translated (0, 2.0f), 14.0f);
         g.setColour (Palette::panel);
         g.fillRoundedRectangle (fr.toFloat(), 14.0f);
+        if (Palette::theme == 8) { g.setColour (Palette::edge); g.drawRoundedRectangle (fr.toFloat().reduced (0.5f), 14.0f, 1.0f); }
     }
     g.setColour (Palette::label);
     g.setFont (uiFont (13.0f * sc, false, 0.12f));
@@ -3155,7 +3172,8 @@ void GranulumEditor::paint (Graphics& g)
 
     for (auto a : { osc1Area, osc2Area, osc3Area })
     {
-        g.setColour (Colours::black.withAlpha (0.14f));
+        if (Palette::theme == 8) { g.setColour (Palette::edge); g.drawRoundedRectangle (a.toFloat().reduced (0.5f), 10.0f, 1.0f); continue; }
+        g.setColour (Colours::black.withAlpha (Palette::theme == 5 || Palette::theme == 7 ? 0.045f : 0.14f));
         g.fillRoundedRectangle (a.toFloat(), 10.0f);
     }
 
@@ -3214,7 +3232,7 @@ void GranulumEditor::paint (Graphics& g)
     if (FxTab::style == 2 && filterTabs[0] != nullptr)
     {
         auto seg = filterTabs[0]->getBounds().getUnion (filterTabs[1]->getBounds()).toFloat();
-        g.setColour (Palette::screen.withAlpha (0.7f));
+        g.setColour (Palette::theme >= 5 ? Palette::field : Palette::screen.withAlpha (0.7f));
         g.fillRoundedRectangle (seg, 8.0f);
         g.setColour (Colours::white.withAlpha (0.05f));
         g.drawRoundedRectangle (seg.reduced (0.5f), 8.0f, 1.0f);
@@ -3222,7 +3240,7 @@ void GranulumEditor::paint (Graphics& g)
     if (FxTab::style == 2 && fxTabs[0] != nullptr)
     {
         auto seg = fxTabs[0]->getBounds().getUnion (fxTabs[2]->getBounds()).toFloat();
-        g.setColour (Palette::screen.withAlpha (0.7f));
+        g.setColour (Palette::theme >= 5 ? Palette::field : Palette::screen.withAlpha (0.7f));
         g.fillRoundedRectangle (seg, 8.0f);
         g.setColour (Colours::white.withAlpha (0.05f));
         g.drawRoundedRectangle (seg.reduced (0.5f), 8.0f, 1.0f);
