@@ -2034,7 +2034,7 @@ void AmpEditor::mouseDrag (const MouseEvent& e)
     if (dragging < 0) return;
     const auto geo = geometry();
     if (dragging == 0)
-        setValue (ParamID::ampA, jlimit (0.5f, 10000.0f, envTime (e.position.x - geo.p0.x, 10000.0f, geo.maxW)));
+        setValue (ParamID::ampA, jlimit (0.0f, 10000.0f, envTime (e.position.x - geo.p0.x - 4.0f, 10000.0f, geo.maxW)));
     else if (dragging == 1)
     {
         setValue (ParamID::ampD, jlimit (1.0f, 10000.0f, envTime (e.position.x - geo.p1.x, 10000.0f, geo.maxW)));

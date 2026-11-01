@@ -207,7 +207,7 @@ int main (int argc, char** argv)
     if (argc > 2 && String (argv[2]) == "amp")
     {
         setP (ParamID::osc1On, 1.0f);
-        setP (ParamID::ampA, 120.0f); setP (ParamID::ampD, 600.0f); setP (ParamID::ampS, 0.55f); setP (ParamID::ampR, 1500.0f);
+        setP (ParamID::ampD, 600.0f); setP (ParamID::ampS, 0.55f); setP (ParamID::ampR, 1500.0f);   // attack stays at its default 0
         ed->showAmp();
         p.keyboardState.noteOn (1, 48, 0.9f);
         run (p, ed, 30);

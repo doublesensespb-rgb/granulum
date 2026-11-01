@@ -460,8 +460,8 @@ AudioProcessorValueTreeState::ParameterLayout GranulumProcessor::createLayout()
                                                String (block) + " gets Osc " + String (o + 1), true));
 
     // AMP envelope
-    auto msFmt = A().withStringFromValueFunction ([] (float v, int) { return v < 1000.0f ? fmt (v, v < 10.0f ? 1 : 0, " ms") : fmt (v / 1000.0f, 2, " s"); });
-    ps.push_back (std::make_unique<P> (ParameterID { ParamID::ampA, 1 }, "Amp Attack",  skewed (0.5f, 10000.0f, 300.0f), 5.0f, msFmt));
+    auto msFmt = A().withStringFromValueFunction ([] (float v, int) { return v < 0.05f ? String ("0 ms") : v < 1000.0f ? fmt (v, v < 10.0f ? 1 : 0, " ms") : fmt (v / 1000.0f, 2, " s"); });
+    ps.push_back (std::make_unique<P> (ParameterID { ParamID::ampA, 1 }, "Amp Attack",  skewed (0.0f, 10000.0f, 300.0f), 0.0f, msFmt));
     ps.push_back (std::make_unique<P> (ParameterID { ParamID::ampD, 1 }, "Amp Decay",   skewed (1.0f, 10000.0f, 500.0f), 300.0f, msFmt));
     ps.push_back (std::make_unique<P> (ParameterID { ParamID::ampS, 1 }, "Amp Sustain", NormalisableRange<float> (0.0f, 1.0f), 1.0f, pct));
     ps.push_back (std::make_unique<P> (ParameterID { ParamID::ampR, 1 }, "Amp Release", skewed (5.0f, 10000.0f, 600.0f), 300.0f, msFmt));
