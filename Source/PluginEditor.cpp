@@ -2915,6 +2915,7 @@ void GranulumEditor::timerCallback()
     }
     for (auto* k : allKnobs) k->tick();
     if (selectedLfo < kNumLfos) lfoTabs[(size_t) selectedLfo]->repaint();
+    else repaint (adsrReadout);
 
     meter    = jmax (proc.outputLevel.load(), meter * 0.85f);
     activity = jmax ((float) proc.vizEngine().vizCount.load() / 20.0f, activity * 0.8f);
@@ -3029,6 +3030,25 @@ void GranulumEditor::paint (Graphics& g)
     if (selectedFx == 1 && proc.apvts.getRawParameterValue (ParamID::delaySync)->load() > 0.5f)
         g.drawText ("TIME", distTypeLabel, Justification::centredLeft, false);
 
+    if (selectedLfo == kNumLfos)
+    {
+        // ADSR values as a calm 2 x 2 readout next to the curve
+        const char* ids[4]   = { ParamID::ampA, ParamID::ampD, ParamID::ampS, ParamID::ampR };
+        const char* names[4] = { "ATTACK", "DECAY", "SUSTAIN", "RELEASE" };
+        auto area = adsrReadout.toFloat().reduced (0.0f, 6.0f);
+        const float cw = area.getWidth() / 2.0f, rh = area.getHeight() / 2.0f;
+        for (int i = 0; i < 4; ++i)
+        {
+            auto cell = Rectangle<float> (area.getX() + cw * (float) (i % 2), area.getY() + rh * (float) (i / 2), cw, rh).reduced (6.0f, 4.0f);
+            g.setColour (Palette::label);
+            g.setFont (uiFont (10.0f * sc, false, 0.12f));
+            g.drawText (names[i], cell.removeFromTop (cell.getHeight() * 0.42f), Justification::bottomLeft, false);
+            auto* prm = proc.apvts.getParameter (ids[i]);
+            g.setColour (Palette::text);
+            g.setFont (uiFont (17.0f * sc, false, 0.04f));
+            g.drawText (prm->getCurrentValueAsText(), cell, Justification::topLeft, false);
+        }
+    }
     if (selectedLfo < kNumLfos)
     {
         g.drawText ("SHAPE",    lfoPresetLabel, Justification::centredLeft, false);
@@ -3253,8 +3273,9 @@ void GranulumEditor::resized()
         lfoEditor.setBounds (lf.removeFromLeft (S (330)));
         {
             // ADSR: the curve on top, the four knobs right under their letters
-            auto box = lfoEditor.getBounds().withRight (voiceArea.getX() - S (18));   // ADSR uses the whole strip
+            auto box = lfoEditor.getBounds();                                        // same size as the LFO screen
             auto knobRow = box.removeFromBottom (S (54));
+            adsrReadout = lfoEditor.getBounds().withLeft (lfoEditor.getRight() + S (24)).withRight (voiceArea.getX() - S (24));
             ampEditor.setBounds (box.withTrimmedBottom (S (2)));
             const int kw = knobRow.getWidth() / 4;
             for (auto& k : ampKnobs) k->setBounds (knobRow.removeFromLeft (kw));

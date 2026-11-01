@@ -488,7 +488,7 @@ private:
 
     juce::Rectangle<int> titleArea, gemsArea, screenFrame, osc1Area, osc2Area, osc3Area, dropZone,
                          grainArea, filterArea, fxArea, ledArea, lfoFrame, voiceArea, fxContent,
-                         lfoPresetLabel, lfoModeLabel, lfoDivLabel, distTypeLabel, fxLabel;
+                         lfoPresetLabel, lfoModeLabel, lfoDivLabel, distTypeLabel, fxLabel, adsrReadout;
     float meter = 0.0f;
     float activity = 0.0f;
     uint32_t shownModVersion = 0;
