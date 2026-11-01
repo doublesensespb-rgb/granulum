@@ -1744,7 +1744,7 @@ Rectangle<float> LfoEditor::removeRect() const
 
 void LfoEditor::mouseMove (const MouseEvent& e)
 {
-    const bool overRemove = proc.countModulations (lfo) > 0 && removeRect().contains (e.position);
+    const bool overRemove = false;
     if (overRemove != hoverRemove) { hoverRemove = overRemove; repaint(); }
     if (overRemove) { setMouseCursor (MouseCursor::PointingHandCursor); return; }
     bool h = false;
@@ -1760,7 +1760,7 @@ void LfoEditor::mouseExit (const MouseEvent&) { hoverIndex = -1; }
 
 void LfoEditor::mouseDown (const MouseEvent& e)
 {
-    if (proc.countModulations (lfo) > 0 && removeRect().contains (e.position))
+    if (false)
     {
         // REMOVE: takes this LFO off every knob (unlike the light, which only pauses it)
         for (int t = 0; t < kNumModTargets; ++t)
@@ -1890,7 +1890,7 @@ void LfoEditor::paint (Graphics& g)
     g.drawText (rate, r.reduced (10.0f, 5.0f), Justification::topRight, false);
 
     // REMOVE: only when this LFO is routed somewhere
-    if (const int n = proc.countModulations (lfo); n > 0)
+    if (const int n = proc.countModulations (lfo); false && n > 0)
     {
         const auto rr = removeRect();
         g.setColour ((hoverRemove ? Palette::buttonHi : Palette::field).withAlpha (hoverRemove ? 0.95f : 0.7f));
@@ -2762,6 +2762,12 @@ GranulumEditor::GranulumEditor (GranulumProcessor& p)
         c->mode.addItemList ({ "FREE", "RETRIG", "ENV" }, 1);
         c->sync.setClickingTogglesState (true);
         c->sync.setTooltip ("Lock the LFO to the project tempo");
+        c->remove.setTooltip ("Take this LFO off every knob it modulates");
+        c->remove.onClick = [this, l]
+        {
+            for (int t = 0; t < kNumModTargets; ++t)
+                if (proc.hasModulation (t, l)) proc.removeModulation (t, l);
+        };
         c->mode.setTooltip ("FREE: runs on its own.  RETRIG: restarts with each note.  ENV: runs once per note and holds.");
         c->rate = std::make_unique<Knob> (proc, ParamID::lfo (l, "Rate"), "Rate", Knob::Size::Small);
         c->rise = std::make_unique<Knob> (proc, ParamID::lfo (l, "Rise"), "Rise", Knob::Size::Small);
@@ -2771,7 +2777,7 @@ GranulumEditor::GranulumEditor (GranulumProcessor& p)
         c->modeA = std::make_unique<ComboAtt> (s, ParamID::lfo (l, "Mode"), c->mode);
         c->syncA = std::make_unique<ButtonAtt> (s, ParamID::lfo (l, "Sync"), c->sync);
         for (Component* comp : { (Component*) &c->preset, (Component*) &c->div, (Component*) &c->mode, (Component*) &c->sync,
-                                 (Component*) c->rate.get(), (Component*) c->rise.get() })
+                                 (Component*) &c->remove, (Component*) c->rate.get(), (Component*) c->rise.get() })
             addChildComponent (comp);
         lfoControls[(size_t) l] = std::move (c);
     }
@@ -2836,7 +2842,7 @@ void GranulumEditor::selectLfo (int i)
         lfoTabs[(size_t) l]->repaint();
         auto& c = *lfoControls[(size_t) l];
         for (Component* comp : { (Component*) &c.preset, (Component*) &c.div, (Component*) &c.mode, (Component*) &c.sync,
-                                 (Component*) c.rate.get(), (Component*) c.rise.get() })
+                                 (Component*) &c.remove, (Component*) c.rate.get(), (Component*) c.rise.get() })
             comp->setVisible (l == i);
     }
     if (! amp) lfoEditor.setLfo (i);
@@ -2951,6 +2957,9 @@ void GranulumEditor::timerCallback()
         c.rate->setAlpha (sync ? 0.35f : 1.0f);
         c.div.setEnabled (sync);
         c.div.setAlpha (sync ? 1.0f : 0.5f);
+        const bool routed = proc.countModulations (l) > 0;
+        c.remove.setEnabled (routed);
+        c.remove.setAlpha (routed ? 1.0f : 0.35f);
     }
 
     if (const auto v = proc.modVersion.load(); v != shownModVersion)
@@ -3351,7 +3360,12 @@ void GranulumEditor::resized()
             c.preset.setBounds (presetBox);
             c.mode.setBounds (modeBox);
             c.div.setBounds (divBox);
-            c.sync.setBounds (syncBox);
+            {
+                auto sb = syncBox;
+                c.sync.setBounds (sb.removeFromLeft (sb.getWidth() * 45 / 100));
+                sb.removeFromLeft (S (4));
+                c.remove.setBounds (sb);
+            }
             c.rate->setBounds (rateCol.withSizeKeepingCentre (rateCol.getWidth(), jmin (rateCol.getHeight(), S (86))));
             c.rise->setBounds (riseCol.withSizeKeepingCentre (riseCol.getWidth(), jmin (riseCol.getHeight(), S (86))));
         }

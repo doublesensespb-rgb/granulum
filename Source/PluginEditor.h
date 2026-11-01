@@ -479,7 +479,7 @@ private:
     struct LfoControls
     {
         juce::ComboBox preset, div, mode;
-        juce::TextButton sync { "SYNC" };
+        juce::TextButton sync { "SYNC" }, remove { "REMOVE" };
         std::unique_ptr<Knob> rate, rise;
         std::unique_ptr<ComboAtt> divA, modeA;
         std::unique_ptr<ButtonAtt> syncA;
