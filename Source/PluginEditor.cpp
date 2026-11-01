@@ -1879,7 +1879,8 @@ void LfoEditor::paint (Graphics& g)
 void AmpTab::paint (Graphics& g)
 {
     auto r = getLocalBounds().toFloat().reduced (1.0f);
-    const auto col = Palette::accent;
+    const auto col = Palette::accent;                 // ADSR's own colour: teal, not used by any LFO
+    const bool on = param != nullptr && param->getValue() > 0.5f;
     g.setColour (selected ? Palette::button : Palette::field);
     g.fillRoundedRectangle (r, 6.0f);
     if (selected)
@@ -1887,20 +1888,36 @@ void AmpTab::paint (Graphics& g)
         g.setColour (col);
         g.drawRoundedRectangle (r.reduced (0.5f), 6.0f, 1.2f);
     }
-    // speaker icon
-    const float cx = r.getX() + 13.0f, cy = r.getCentreY();
-    Path sp;
-    sp.startNewSubPath (cx - 5.0f, cy - 2.0f);
-    sp.lineTo (cx - 2.5f, cy - 2.0f); sp.lineTo (cx + 1.0f, cy - 5.0f); sp.lineTo (cx + 1.0f, cy + 5.0f);
-    sp.lineTo (cx - 2.5f, cy + 2.0f); sp.lineTo (cx - 5.0f, cy + 2.0f); sp.closeSubPath();
-    g.setColour (col.withAlpha (selected ? 1.0f : 0.7f));
-    g.fillPath (sp);
-    Path wave;
-    wave.addCentredArc (cx + 1.5f, cy, 4.5f, 4.5f, 0.0f, 0.6f, 2.55f, true);
-    g.strokePath (wave, PathStrokeType (1.2f));
-    g.setColour (selected ? Colours::white : Palette::text);
-    g.setFont (uiFont (13.0f, true, 0.08f));
-    g.drawText ("ADSR", r.withTrimmedLeft (24.0f), Justification::centredLeft, false);
+    const auto ledR = Rectangle<float> (10.0f, 10.0f).withCentre ({ r.getX() + 13.0f, r.getCentreY() });
+    if (on) drawLed (g, ledR, col, col.darker (0.6f), 0.9f);
+    else  { g.setColour (col.withAlpha (0.45f)); g.drawEllipse (ledR.reduced (0.5f), 1.2f); }
+
+    const auto f = uiFont (13.0f, true, 0.08f);
+    g.setFont (f);
+    g.setColour ((selected ? Colours::white : Palette::text).withAlpha (on ? 1.0f : 0.45f));
+    auto tr = r.withTrimmedLeft (24.0f);
+    g.drawText ("ADSR", tr, Justification::centredLeft, false);
+    const float w = (float) GlyphArrangement::getStringWidthInt (f, "ADSR") + 5.0f;
+    g.setFont (uiFont (10.0f, false, 0.08f));
+    g.setColour (Palette::textDim.withAlpha (on ? 0.85f : 0.4f));
+    g.drawText ("amp", tr.withTrimmedLeft (w), Justification::centredLeft, false);
+}
+
+void AmpTab::mouseMove (const MouseEvent& e)
+{
+    setMouseCursor (e.position.x < 26.0f ? MouseCursor::NormalCursor : MouseCursor::PointingHandCursor);
+}
+
+void AmpTab::mouseDown (const MouseEvent& e)
+{
+    if (e.position.x < 26.0f && param != nullptr)
+    {
+        param->beginChangeGesture();
+        param->setValueNotifyingHost (param->getValue() > 0.5f ? 0.0f : 1.0f);
+        param->endChangeGesture();
+        repaint();
+    }
+    if (onSelect) onSelect();
 }
 
 AmpEditor::AmpEditor (GranulumProcessor& p) : proc (p)
@@ -2732,6 +2749,7 @@ GranulumEditor::GranulumEditor (GranulumProcessor& p)
     }
     addAndMakeVisible (lfoEditor);
     addChildComponent (ampEditor);
+    ampTab.param = proc.apvts.getParameter (ParamID::ampOn);
     addAndMakeVisible (ampTab);
     ampTab.onSelect = [this] { selectLfo (3); };
     for (auto [id, nm] : { std::pair<const char*, const char*> { ParamID::ampA, "A" }, { ParamID::ampD, "D" },

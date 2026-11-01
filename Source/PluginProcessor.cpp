@@ -464,6 +464,7 @@ AudioProcessorValueTreeState::ParameterLayout GranulumProcessor::createLayout()
     ps.push_back (std::make_unique<P> (ParameterID { ParamID::ampA, 1 }, "Amp Attack",  skewed (0.0f, 10000.0f, 300.0f), 0.0f, msFmt));
     ps.push_back (std::make_unique<P> (ParameterID { ParamID::ampD, 1 }, "Amp Decay",   skewed (1.0f, 10000.0f, 500.0f), 300.0f, msFmt));
     ps.push_back (std::make_unique<P> (ParameterID { ParamID::ampS, 1 }, "Amp Sustain", NormalisableRange<float> (0.0f, 1.0f), 1.0f, pct));
+    ps.push_back (std::make_unique<B> (ParameterID { ParamID::ampOn, 1 }, "Amp Envelope On", true));
     ps.push_back (std::make_unique<P> (ParameterID { ParamID::ampR, 1 }, "Amp Release", skewed (5.0f, 10000.0f, 600.0f), 300.0f, msFmt));
 
     // VOICE / global
@@ -531,6 +532,7 @@ GranulumProcessor::GranulumProcessor()
     pAmpD      = apvts.getRawParameterValue (ParamID::ampD);
     pAmpS      = apvts.getRawParameterValue (ParamID::ampS);
     pAmpR      = apvts.getRawParameterValue (ParamID::ampR);
+    pAmpOn     = apvts.getRawParameterValue (ParamID::ampOn);
     for (int l = 0; l < kNumLfos; ++l)
     {
         pLfoSync[(size_t) l] = apvts.getRawParameterValue (ParamID::lfo (l, "Sync"));
@@ -790,10 +792,18 @@ granulum::Params GranulumProcessor::voiceParams (const float* v, int osc) const
     p.evolve   = 0.0f;   // EVOLVE knob removed
     p.mono     = pMono->load() > 0.5f;
     p.portaMs  = v[mtPorta];
-    p.attackMs  = pAmpA->load();
-    p.decayMs   = pAmpD->load();
-    p.sustain   = pAmpS->load();
-    p.releaseMs = pAmpR->load();
+    if (pAmpOn->load() > 0.5f)
+    {
+        p.attackMs  = pAmpA->load();
+        p.decayMs   = pAmpD->load();
+        p.sustain   = pAmpS->load();
+        p.releaseMs = pAmpR->load();
+    }
+    else
+    {
+        // ADSR switched off: a plain gate (instant on, full level, 10 ms tail)
+        p.attackMs = 0.0f; p.decayMs = 1.0f; p.sustain = 1.0f; p.releaseMs = 10.0f;
+    }
 
     const bool grainBlock = pGrainOn->load() > 0.5f;
     if (osc == 0)

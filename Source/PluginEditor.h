@@ -360,11 +360,13 @@ private:
 class AmpTab final : public juce::Component, public juce::SettableTooltipClient
 {
 public:
-    AmpTab() { setTooltip ("ADSR: the volume envelope of every note (Attack, Decay, Sustain, Release)"); setMouseCursor (juce::MouseCursor::PointingHandCursor); }
+    AmpTab() { setTooltip ("ADSR amp: the volume envelope of every note.\nClick the light to switch it off (notes become a plain on/off gate)."); }
     void paint (juce::Graphics&) override;
-    void mouseDown (const juce::MouseEvent&) override { if (onSelect) onSelect(); }
+    void mouseMove (const juce::MouseEvent&) override;
+    void mouseDown (const juce::MouseEvent&) override;
     std::function<void()> onSelect;
     bool selected = false;
+    juce::RangedAudioParameter* param = nullptr;
 };
 
 // ADSR drawn as a curve; drag the three points (attack peak, decay/sustain corner, release end)
