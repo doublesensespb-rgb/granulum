@@ -193,7 +193,7 @@ void GranulumLook::drawButtonText (Graphics& g, TextButton& b, bool over, bool)
 {
     g.setFont (uiFont (b.getHeight() < 30 ? 11.5f : 13.5f, false, 0.08f));
     const auto onText = toggleStyle == 0 ? Palette::screen : toggleStyle == 2 ? Palette::accent.brighter (0.2f)
-                      : toggleStyle >= 5 ? Colours::white : Palette::ice;
+                      : toggleStyle >= 5 ? (Palette::theme >= 5 ? Palette::onAccent() : Colours::white) : Palette::ice;
     g.setColour (b.getToggleState() ? onText : (over ? Palette::hi : Palette::text));
     g.drawText (b.getButtonText(), b.getLocalBounds(), Justification::centred, false);
 }
@@ -2383,7 +2383,7 @@ struct RouteButtons::Digit final : public Button
             g.setColour (Palette::textDim.withAlpha (over ? 0.9f : 0.45f));
             g.drawRoundedRectangle (r.reduced (0.5f), 4.0f, 1.0f);
         }
-        g.setColour (on ? Palette::screen : Palette::textDim.withAlpha (over ? 1.0f : 0.7f));
+        g.setColour (on ? (Palette::theme >= 5 ? Palette::onAccent() : Palette::screen) : Palette::textDim.withAlpha (over ? 1.0f : 0.7f));
         g.setFont (uiFont (r.getHeight() * 0.68f, true));
         g.drawText (getButtonText(), r, Justification::centred, false);
     }
