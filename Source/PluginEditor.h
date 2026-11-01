@@ -360,7 +360,7 @@ private:
 class AmpTab final : public juce::Component, public juce::SettableTooltipClient
 {
 public:
-    AmpTab() { setTooltip ("AMP: the volume envelope of every note (Attack, Decay, Sustain, Release)"); setMouseCursor (juce::MouseCursor::PointingHandCursor); }
+    AmpTab() { setTooltip ("ADSR: the volume envelope of every note (Attack, Decay, Sustain, Release)"); setMouseCursor (juce::MouseCursor::PointingHandCursor); }
     void paint (juce::Graphics&) override;
     void mouseDown (const juce::MouseEvent&) override { if (onSelect) onSelect(); }
     std::function<void()> onSelect;

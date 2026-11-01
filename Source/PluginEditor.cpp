@@ -1900,7 +1900,7 @@ void AmpTab::paint (Graphics& g)
     g.strokePath (wave, PathStrokeType (1.2f));
     g.setColour (selected ? Colours::white : Palette::text);
     g.setFont (uiFont (13.0f, true, 0.08f));
-    g.drawText ("AMP", r.withTrimmedLeft (24.0f), Justification::centredLeft, false);
+    g.drawText ("ADSR", r.withTrimmedLeft (24.0f), Justification::centredLeft, false);
 }
 
 AmpEditor::AmpEditor (GranulumProcessor& p) : proc (p)
@@ -3244,9 +3244,9 @@ void GranulumEditor::resized()
         auto tabs = lf.removeFromLeft (S (100));
         const int gapT = S (5);
         const int th = (tabs.getHeight() - gapT * kNumLfos) / (kNumLfos + 1);
+        ampTab.setBounds (tabs.getX(), tabs.getY(), tabs.getWidth(), th);          // ADSR first
         for (int l = 0; l < kNumLfos; ++l)
-            lfoTabs[(size_t) l]->setBounds (tabs.getX(), tabs.getY() + l * (th + gapT), tabs.getWidth(), th);
-        ampTab.setBounds (tabs.getX(), tabs.getY() + kNumLfos * (th + gapT), tabs.getWidth(), th);
+            lfoTabs[(size_t) l]->setBounds (tabs.getX(), tabs.getY() + (l + 1) * (th + gapT), tabs.getWidth(), th);
         lf.removeFromLeft (S (12));
 
         voiceArea = lf.removeFromRight (S (180));
