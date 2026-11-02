@@ -2,6 +2,9 @@
 #include "PluginProcessor.h"
 #include "PluginEditor.h"
 #include "BinaryData.h"
+#ifndef GRAINFORM_VERSION
+ #define GRAINFORM_VERSION "dev"
+#endif
 
 using namespace juce;
 
@@ -436,8 +439,10 @@ AudioProcessorValueTreeState::ParameterLayout GranulumProcessor::createLayout()
     ps.push_back (std::make_unique<B> (ParameterID { ParamID::osc3On, 1 }, "Osc 3 On", false));
     ps.push_back (std::make_unique<P> (ParameterID { ParamID::osc3Vol, 1 }, "Osc 3 Volume", NormalisableRange<float> (0.0f, 1.0f), 0.5f, pct));
     ps.push_back (std::make_unique<AudioParameterChoice> (ParameterID { ParamID::osc3Type, 1 }, "Osc 3 Noise", noiseNames(), 0));
-    ps.push_back (std::make_unique<P> (ParameterID { ParamID::osc3Color, 1 }, "Osc 3 Color", NormalisableRange<float> (-1.0f, 1.0f), 0.0f,
-                                       A().withStringFromValueFunction ([] (float v, int) { return std::abs (v) < 0.02f ? String ("NEUTRAL") : (v < 0 ? "DARK " : "BRIGHT ") + String (roundToInt (std::abs (v) * 100.0f)); })));
+    // OSC 3 PITCH (the old COLOR id is kept so projects load): -1..1 = -12..+12 semitones
+    ps.push_back (std::make_unique<P> (ParameterID { ParamID::osc3Color, 1 }, "Osc 3 Pitch", NormalisableRange<float> (-1.0f, 1.0f), 0.0f,
+                                       A().withStringFromValueFunction ([] (float v, int) { const float st = v * 12.0f;
+                                           return std::abs (st) < 0.05f ? String ("0 st") : (st > 0 ? "+" : "") + String (st, 1) + " st"; })));
     ps.push_back (std::make_unique<B> (ParameterID { ParamID::osc3Grain, 1 }, "Osc 3 Granular", false));
 
     // GRANULAR
@@ -592,6 +597,8 @@ GranulumProcessor::GranulumProcessor()
     harmonics[0] = 1.0f;
     for (int l = 0; l < kNumLfos; ++l) setLfoPoints (l, lfoPreset (1));   // triangle
 
+    // factory sounds ship inside the plugin and are written to Documents/GRAIN FORM/Samples/Atmos once
+    installFactorySamples();
     // OSC 2 is never empty: the first factory sound is ready (a saved project replaces it)
     loadAdjacentFactorySample (+1);
     if (auto* on = apvts.getParameter (ParamID::osc2On)) on->setValueNotifyingHost (0.0f);   // INIT keeps OSC 2 off
@@ -873,6 +880,7 @@ granulum::Params GranulumProcessor::voiceParams (const float* v, int osc) const
         p.keyTrack = false;        // noise sounds the same on every note
         p.randomStart = true;      // stacked voices don't phase against each other
         p.portaMs = 0.0f;
+        p.transpose = v[mtOsc3Color] * 12.0f;   // OSC 3 PITCH
         p.grainOn = grainBlock && pOsc3Grain->load() > 0.5f;
     }
     return p;
@@ -1000,23 +1008,6 @@ void GranulumProcessor::processChunk (int from, int len)
             L[i] *= gg; R[i] *= gg;
         }
         *lastG[o] = g[o];
-    }
-
-    // ---- OSC 3 COLOR: one knob from dark (low-pass) to bright (high-pass) ----
-    {
-        const float c = v[mtOsc3Color];
-        float* ch[2] = { noiseBuf.getWritePointer (0) + from, noiseBuf.getWritePointer (1) + from };
-        const float lpHz = c < 0.0f ? 20000.0f * std::pow (0.012f, -c) : 20000.0f;
-        const float hpHz = c > 0.0f ? 20.0f * std::pow (200.0f, c) : 5.0f;
-        const float al = std::exp (-MathConstants<float>::twoPi * jmin (lpHz, (float) sr * 0.45f) / (float) sr);
-        const float ah = std::exp (-MathConstants<float>::twoPi * hpHz / (float) sr);
-        for (int k = 0; k < 2; ++k)
-            for (int i = 0; i < len; ++i)
-            {
-                colorLp[k] = (1.0f - al) * ch[k][i] + al * colorLp[k];
-                colorHp[k] = (1.0f - ah) * colorLp[k] + ah * colorHp[k];
-                ch[k][i] = colorLp[k] - colorHp[k];
-            }
     }
 
     // ---- shared block settings ----
@@ -1222,6 +1213,24 @@ File GranulumProcessor::factorySampleDir()
     return File::getSpecialLocation (File::userDocumentsDirectory).getChildFile ("GRAIN FORM").getChildFile ("Samples");
 }
 
+void GranulumProcessor::installFactorySamples()
+{
+    const auto dir = factorySampleDir().getChildFile ("Atmos");
+    for (int i = 0; i < BinaryData::namedResourceListSize; ++i)
+    {
+        const String file = BinaryData::getNamedResourceOriginalFilename (BinaryData::namedResourceList[i]);
+        if (! file.endsWithIgnoreCase (".flac") || CharacterFunctions::isDigit (file[0])) continue;   // skip the noises
+        const auto target = dir.getChildFile (file);
+        if (target.existsAsFile()) continue;
+        int size = 0;
+        if (const char* data = BinaryData::getNamedResource (BinaryData::namedResourceList[i], size))
+        {
+            dir.createDirectory();
+            target.replaceWithData (data, (size_t) size);
+        }
+    }
+}
+
 bool GranulumProcessor::isFactorySample() const
 {
     const ScopedLock sl (infoLock);
@@ -1295,7 +1304,7 @@ namespace
             for (int i = 0; i < BinaryData::namedResourceListSize; ++i)
             {
                 const String file = BinaryData::getNamedResourceOriginalFilename (BinaryData::namedResourceList[i]);
-                if (! file.endsWithIgnoreCase (".flac")) continue;
+                if (! file.endsWithIgnoreCase (".flac") || ! CharacterFunctions::isDigit (file[0])) continue;   // noises are "NN_NAME.flac"
                 // "03_TAPE_HISS.flac" -> "TAPE HISS"
                 const String name = file.upToLastOccurrenceOf (".", false, false).fromFirstOccurrenceOf ("_", false, false).replace ("_", " ");
                 v.push_back ({ BinaryData::namedResourceList[i], name });
@@ -1360,6 +1369,15 @@ File GranulumProcessor::presetFolder()
 {
     auto f = File::getSpecialLocation (File::userDocumentsDirectory).getChildFile ("GRAIN FORM").getChildFile ("Presets");
     f.createDirectory();
+    // presets made in the old Granulum versions are copied over once (never overwritten)
+    static bool migrated = false;
+    if (! migrated)
+    {
+        migrated = true;
+        const auto old = File::getSpecialLocation (File::userDocumentsDirectory).getChildFile ("Granulum").getChildFile ("Presets");
+        for (auto& o : old.findChildFiles (File::findFiles, false, "*.gpreset"))
+            if (! f.getChildFile (o.getFileName()).exists()) o.copyFileTo (f.getChildFile (o.getFileName()));
+    }
     return f;
 }
 
@@ -1501,6 +1519,7 @@ void GranulumProcessor::getStateInformation (MemoryBlock& destData)
     for (float h : harmonics) hs.add (String (h, 4));
     state.setProperty ("harmonics", hs.joinIntoString (","), nullptr);
     state.setProperty ("presetName", presetName, nullptr);
+    state.setProperty ("pluginVersion", GRAINFORM_VERSION, nullptr);
     state.setProperty ("grainMask", (int) grainMask.load(), nullptr);
 
     StringArray ms;
@@ -1535,6 +1554,10 @@ void GranulumProcessor::setStateInformation (const void* data, int sizeInBytes)
     const uint32_t gm = (uint32_t) (int) state.getProperty ("grainMask", 0xffff);
     apvts.replaceState (state);
     presetName = pn;
+
+    // Saved before 0.92: OSC 3 knob was COLOR (a tone filter), now it is PITCH -> start at 0 st
+    if (! state.hasProperty ("pluginVersion"))
+        if (auto* q = apvts.getParameter (ParamID::osc3Color)) q->setValueNotifyingHost (q->convertTo0to1 (0.0f));
 
     // Old sessions/presets had a GRANULAR on/off lamp. If it was off, keep them clean:
     // switch every OSC's GRAIN off, then mark the (now hidden) block switch as on.

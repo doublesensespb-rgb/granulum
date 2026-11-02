@@ -160,7 +160,7 @@ void GranulumLook::drawButtonBackground (Graphics& g, Button& b, const Colour&, 
             // a soft light glint sweeps across every few seconds, so the button invites a click
             if (! open)
             {
-                const double t = std::fmod (Time::getMillisecondCounterHiRes() * 0.001, 3.6);
+                const double t = std::fmod (Time::getMillisecondCounterHiRes() * 0.001, 1.8);
                 if (t < 0.9)
                 {
                     const float k = (float) (t / 0.9);
@@ -2929,7 +2929,7 @@ GranulumEditor::GranulumEditor (GranulumProcessor& p)
     add (osc2Knobs, ParamID::osc2Oct,  "Oct",  Knob::Size::Small);
     add (osc2Knobs, ParamID::osc2Semi, "Semi", Knob::Size::Small);
     add (osc3Knobs, ParamID::osc3Vol,   "Vol",   Knob::Size::Small);
-    add (osc3Knobs, ParamID::osc3Color, "Color", Knob::Size::Small);
+    add (osc3Knobs, ParamID::osc3Color, "Pitch", Knob::Size::Small);
 
     add (filterKnobs, ParamID::cutoff, "Cutoff");
     add (filterKnobs, ParamID::reso,   "Reso");
