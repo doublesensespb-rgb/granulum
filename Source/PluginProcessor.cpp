@@ -535,6 +535,7 @@ AudioProcessorValueTreeState::ParameterLayout GranulumProcessor::createLayout()
         ps.push_back (std::make_unique<AudioParameterChoice> (ParameterID { ParamID::lfo (l, "Mode"), 1 }, n + "Mode", StringArray { "FREE", "RETRIG", "ENV" }, 0));
         ps.push_back (std::make_unique<P> (ParameterID { ParamID::lfo (l, "Rise"), 1 }, n + "Rise", skewed (0.0f, 8.0f, 1.5f), 0.0f, secFmt));
         ps.push_back (std::make_unique<B> (ParameterID { ParamID::lfo (l, "On"), 1 }, n + "On", true));
+        ps.push_back (std::make_unique<B> (ParameterID { ParamID::lfo (l, "Grains"), 1 }, n + "Into Grains", false));
     }
 
     return { ps.begin(), ps.end() };
@@ -542,7 +543,7 @@ AudioProcessorValueTreeState::ParameterLayout GranulumProcessor::createLayout()
 
 GranulumProcessor::GranulumProcessor()
     : AudioProcessor (BusesProperties().withOutput ("Output", AudioChannelSet::stereo(), true)),
-      apvts (*this, nullptr, "GRANULUM", createLayout())
+      apvts (*this, &undoManager, "GRANULUM", createLayout())
 {
     formatManager.registerBasicFormats();
 
@@ -590,6 +591,7 @@ GranulumProcessor::GranulumProcessor()
         pLfoMode[(size_t) l] = apvts.getRawParameterValue (ParamID::lfo (l, "Mode"));
         pLfoRise[(size_t) l] = apvts.getRawParameterValue (ParamID::lfo (l, "Rise"));
         pLfoOn[(size_t) l]   = apvts.getRawParameterValue (ParamID::lfo (l, "On"));
+        pLfoGrains[(size_t) l] = apvts.getRawParameterValue (ParamID::lfo (l, "Grains"));
     }
 
     loadNoises();
@@ -802,6 +804,7 @@ void GranulumProcessor::advanceLfos (int endSample, int len, const float* v)
         const int  mode = (int) pLfoMode[L]->load();       // 0 free, 1 retrig, 2 env
         const double beats = divisionBeats ((int) pLfoDiv[L]->load());
         const double rate = sync ? (hostBpm / 60.0) / beats : (double) v[mtLfo1Rate + l];
+        lfoRateNow[L] = rate;
 
         double ph;
         if (mode == 2)
@@ -988,25 +991,65 @@ void GranulumProcessor::processChunk (int from, int len)
     SourceSlot* slots[kNumOscs] = { &addSlot, &smpSlot, &noiseSlot };
 
     // ---- the three oscillators, each into its own buffer ----
+    const int volTarget[kNumOscs] = { mtOsc1Vol, mtOsc2Vol, mtOsc3Vol };
     for (int o = 0; o < kNumOscs; ++o)
     {
         float* L = bufs[o]->getWritePointer (0) + from;
         float* R = bufs[o]->getWritePointer (1) + from;
         const bool audible = g[o] > 0.0001f || *lastG[o] > 0.0001f;
-        const auto vp = voiceParams (v, o);
-        engines[o]->render (L, R, len, vp, audible ? slots[o]->active.get() : nullptr);
+        auto vp = voiceParams (v, o);
+        auto ramp = [&] (float* l, float* r)
+        {
+            for (int i = 0; i < len; ++i)
+            {
+                const float gg = *lastG[o] + (g[o] - *lastG[o]) * (float) (i + 1) / (float) len;
+                l[i] *= gg; r[i] *= gg;
+            }
+        };
+
+        // INTO GRAINS: LFOs on this OSC's volume whose rhythm the grains should cut up
+        if (vp.grainOn && g[o] > 0.0f)
+        {
+            float base = modParams[(size_t) volTarget[o]]->getValue();
+            for (auto& m : mods)
+            {
+                if (m.target.load (std::memory_order_acquire) != volTarget[o]) continue;
+                const int l = jlimit (0, kNumLfos - 1, m.lfo.load (std::memory_order_relaxed));
+                if (pLfoOn[(size_t) l]->load() < 0.5f) continue;
+                const float d = m.depth.load (std::memory_order_relaxed);
+                if (pLfoGrains[(size_t) l]->load() > 0.5f && vp.glfoCount < 3)
+                {
+                    auto& G = vp.glfo[(size_t) vp.glfoCount++];
+                    G.table = lfoTables[(size_t) l][(size_t) lfoTableIndex[(size_t) l].load (std::memory_order_acquire)].data();
+                    G.size = kLfoTable;
+                    G.phase = lfoPhase[(size_t) l];
+                    G.inc = lfoRateNow[(size_t) l] / sr;
+                    G.depth = d;
+                    G.rise = lfoRiseOut[(size_t) l].load (std::memory_order_relaxed);
+                }
+                else base += d * lfoValue[(size_t) l];
+            }
+            if (vp.glfoCount > 0)
+            {
+                vp.volInGrains = true;
+                vp.volBase = base;
+                vp.volScale = o == 2 ? 1.4f : 1.0f;
+                vp.level = g[o];
+                vp.levelPrev = *lastG[o];
+            }
+        }
+
         if (o == 0)
         {
-            // harmonics switched off in the GRAIN row: clean and mono, never granulated
+            // harmonics switched off in the GRAIN row: clean and mono, never granulated (normal volume)
             auto clean = vp;
             clean.grainOn = false;
+            clean.volInGrains = false;
             engineAddClean.render (L, R, len, clean, audible ? addCleanSlot.active.get() : nullptr);
+            if (vp.volInGrains) ramp (L, R);
         }
-        for (int i = 0; i < len; ++i)
-        {
-            const float gg = *lastG[o] + (g[o] - *lastG[o]) * (float) (i + 1) / (float) len;
-            L[i] *= gg; R[i] *= gg;
-        }
+        engines[o]->render (L, R, len, vp, audible ? slots[o]->active.get() : nullptr);
+        if (! vp.volInGrains) ramp (L, R);
         *lastG[o] = g[o];
     }
 

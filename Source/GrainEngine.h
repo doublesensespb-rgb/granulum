@@ -100,6 +100,16 @@ struct Params
     float chime    = 0.0f;   // CHIME: grains ring a bank of resonators tuned to the note
     bool  grainOn  = false;
 
+    // INTO GRAINS: LFOs whose rhythm on this OSC's volume is cut up by the grains. Each grain carries its own
+    // piece of the LFO rhythm, taken from a slightly different moment (more SCATTER = further apart).
+    struct GrainLfo { const float* table = nullptr; int size = 0; double phase = 0.0, inc = 0.0; float depth = 0.0f, rise = 1.0f; };
+    std::array<GrainLfo, 3> glfo {};
+    int   glfoCount = 0;
+    bool  volInGrains = false;     // OSC volume is applied here instead of after the engine
+    float volBase = 1.0f;          // normalised volume without the INTO GRAINS LFOs
+    float volScale = 1.0f;         // OSC 3 is a little louder
+    float level = 1.0f, levelPrev = 1.0f;   // full volume now / at the previous chunk (dry part)
+
     // oscillator
     float transpose = 0.0f;  // semitones
     bool  keyTrack  = true;  // false: every note plays the source at its original pitch (noise)
@@ -141,6 +151,7 @@ struct Grain
     float  pan = 0.0f;
     uint8_t kind = 0;   // 0 normal, 1 shimmer, 2 reverse
     bool   perc = false; // SHIMMER "ping": sharp attack, ringing decay (glass / bells)
+    double lph[3] {};    // INTO GRAINS: this grain's own position in each LFO's rhythm
 };
 
 // A grain that was just born — the UI turns these into flying shards.
@@ -437,8 +448,24 @@ public:
                     const float w = g.perc ? percWindow (g.age, g.length) * 1.6f : window (g.age, g.length, g.fade);
                     float l, r;
                     readHermite (srcL, srcR, N, g.pos, l, r);
-                    sumL += l * w * g.gainL;
-                    sumR += r * w * g.gainR;
+                    float gv = 1.0f;
+                    if (p.volInGrains)
+                    {
+                        float vn = p.volBase;
+                        for (int k = 0; k < p.glfoCount; ++k)
+                        {
+                            const auto& L = p.glfo[(size_t) k];
+                            const double ph = g.lph[k] - std::floor (g.lph[k]);
+                            const double x = ph * (double) L.size;
+                            const int i0 = std::min (L.size - 1, (int) x);
+                            const float f = (float) (x - (double) i0);
+                            vn += L.depth * L.rise * (L.table[i0] + (L.table[i0 + 1] - L.table[i0]) * f);
+                            g.lph[k] += L.inc;
+                        }
+                        gv = std::clamp (vn, 0.0f, 1.0f) * p.volScale;
+                    }
+                    sumL += l * w * g.gainL * gv;
+                    sumR += r * w * g.gainR * gv;
                     g.pos += g.inc;
                     if (++g.age >= g.length) g.active = false;
                 }
@@ -467,8 +494,9 @@ public:
                     gl += rl * chimeAmt;
                     gr += rr * chimeAmt;
                 }
-                outL[i] += (dl * 0.85f * (1.0f - wet) + gl * wet) * amp;
-                outR[i] += (dr * 0.85f * (1.0f - wet) + gr * wet) * amp;
+                const float dryLevel = p.volInGrains ? p.levelPrev + (p.level - p.levelPrev) * (float) (i + 1) / (float) numSamples : 1.0f;
+                outL[i] += (dl * 0.85f * (1.0f - wet) * dryLevel + gl * wet) * amp;
+                outR[i] += (dr * 0.85f * (1.0f - wet) * dryLevel + gr * wet) * amp;
             }
         }
 
@@ -662,6 +690,16 @@ private:
         g->pan = pan;
         g->kind = kind;
         g->perc = perc;
+        if (p.volInGrains)
+        {
+            // this grain's slice of the LFO rhythm comes from a moment up to ~1 s back (SCATTER), or right now
+            const double back = (0.02 + 0.98 * (double) scatter) * sr * (double) rng.uni();
+            for (int k = 0; k < p.glfoCount; ++k)
+            {
+                const double ph = p.glfo[(size_t) k].phase - back * p.glfo[(size_t) k].inc;
+                g->lph[k] = ph - std::floor (ph);
+            }
+        }
         if (perc)
         {
             g->length = length = std::max (64, (int) ((0.06 + 0.35 * rng.uni()) * sr));

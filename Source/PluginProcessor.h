@@ -320,6 +320,7 @@ public:
     std::array<float, kScopeSize> scopeRing {};
     std::atomic<int> scopeWrite { 0 };
 
+    juce::UndoManager undoManager { 30000, 60 };   // UNDO in the header: knob and switch changes
     juce::AudioProcessorValueTreeState apvts;
     granulum::GrainEngine engineAdd, engineAddClean, engineSmp, engineNoise;
     juce::MidiKeyboardState keyboardState;
@@ -397,7 +398,8 @@ private:
     std::array<std::array<std::atomic<float>*, kNumOscs>, kNumRouteBlocks> pRoute {};
     std::atomic<float>* pMono {};
     std::atomic<float>* pAmpA {}; std::atomic<float>* pAmpD {}; std::atomic<float>* pAmpS {}; std::atomic<float>* pAmpR {}; std::atomic<float>* pAmpOn {};
-    std::array<std::atomic<float>*, kNumLfos> pLfoSync {}, pLfoDiv {}, pLfoMode {}, pLfoRise {}, pLfoOn {};
+    std::array<std::atomic<float>*, kNumLfos> pLfoSync {}, pLfoDiv {}, pLfoMode {}, pLfoRise {}, pLfoOn {}, pLfoGrains {};
+    std::array<double, kNumLfos> lfoRateNow {};
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (GranulumProcessor)
 };

@@ -160,7 +160,7 @@ void GranulumLook::drawButtonBackground (Graphics& g, Button& b, const Colour&, 
             // a soft light glint sweeps across every few seconds, so the button invites a click
             if (! open)
             {
-                const double t = std::fmod (Time::getMillisecondCounterHiRes() * 0.001, 1.8);
+                const double t = std::fmod (Time::getMillisecondCounterHiRes() * 0.001 + (double) b.getProperties().getWithDefault ("glintOffset", 0.0), 1.8);
                 if (t < 0.9)
                 {
                     const float k = (float) (t / 0.9);
@@ -420,7 +420,7 @@ void ModChip::mouseDown (const MouseEvent& e)
 void ModChip::mouseDrag (const MouseEvent& e)
 {
     if (e.mods.isPopupMenu()) return;
-    const float sens = e.mods.isShiftDown() ? 600.0f : 150.0f;
+    const float sens = e.mods.isShiftDown() || e.mods.isCtrlDown() ? 2400.0f : 450.0f;   // heavy, so depth is easy to set
     const float d = jlimit (-1.0f, 1.0f, startDepth - (float) e.getDistanceFromDragStartY() / sens);
     proc.setModulation (owner.target, lfo, d);
     updateTooltip();
@@ -439,6 +439,7 @@ Knob::Knob (GranulumProcessor& p, const String& paramId, const String& t, Size s
     : target (GranulumProcessor::modIndexOf (paramId)), proc (p), title (t), size (sz)
 {
     slider.setSliderStyle (Slider::RotaryHorizontalVerticalDrag);
+    slider.setMouseDragSensitivity (slider.baseSensitivity);
     slider.setTextBoxStyle (Slider::TextBoxBelow, false, 84, 18);
     slider.setRotaryParameters (MathConstants<float>::pi * 1.25f, MathConstants<float>::pi * 2.75f, true);
     auto* param = proc.apvts.getParameter (paramId);
@@ -458,7 +459,7 @@ Knob::Dial Knob::dial() const
 {
     Dial d;
     auto* lf = dynamic_cast<Slider::LookAndFeelMethods*> (&slider.getLookAndFeel());
-    auto sb = (lf != nullptr ? lf->getSliderLayout (const_cast<Slider&> (slider)).sliderBounds : slider.getLocalBounds())
+    auto sb = (lf != nullptr ? lf->getSliderLayout (const_cast<FineSlider&> (slider)).sliderBounds : slider.getLocalBounds())
                   .translated (slider.getX(), slider.getY()).toFloat().reduced (5.0f);
     d.r = jmin (sb.getWidth(), sb.getHeight()) * 0.5f;
     d.c = sb.getCentre();
@@ -2954,6 +2955,7 @@ GranulumEditor::GranulumEditor (GranulumProcessor& p)
     add (distKnobs,  ParamID::distDrive, "Drive",    Knob::Size::Small);
     add (distKnobs,  ParamID::distTone,  "Tone",     Knob::Size::Small);
     add (distKnobs,  ParamID::distMix,   "Mix",      Knob::Size::Small);
+    for (auto& k : distKnobs) { k->slider.baseSensitivity = 1100; k->slider.setMouseDragSensitivity (1100); }   // distortion: very heavy
     add (delayKnobs, ParamID::delayTime, "Time",     Knob::Size::Small);
     add (delayKnobs, ParamID::delayFb,   "Feedback", Knob::Size::Small);
     add (delayKnobs, ParamID::delayTone, "Tone",     Knob::Size::Small);
@@ -3051,7 +3053,13 @@ GranulumEditor::GranulumEditor (GranulumProcessor& p)
     addAndMakeVisible (presetBar);
     presetBar.onLoaded = [this] { lfoEditor.setLfo (selectedLfo); };
 
-    for (auto* b : { &rndGrains, &rndFx, &rndBars, &randomButton, &initButton, &loadButton, &chordButton }) addAndMakeVisible (*b);
+    for (auto* b : { &rndGrains, &rndFx, &rndBars, &randomButton, &initButton, &loadButton, &chordButton, &undoButton }) addAndMakeVisible (*b);
+    undoButton.onClick = [this] { proc.undoManager.undo(); };
+    undoButton.setTooltip ("Undo the last change (Ctrl+Z). Ctrl+Shift+Z = redo");
+    addMouseListener (this, true);   // every click starts a new undo step
+    setWantsKeyboardFocus (true);
+    chordButton.getProperties().set ("sounds", 4);   // copper with a glint, like SOUNDS
+    chordButton.getProperties().set ("glintOffset", 0.9);
     rndGrains.onClick    = [this] { proc.randomizeSection (0); };
     rndFx.onClick        = [this] { proc.randomizeSection (2); };
     rndBars.onClick      = [this] { proc.randomizeSection (3); };
@@ -3093,7 +3101,6 @@ GranulumEditor::GranulumEditor (GranulumProcessor& p)
             lfoEditor.setLfo (l);
             box.setSelectedId (0, dontSendNotification);
         };
-        c->div.addItemList (GranulumProcessor::divisionNames(), 1);
         c->mode.addItemList ({ "FREE", "RETRIG", "ENV" }, 1);
         c->sync.setClickingTogglesState (true);
         c->sync.setTooltip ("Lock the LFO to the project tempo");
@@ -3105,14 +3112,19 @@ GranulumEditor::GranulumEditor (GranulumProcessor& p)
         };
         c->mode.setTooltip ("FREE: runs on its own.  RETRIG: restarts with each note.  ENV: runs once per note and holds.");
         c->rate = std::make_unique<Knob> (proc, ParamID::lfo (l, "Rate"), "Rate", Knob::Size::Small);
+        c->div  = std::make_unique<Knob> (proc, ParamID::lfo (l, "Div"),  "Rate", Knob::Size::Small);
+        c->div->slider.setTooltip ("RATE in note values (SYNC is on). Turn it, or switch SYNC off for Hz");
+        c->rate->slider.setTooltip ("RATE in Hz (SYNC is off). Switch SYNC on for note values");
+        c->grains.setClickingTogglesState (true);
+        c->grains.setTooltip ("INTO GRAINS: the grains cut up this LFO's rhythm (best with a fast LFO on an OSC VOL)");
+        c->grainsA = std::make_unique<ButtonAtt> (s, ParamID::lfo (l, "Grains"), c->grains);
         c->rise = std::make_unique<Knob> (proc, ParamID::lfo (l, "Rise"), "Rise", Knob::Size::Small);
         c->rise->slider.setTooltip ("RISE: the LFO fades in over this time after a note starts");
         allKnobs.push_back (c->rate.get());
-        c->divA  = std::make_unique<ComboAtt> (s, ParamID::lfo (l, "Div"), c->div);
         c->modeA = std::make_unique<ComboAtt> (s, ParamID::lfo (l, "Mode"), c->mode);
         c->syncA = std::make_unique<ButtonAtt> (s, ParamID::lfo (l, "Sync"), c->sync);
-        for (Component* comp : { (Component*) &c->preset, (Component*) &c->div, (Component*) &c->mode, (Component*) &c->sync,
-                                 (Component*) &c->remove, (Component*) c->rate.get(), (Component*) c->rise.get() })
+        for (Component* comp : { (Component*) &c->preset, (Component*) &c->mode, (Component*) &c->sync, (Component*) &c->grains,
+                                 (Component*) &c->remove, (Component*) c->rate.get(), (Component*) c->div.get(), (Component*) c->rise.get() })
             addChildComponent (comp);
         lfoControls[(size_t) l] = std::move (c);
     }
@@ -3176,9 +3188,12 @@ void GranulumEditor::selectLfo (int i)
         lfoTabs[(size_t) l]->selected = (l == i);
         lfoTabs[(size_t) l]->repaint();
         auto& c = *lfoControls[(size_t) l];
-        for (Component* comp : { (Component*) &c.preset, (Component*) &c.div, (Component*) &c.mode, (Component*) &c.sync,
-                                 (Component*) &c.remove, (Component*) c.rate.get(), (Component*) c.rise.get() })
+        for (Component* comp : { (Component*) &c.preset, (Component*) &c.mode, (Component*) &c.sync, (Component*) &c.grains,
+                                 (Component*) &c.remove, (Component*) c.rise.get() })
             comp->setVisible (l == i);
+        const bool sync = c.sync.getToggleState();
+        c.rate->setVisible (l == i && ! sync);
+        c.div->setVisible (l == i && sync);
     }
     if (! amp) lfoEditor.setLfo (i);
 }
@@ -3371,7 +3386,8 @@ void GranulumEditor::openFile (const File& f)
 
 void GranulumEditor::timerCallback()
 {
-    if (loadButton.isShowing()) loadButton.repaint();   // SOUNDS glint animation
+    if (loadButton.isShowing()) loadButton.repaint();   // SOUNDS / CHORD glint animation
+    if (chordButton.isShowing()) chordButton.repaint();
     auto& s = proc.apvts;
 
     const int chord = (int) s.getRawParameterValue (ParamID::chord)->load();
@@ -3414,10 +3430,9 @@ void GranulumEditor::timerCallback()
     {
         auto& c = *lfoControls[(size_t) l];
         const bool sync = c.sync.getToggleState();
-        c.rate->setEnabled (! sync);
-        c.rate->setAlpha (sync ? 0.35f : 1.0f);
-        c.div.setEnabled (sync);
-        c.div.setAlpha (sync ? 1.0f : 0.5f);
+        const bool shown = l == selectedLfo;
+        if (c.rate->isVisible() != (shown && ! sync)) c.rate->setVisible (shown && ! sync);   // one RATE knob: Hz or note value
+        if (c.div->isVisible()  != (shown && sync))   c.div->setVisible (shown && sync);
         const bool routed = proc.countModulations (l) > 0;
         c.remove.setEnabled (routed);
         c.remove.setAlpha (routed ? 1.0f : 0.35f);
@@ -3642,7 +3657,7 @@ void GranulumEditor::paint (Graphics& g)
     {
         g.drawText ("SHAPE",    lfoPresetLabel, Justification::centredLeft, false);
         g.drawText ("MODE",     lfoModeLabel,   Justification::centredLeft, false);
-        g.drawText ("DIVISION", lfoDivLabel,    Justification::centredLeft, false);
+        g.drawText ("TEMPO",    lfoDivLabel,    Justification::centredLeft, false);
     }
     g.setColour (Colours::white.withAlpha (0.08f));
     g.drawVerticalLine (voiceArea.getX() - 9, (float) voiceArea.getY(), (float) voiceArea.getBottom());
@@ -3682,8 +3697,10 @@ void GranulumEditor::resized()
     randomButton.setBounds (header.removeFromRight (S (118)).withSizeKeepingCentre (S (118), S (30)));
     header.removeFromRight (S (8));
     initButton.setBounds (header.removeFromRight (S (60)).withSizeKeepingCentre (S (60), S (30)));
+    header.removeFromRight (S (8));
+    undoButton.setBounds (header.removeFromRight (S (62)).withSizeKeepingCentre (S (62), S (30)));
     header.removeFromRight (S (16));
-    presetBar.setBounds (header.removeFromRight (S (270)).withSizeKeepingCentre (S (270), S (30)));
+    presetBar.setBounds (header.removeFromRight (S (240)).withSizeKeepingCentre (S (240), S (30)));
     titleArea = header.withTrimmedLeft (S (4));
     r.removeFromTop (S (6));
 
@@ -3896,7 +3913,7 @@ void GranulumEditor::resized()
             auto& c = *lfoControls[(size_t) l];
             c.preset.setBounds (presetBox);
             c.mode.setBounds (modeBox);
-            c.div.setBounds (divBox);
+            c.grains.setBounds (divBox);
             {
                 // REMOVE LINKS takes the whole row; SYNC becomes a small toggle on the DIVISION title line
                 c.remove.setBounds (syncBox);
@@ -3904,6 +3921,7 @@ void GranulumEditor::resized()
                 c.sync.setBounds (lfoDivLabel.withLeft (lfoDivLabel.getRight() - S (44)).withHeight (S (17)).translated (0, -S (2)));
             }
             c.rate->setBounds (rateCol.withSizeKeepingCentre (rateCol.getWidth(), jmin (rateCol.getHeight(), S (86))));
+            c.div->setBounds (c.rate->getBounds());
             c.rise->setBounds (riseCol.withSizeKeepingCentre (riseCol.getWidth(), jmin (riseCol.getHeight(), S (86))));
         }
 
@@ -3929,19 +3947,33 @@ bool GranulumEditor::isInterestedInFileDrag (const StringArray& files)
 
 void GranulumEditor::mouseMove (const MouseEvent& e)
 {
+    if (e.eventComponent != this) return;
     const bool over = dropZone.contains (e.getPosition());
     if (over != dropHover) { dropHover = over; setMouseCursor (over ? MouseCursor::PointingHandCursor : MouseCursor::NormalCursor); repaint (dropZone.expanded (2)); }
 }
 
-void GranulumEditor::mouseExit (const MouseEvent&)
+void GranulumEditor::mouseExit (const MouseEvent& e)
 {
+    if (e.eventComponent != this) return;
     if (dropHover) { dropHover = false; setMouseCursor (MouseCursor::NormalCursor); repaint (dropZone.expanded (2)); }
 }
 
 void GranulumEditor::mouseDown (const MouseEvent& e)
 {
+    proc.undoManager.beginNewTransaction();          // each click (on any control) is one undo step
+    if (e.eventComponent != this) return;            // clicks on children only start the undo step
     if (sampleMenu.isVisible()) { toggleSampleMenu (false); return; }
     if (dropZone.contains (e.getPosition())) launchChooser();   // click the sample box = choose your own file
+}
+
+bool GranulumEditor::keyPressed (const KeyPress& k)
+{
+    if (k.getModifiers().isCommandDown() && (k.getKeyCode() == 'Z' || k.getKeyCode() == 'z'))
+    {
+        if (k.getModifiers().isShiftDown()) proc.undoManager.redo(); else proc.undoManager.undo();
+        return true;
+    }
+    return false;
 }
 
 void GranulumEditor::fileDragEnter (const StringArray&, int, int) { field.dragHover = fileHover = true;  repaint(); }

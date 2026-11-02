@@ -150,6 +150,18 @@ private:
     float startDepth = 0.0f;
 };
 
+// Slider with a heavier feel: longer drag for the full range, Shift (or Ctrl) = 8x finer
+class FineSlider final : public juce::Slider
+{
+public:
+    int baseSensitivity = 500;   // pixels for the full range (JUCE default is 250)
+    void mouseDown (const juce::MouseEvent& e) override
+    {
+        setMouseDragSensitivity (e.mods.isShiftDown() || e.mods.isCtrlDown() ? baseSensitivity * 8 : baseSensitivity);
+        juce::Slider::mouseDown (e);
+    }
+};
+
 class Knob final : public juce::Component, public juce::DragAndDropTarget
 {
 public:
@@ -169,7 +181,7 @@ public:
     void tick();
     void setCompact (bool c) { compact = c; slider.setPopupDisplayEnabled (c, true, nullptr); resized(); }   // no value box: value pops up while dragging
 
-    juce::Slider slider;
+    FineSlider slider;
     const int target;       // modulation target index, -1 if not modulatable
 private:
     struct Dial { juce::Point<float> c; float r = 0, track = 0, start = 0, end = 0; };
@@ -533,6 +545,7 @@ public:
     void mouseMove (const juce::MouseEvent&) override;
     void mouseExit (const juce::MouseEvent&) override;
     void mouseDown (const juce::MouseEvent&) override;
+    bool keyPressed (const juce::KeyPress&) override;
     // snapshot tool: 0 normal, 1 mouse over the sample box, 2 a file is being dragged over the plugin
     void previewDropState (int s) { dropHover = s == 1; fileHover = s == 2; repaint(); }
 
@@ -575,7 +588,7 @@ private:
     Lamp osc1Lamp { "OSC 1", "ADDITIVE" }, osc2Lamp { "OSC 2", "SAMPLE" }, osc3Lamp { "OSC 3", "NOISE" };
     std::unique_ptr<ButtonAtt> osc1LampA, osc2LampA, osc3LampA;
 
-    juce::TextButton initButton { "INIT" }, randomButton { "RANDOM ALL" }, loadButton { juce::String::fromUTF8 ("SOUNDS \xe2\x96\xbe") }, chordButton { "CHORD: OFF" };
+    juce::TextButton undoButton { "UNDO" }, initButton { "INIT" }, randomButton { "RANDOM ALL" }, loadButton { juce::String::fromUTF8 ("SOUNDS \xe2\x96\xbe") }, chordButton { "CHORD: OFF" };
     juce::TextButton rndGrains { "RANDOM" }, rndFx { "RANDOM" }, rndBars { "RANDOM" };
     juce::TextButton osc1Grain { "GRAIN" }, osc2Grain { "GRAIN" }, osc3Grain { "GRAIN" };
     juce::TextButton polyButton { "POLY" }, monoButton { "MONO" };
@@ -600,10 +613,11 @@ private:
 
     struct LfoControls
     {
-        juce::ComboBox preset, div, mode;
-        juce::TextButton sync { "SYNC" }, remove { "REMOVE" };
-        std::unique_ptr<Knob> rate, rise;
-        std::unique_ptr<ComboAtt> divA, modeA;
+        juce::ComboBox preset, mode;
+        juce::TextButton sync { "SYNC" }, remove { "REMOVE" }, grains { "INTO GRAINS" };
+        std::unique_ptr<Knob> rate, rise, div;   // RATE knob shows the division when SYNC is on (like Serum)
+        std::unique_ptr<ButtonAtt> grainsA;
+        std::unique_ptr<ComboAtt> modeA;
         std::unique_ptr<ButtonAtt> syncA;
     };
     std::array<std::unique_ptr<LfoTab>, kNumLfos> lfoTabs;
