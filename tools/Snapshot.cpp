@@ -214,6 +214,18 @@ int main (int argc, char** argv)
         ed->previewDropState (0);
     }
 
+    // design preview: "Snapshot <dir> loop" -> LOOP region on the grain field
+    if (argc > 2 && String (argv[2]) == "loop")
+    {
+        setP (ParamID::loopMode, 1.0f); setP (ParamID::loopStart, 0.28f); setP (ParamID::loopEnd, 0.62f);
+        setP (ParamID::position, 0.3f);
+        run (p, ed, 60);
+        save (*base, outDir, "loop-1.png");
+        setP (ParamID::loopMode, 2.0f);
+        run (p, ed, 30);
+        save (*base, outDir, "loop-2.png");
+    }
+
     // design preview: "Snapshot <dir> scope" -> filter view with a low, resonant cutoff
     if (argc > 2 && String (argv[2]) == "scope")
     {

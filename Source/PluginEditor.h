@@ -205,9 +205,14 @@ public:
     void mouseDown (const juce::MouseEvent&) override;
     void mouseDrag (const juce::MouseEvent&) override;
     void mouseUp (const juce::MouseEvent&) override;
+    void mouseMove (const juce::MouseEvent&) override;
 
     bool dragHover = false;
     void simulate (float dt);   // public so the snapshot tool can advance time
+private:
+    juce::RangedAudioParameter* dragParam = nullptr;   // POSITION, LOOP START or LOOP END
+    int flagAt (float x) const;                         // 0 none, 1 start flag, 2 end flag
+public:
 
 private:
     void timerCallback() override;
@@ -481,6 +486,25 @@ private:
     int hover = -1;
 };
 
+// LOOP mode selector in the GRAIN FIELD title row: OFF | LOOP | PING-PONG | ONE-SHOT
+class LoopModeBar final : public juce::Component, public juce::SettableTooltipClient, private juce::Timer
+{
+public:
+    explicit LoopModeBar (GranulumProcessor& p) : proc (p)
+    {
+        setTooltip ("LOOP: grains use only the part between the two flags on the screen (OSC 2 and OSC 3).\n"
+                    "LOOP repeats, PING-PONG goes back and forth, ONE-SHOT plays it once and holds the end.");
+        startTimerHz (10);
+    }
+    void paint (juce::Graphics&) override;
+    void mouseDown (const juce::MouseEvent&) override;
+private:
+    void timerCallback() override { const int m = mode(); if (m != shown) { shown = m; repaint(); } }
+    int mode() const;
+    GranulumProcessor& proc;
+    int shown = -1;
+};
+
 // AMP tab in the LFO strip: speaker icon + "AMP"
 class AmpTab final : public juce::Component, public juce::SettableTooltipClient
 {
@@ -579,6 +603,7 @@ private:
 
     FilterScope filterScope { proc };
     SampleMenu sampleMenu { proc };
+    LoopModeBar loopBar { proc };
     void toggleSampleMenu (bool show);
 public:
     void openSampleMenuForPreview (bool show = true) { toggleSampleMenu (show); }

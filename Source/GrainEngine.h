@@ -100,6 +100,10 @@ struct Params
     float chime    = 0.0f;   // CHIME: grains ring a bank of resonators tuned to the note
     bool  grainOn  = false;
 
+    // LOOP: grains (and the plain playback) stay inside [loopA, loopB] of the source
+    int   loopMode = 0;      // 0 OFF (whole file), 1 LOOP, 2 PING-PONG, 3 ONE-SHOT
+    float loopA = 0.0f, loopB = 1.0f;
+
     // INTO GRAINS: LFOs whose rhythm on this OSC's volume is cut up by the grains. Each grain carries its own
     // piece of the LFO rhythm, taken from a slightly different moment (more SCATTER = further apart).
     struct GrainLfo { const float* table = nullptr; int size = 0; double phase = 0.0, inc = 0.0; float depth = 0.0f, rise = 1.0f; };
@@ -408,8 +412,24 @@ public:
                 // dry: plain looping playback
                 float dl, dr;
                 readHermite (srcL, srcR, N, v.playPos, dl, dr);
-                v.playPos += ratio;
-                if (v.playPos >= (double) N) v.playPos -= (double) N;
+                if (p.loopMode == 0)
+                {
+                    v.playPos += ratio;
+                    if (v.playPos >= (double) N) v.playPos -= (double) N;
+                }
+                else
+                {
+                    const double A = (double) p.loopA * N, B = std::max (A + 64.0, (double) p.loopB * N);
+                    if (v.playDone) { dl = dr = 0.0f; }
+                    else
+                    {
+                        v.playPos += ratio * (double) v.playDir;
+                        if (p.loopMode == 1)      { if (v.playPos >= B || v.playPos < A) v.playPos = A + std::fmod (std::max (0.0, v.playPos - A), B - A); }
+                        else if (p.loopMode == 2) { if (v.playPos >= B) { v.playPos = B - (v.playPos - B); v.playDir = -1; }
+                                                    else if (v.playPos < A) { v.playPos = A + (A - v.playPos); v.playDir = 1; } }
+                        else if (v.playPos >= B)  { v.playDone = true; }
+                    }
+                }
 
                 if (! p.grainOn)
                 {
@@ -427,8 +447,11 @@ public:
                     const double dens = 3.0 * std::pow (60.0, (double) p.density) * (1.0 + 2.5 * bloom);
                     double spacing = sr / dens;
                     spawnGrain (v, p, *sample, ratio, spacing, fileRate, bloom);
-                    v.travel += (double) p.speed * spacing * fileRate / (double) N;
-                    v.travel -= std::floor (v.travel);
+                    const double loopLen = p.loopMode == 0 ? 1.0 : std::max (0.005, (double) (p.loopB - p.loopA));
+                    v.travel += (double) p.speed * spacing * fileRate / (double) N / loopLen;   // speed stays "seconds of audio"
+                    if (p.loopMode == 3) v.travel = std::clamp (v.travel, -1.0, 1.0);           // ONE-SHOT: stops at the end
+                    else if (p.loopMode == 2) v.travel -= 2.0 * std::floor (v.travel * 0.5);
+                    else v.travel -= std::floor (v.travel);
                     spacing *= 1.0 + (double) p.scatter * 0.6 * (double) rng.bipolar();
                     // high SCATTER breaks the stream: quick bursts and holes of silence
                     const float brk = std::clamp ((p.scatter - 0.4f) / 0.6f, 0.0f, 1.0f);
@@ -544,6 +567,8 @@ private:
         double   nextGrainIn = 0.0;
         float    strike = 0.0f;       // CHIME hammer: a short click every time a grain is born
         double   playPos = 0.0;
+        int      playDir = 1;            // PING-PONG direction of the plain playback
+        bool     playDone = false;       // ONE-SHOT plain playback reached the end
         int64_t  age = 0;
         uint64_t startStamp = 0;
         float    walk[4] {}, walkTarget[4] {};
@@ -560,11 +585,13 @@ private:
         v.curNote = v.glideFrom = v.glideTarget = note; v.glideLen = v.glideAge = 0;
         v.stage = Stage::Attack; v.startStamp = ++stamp;
         v.travel = 0.0; v.nextGrainIn = 0.0; v.age = 0;
-        v.playPos = (double) std::clamp (p.position, 0.0f, 0.9999f) * (double) lastNumFrames;
+        v.playPos = loopHead ((double) std::clamp (p.position, 0.0f, 0.9999f), p) * (double) lastNumFrames;
+        v.playDir = 1; v.playDone = false;
         if (p.randomStart)
         {
             v.travel = rng.uni();
             v.playPos = std::fmod (v.playPos + v.travel * (double) lastNumFrames, (double) lastNumFrames);
+            if (p.loopMode != 0) v.playPos = inLoop (v.playPos / (double) lastNumFrames, p) * (double) lastNumFrames;
         }
         if (fresh)
         {
@@ -601,6 +628,26 @@ private:
         for (int i = 0; i < stackSize; ++i)
             if (noteStack[(size_t) i] != note) noteStack[(size_t) w++] = noteStack[(size_t) i];
         stackSize = w;
+    }
+
+    // where the read head is (0..1 of the file) for "position + travel" under the LOOP mode
+    static inline double loopHead (double u, const Params& p)
+    {
+        const double a = p.loopA, b = std::max ((double) p.loopA + 0.005, (double) p.loopB);
+        switch (p.loopMode)
+        {
+            case 1:  return a + wrap (u, 1.0) * (b - a);
+            case 2:  { const double f = wrap (u, 2.0); return a + (f < 1.0 ? f : 2.0 - f) * (b - a); }
+            case 3:  return a + std::clamp (u, 0.0, 1.0) * (b - a);
+            default: return wrap (u, 1.0);
+        }
+    }
+    // keep a grain start inside the loop region
+    static inline double inLoop (double x, const Params& p)
+    {
+        if (p.loopMode == 0) return wrap (x, 1.0);
+        const double a = p.loopA, b = std::max ((double) p.loopA + 0.005, (double) p.loopB);
+        return a + wrap ((x - a) / (b - a), 1.0) * (b - a);
     }
 
     static inline double wrap (double x, double n)
@@ -671,8 +718,9 @@ private:
 
         // position: POSITION + travel + SCATTER/SMEAR/BLOOM jitter + DRIFT wander
         const float jitter = scatter * 0.15f + scatter * scatter * 0.45f + smear * 0.12f + bloom * 0.08f;
-        double start = (double) p.position + v.travel + (double) (jitter * rng.bipolar()) + (double) (drift * 0.12f * v.walk[0]);
-        start = wrap (start, 1.0) * (double) N;
+        const double region = p.loopMode == 0 ? 1.0 : std::max (0.005, (double) (p.loopB - p.loopA));
+        double start = loopHead ((double) p.position + v.travel, p) + ((double) (jitter * rng.bipolar()) + (double) (drift * 0.12f * v.walk[0])) * region;
+        start = inLoop (start, p) * (double) N;
 
         // stereo: SCATTER + BLOOM + SMEAR, plus DRIFT pan wander
         const float width = std::clamp (scatter + bloom * 0.35f + smear * 0.2f, 0.0f, 1.0f);
@@ -737,7 +785,7 @@ private:
             if (! v.active || ! hasSample) continue;
             if (h < kMaxVoices)
             {
-                const double head = p.grainOn ? wrap ((double) p.position + v.travel, 1.0) : v.playPos / (double) N;
+                const double head = p.grainOn ? loopHead ((double) p.position + v.travel, p) : v.playPos / (double) N;
                 vizHead[(size_t) h++].store ((float) head, std::memory_order_relaxed);
             }
             for (auto& g : v.grains)

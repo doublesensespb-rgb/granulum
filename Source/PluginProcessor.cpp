@@ -445,6 +445,11 @@ AudioProcessorValueTreeState::ParameterLayout GranulumProcessor::createLayout()
                                            return std::abs (st) < 0.05f ? String ("0 st") : (st > 0 ? "+" : "") + String (st, 1) + " st"; })));
     ps.push_back (std::make_unique<B> (ParameterID { ParamID::osc3Grain, 1 }, "Osc 3 Granular", false));
 
+    // LOOP (OSC 2 / OSC 3): which part of the source the grains use
+    ps.push_back (std::make_unique<AudioParameterChoice> (ParameterID { ParamID::loopMode, 1 }, "Loop Mode", StringArray { "OFF", "LOOP", "PING-PONG", "ONE-SHOT" }, 0));
+    ps.push_back (std::make_unique<P> (ParameterID { ParamID::loopStart, 1 }, "Loop Start", NormalisableRange<float> (0.0f, 1.0f), 0.0f, pct));
+    ps.push_back (std::make_unique<P> (ParameterID { ParamID::loopEnd, 1 },   "Loop End",   NormalisableRange<float> (0.0f, 1.0f), 1.0f, pct));
+
     // GRANULAR
     ps.push_back (std::make_unique<B> (ParameterID { ParamID::grainOn, 1 }, "Granular On (legacy)", true));
     ps.push_back (std::make_unique<P> (ParameterID { ParamID::bloom, 1 },   "Bloom",   NormalisableRange<float> (0.0f, 1.0f), 0.0f, pct));
@@ -594,6 +599,9 @@ GranulumProcessor::GranulumProcessor()
         pLfoGrains[(size_t) l] = apvts.getRawParameterValue (ParamID::lfo (l, "Grains"));
     }
 
+    pLoopMode  = apvts.getRawParameterValue (ParamID::loopMode);
+    pLoopStart = apvts.getRawParameterValue (ParamID::loopStart);
+    pLoopEnd   = apvts.getRawParameterValue (ParamID::loopEnd);
     loadNoises();
     harmonics = {};
     harmonics[0] = 1.0f;
@@ -873,12 +881,19 @@ granulum::Params GranulumProcessor::voiceParams (const float* v, int osc) const
         p.chordSize = (int) iv.size();
         for (size_t i = 0; i < iv.size() && i < p.chord.size(); ++i) p.chord[i] = iv[i];
     }
-    else if (osc == 1)
+    if (osc > 0)
+    {
+        const float a = pLoopStart->load(), b = pLoopEnd->load();
+        p.loopMode = (int) pLoopMode->load();
+        p.loopA = jmin (a, b);
+        p.loopB = jmax (a, b);
+    }
+    if (osc == 1)
     {
         p.transpose = v[mtOsc2Oct] * 12.0f + v[mtOsc2Semi];
         p.grainOn = grainBlock && pOsc2Grain->load() > 0.5f;
     }
-    else
+    else if (osc == 2)
     {
         p.keyTrack = false;        // noise sounds the same on every note
         p.randomStart = true;      // stacked voices don't phase against each other

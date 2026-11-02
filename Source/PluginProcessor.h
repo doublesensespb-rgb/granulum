@@ -34,6 +34,9 @@ namespace ParamID
     inline constexpr const char* shimmer   = "shimmer";
     inline constexpr const char* drift     = "drift";
     inline constexpr const char* gsize     = "gsize";
+    inline constexpr const char* loopMode  = "loopMode";
+    inline constexpr const char* loopStart = "loopStart";
+    inline constexpr const char* loopEnd   = "loopEnd";
     inline constexpr const char* speed     = "speed";
     inline constexpr const char* position  = "position";
     inline constexpr const char* density   = "density";
@@ -400,6 +403,7 @@ private:
     std::atomic<float>* pAmpA {}; std::atomic<float>* pAmpD {}; std::atomic<float>* pAmpS {}; std::atomic<float>* pAmpR {}; std::atomic<float>* pAmpOn {};
     std::array<std::atomic<float>*, kNumLfos> pLfoSync {}, pLfoDiv {}, pLfoMode {}, pLfoRise {}, pLfoOn {}, pLfoGrains {};
     std::array<double, kNumLfos> lfoRateNow {};
+    std::atomic<float>* pLoopMode {}; std::atomic<float>* pLoopStart {}; std::atomic<float>* pLoopEnd {};
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (GranulumProcessor)
 };

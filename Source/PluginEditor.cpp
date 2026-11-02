@@ -916,7 +916,13 @@ void GrainField::paint (Graphics& g)
 
     // ---- position marker + read heads ----
     {
-        const float pos = proc.modNorm[(size_t) mtPosition].load();
+        float pos = proc.modNorm[(size_t) mtPosition].load();
+        if ((int) proc.apvts.getRawParameterValue (ParamID::loopMode)->load() != 0)
+        {
+            // with a LOOP, POSITION is a place inside the loop
+            const float a = proc.apvts.getRawParameterValue (ParamID::loopStart)->load(), b = proc.apvts.getRawParameterValue (ParamID::loopEnd)->load();
+            pos = jmin (a, b) + pos * std::abs (b - a);
+        }
         const float x = P (pos, 0).x;
         ColourGradient cg (Palette::ice.withAlpha (0.0f), x - 9.0f, 0, Palette::ice.withAlpha (0.0f), x + 9.0f, 0, false);
         cg.addColour (0.5, Palette::ice.withAlpha (0.16f));
@@ -997,6 +1003,31 @@ void GrainField::paint (Graphics& g)
         }
     }
 
+    // LOOP region: dim what is outside, two copper flags at the edges
+    if (const int lm = (int) proc.apvts.getRawParameterValue (ParamID::loopMode)->load(); lm != 0)
+    {
+        const float a = proc.apvts.getRawParameterValue (ParamID::loopStart)->load();
+        const float b = proc.apvts.getRawParameterValue (ParamID::loopEnd)->load();
+        const float xa = in.getX() + jmin (a, b) * in.getWidth(), xb = in.getX() + jmax (a, b) * in.getWidth();
+        g.setColour (Palette::deep.withAlpha (0.62f));
+        g.fillRect (Rectangle<float> (r.getX(), r.getY(), xa - r.getX(), r.getHeight()));
+        g.fillRect (Rectangle<float> (xb, r.getY(), r.getRight() - xb, r.getHeight()));
+        for (int k = 0; k < 2; ++k)
+        {
+            const float x = k == 0 ? xa : xb;
+            g.setColour (Palette::accent.withAlpha (0.85f));
+            g.fillRect (x - 0.75f, r.getY(), 1.5f, r.getHeight());
+            Path flag;   // little pennant pointing into the loop
+            const float dir = k == 0 ? 1.0f : -1.0f;
+            flag.addTriangle (x, r.getY() + 4.0f, x, r.getY() + 16.0f, x + dir * 10.0f, r.getY() + 10.0f);
+            g.fillPath (flag);
+        }
+        g.setColour (Palette::accent.withAlpha (0.9f));
+        g.setFont (uiFont (9.0f, true, 0.12f));
+        const char* tag = lm == 1 ? "LOOP" : lm == 2 ? "PING-PONG" : "ONE-SHOT";
+        g.drawText (tag, Rectangle<float> (xa + 14.0f, r.getY() + 3.0f, jmax (10.0f, xb - xa - 20.0f), 14.0f), Justification::centredLeft, true);
+    }
+
     // vignette
     if (fastPaint) g.drawImageAt (vignette, 0, 0);
     else
@@ -1029,17 +1060,84 @@ void GrainField::setPositionFromMouse (const MouseEvent& e)
         p->setValueNotifyingHost (norm);
 }
 
-void GrainField::mouseDown (const MouseEvent& e)
+int GrainField::flagAt (float x) const
 {
-    if (auto* p = proc.apvts.getParameter (ParamID::position)) p->beginChangeGesture();
-    setPositionFromMouse (e);
+    if ((int) proc.apvts.getRawParameterValue (ParamID::loopMode)->load() == 0) return 0;
+    const auto in = inner();
+    const float xa = in.getX() + proc.apvts.getRawParameterValue (ParamID::loopStart)->load() * in.getWidth();
+    const float xb = in.getX() + proc.apvts.getRawParameterValue (ParamID::loopEnd)->load() * in.getWidth();
+    const float da = std::abs (x - xa), db = std::abs (x - xb);
+    if (jmin (da, db) > 8.0f) return 0;
+    return da <= db ? 1 : 2;
 }
 
-void GrainField::mouseDrag (const MouseEvent& e) { setPositionFromMouse (e); }
+void GrainField::mouseMove (const MouseEvent& e)
+{
+    setMouseCursor (flagAt (e.position.x) != 0 ? MouseCursor::LeftRightResizeCursor : MouseCursor::PointingHandCursor);
+}
+
+void GrainField::mouseDown (const MouseEvent& e)
+{
+    const int f = flagAt (e.position.x);
+    dragParam = proc.apvts.getParameter (f == 1 ? ParamID::loopStart : f == 2 ? ParamID::loopEnd : ParamID::position);
+    if (dragParam != nullptr) dragParam->beginChangeGesture();
+    mouseDrag (e);
+}
+
+void GrainField::mouseDrag (const MouseEvent& e)
+{
+    if (dragParam == nullptr) return;
+    const auto in = inner();
+    dragParam->setValueNotifyingHost (jlimit (0.0f, 1.0f, (e.position.x - in.getX()) / in.getWidth()));
+}
 
 void GrainField::mouseUp (const MouseEvent&)
 {
-    if (auto* p = proc.apvts.getParameter (ParamID::position)) p->endChangeGesture();
+    if (dragParam != nullptr) dragParam->endChangeGesture();
+    dragParam = nullptr;
+}
+
+// ============================================================================
+// LOOP mode selector
+
+int LoopModeBar::mode() const { return (int) proc.apvts.getRawParameterValue (ParamID::loopMode)->load(); }
+
+void LoopModeBar::paint (Graphics& g)
+{
+    static const char* names[] = { "OFF", "LOOP", "PING-PONG", "ONE-SHOT" };
+    static const float widths[] = { 0.17f, 0.22f, 0.32f, 0.29f };
+    auto r = getLocalBounds().toFloat();
+    g.setColour (Palette::field);
+    g.fillRoundedRectangle (r, 7.0f);
+    const int m = mode();
+    float x = r.getX();
+    for (int i = 0; i < 4; ++i)
+    {
+        auto seg = Rectangle<float> (x, r.getY(), r.getWidth() * widths[i], r.getHeight());
+        x += seg.getWidth();
+        if (i == m)
+        {
+            g.setColour (i == 0 ? Palette::buttonHi.withAlpha (0.6f) : Palette::accent);
+            g.fillRoundedRectangle (seg.reduced (2.0f), 5.5f);
+        }
+        g.setColour (i == m ? (i == 0 ? Palette::text : Palette::onAccent()) : Palette::textDim);
+        g.setFont (uiFont (9.5f, i == m, 0.12f));
+        g.drawText (names[i], seg, Justification::centred, false);
+    }
+}
+
+void LoopModeBar::mouseDown (const MouseEvent& e)
+{
+    static const float widths[] = { 0.17f, 0.22f, 0.32f, 0.29f };
+    float x = 0.0f; int idx = 3;
+    for (int i = 0; i < 4; ++i) { x += widths[i] * (float) getWidth(); if (e.position.x < x) { idx = i; break; } }
+    if (auto* p = proc.apvts.getParameter (ParamID::loopMode))
+    {
+        p->beginChangeGesture();
+        p->setValueNotifyingHost (p->convertTo0to1 ((float) idx));
+        p->endChangeGesture();
+    }
+    repaint();
 }
 
 // ============================================================================
@@ -3070,6 +3168,7 @@ GranulumEditor::GranulumEditor (GranulumProcessor& p)
     loadButton.setTooltip ("Factory sounds, or load your own file");
     loadButton.getProperties().set ("sounds", soundsStyle);
     addChildComponent (sampleMenu);
+    addAndMakeVisible (loopBar);
     sampleMenu.onPick = [this] (const File& f)
     {
         toggleSampleMenu (false);
@@ -3726,6 +3825,7 @@ void GranulumEditor::resized()
     oscCol.setTop (screenFrame.getY() + S (8));
     inside.removeFromRight (S (12));
     field.setBounds (inside);
+    loopBar.setBounds (screenFrame.getX() + S (150), screenFrame.getY() + S (9), inside.getRight() - screenFrame.getX() - S (150), S (22));
 
     {
         const int rowH = S (54);
