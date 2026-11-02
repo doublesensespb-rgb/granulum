@@ -149,6 +149,18 @@ void GranulumLook::drawButtonBackground (Graphics& g, Button& b, const Colour&, 
         // the SOUNDS button: copper, with a small "library" icon, so it invites a click
         const int st = (int) b.getProperties()["sounds"];
         const bool open = b.getToggleState();
+        if (st == 4)
+        {
+            // exactly like a lit GRAIN button
+            const auto c = Palette::accent;
+            g.setColour (c.withAlpha (0.18f));
+            g.fillRoundedRectangle (r.expanded (1.5f), rad + 1.5f);
+            g.setColour (c.interpolatedWith (Colours::white, over || open ? 0.10f : 0.0f));
+            g.fillRoundedRectangle (r, rad);
+            g.setColour (Colours::white.withAlpha (0.12f));
+            g.drawRoundedRectangle (r.reduced (0.5f), rad, 1.0f);
+            return;
+        }
         if (st >= 3)
         {
             g.setColour (Palette::accent.withAlpha (over || open ? 0.30f : 0.18f));
@@ -230,6 +242,13 @@ void GranulumLook::drawButtonBackground (Graphics& g, Button& b, const Colour&, 
 
 void GranulumLook::drawButtonText (Graphics& g, TextButton& b, bool over, bool)
 {
+    if (b.getProperties().contains ("sounds") && (int) b.getProperties()["sounds"] == 4)
+    {
+        g.setFont (uiFont (b.getHeight() < 30 ? 11.5f : 13.5f, false, 0.08f));
+        g.setColour (Palette::onAccent());
+        g.drawText (b.getButtonText().upToFirstOccurrenceOf (" ", false, false), b.getLocalBounds(), Justification::centred, false);
+        return;
+    }
     if (b.getProperties().contains ("sounds"))
     {
         g.setFont (uiFont (10.5f, true, 0.06f));
