@@ -223,6 +223,13 @@ private:
     juce::Random rng;
     float time = 0.0f, pulse = 0.0f;
     double lastTick = 0.0;
+
+    // speed: the static layers are drawn once and reused every frame
+    void rebuildCaches();
+    juce::Image bgLow, bgHigh, vignette, glowSprite;
+    int cacheTheme = -1;
+public:
+    static inline bool fastPaint = true;   // the snapshot tool flips this to compare old/new drawing
 };
 
 // Additive bars: draw the 16 harmonic amplitudes; the gold GRAIN row below picks which harmonics are granulated

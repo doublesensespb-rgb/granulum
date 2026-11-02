@@ -669,19 +669,70 @@ void GrainField::simulate (float dt)
     (void) grains;
 }
 
+void GrainField::rebuildCaches()
+{
+    const auto r = getLocalBounds().toFloat();
+    cacheTheme = Palette::theme;
+    auto makeBg = [&] (float bright)
+    {
+        Image im (Image::RGB, jmax (1, getWidth()), jmax (1, getHeight()), true);
+        Graphics g (im);
+        g.setColour (Palette::panel);
+        g.fillAll();
+        Path clip; clip.addRoundedRectangle (r, 10.0f);
+        g.reduceClipRegion (clip);
+        g.setGradientFill (ColourGradient (Palette::screen.brighter (bright), r.getCentreX(), r.getCentreY(), Palette::deep, r.getX(), r.getY(), true));
+        g.fillRect (r);
+        return im;
+    };
+    bgLow = makeBg (0.10f);
+    bgHigh = makeBg (0.23f);
+    vignette = Image (Image::ARGB, jmax (1, getWidth()), jmax (1, getHeight()), true);
+    {
+        Graphics g (vignette);
+        g.setGradientFill (ColourGradient (Colours::transparentBlack, r.getCentreX(), r.getCentreY(),
+                                           Palette::deep.withAlpha (0.55f), r.getX(), r.getY(), true));
+        g.fillRect (r);
+    }
+    // soft glow: an elliptic gaussian blob, tinted at draw time
+    glowSprite = Image (Image::SingleChannel, 64, 32, true);
+    {
+        Image::BitmapData bd (glowSprite, Image::BitmapData::writeOnly);
+        for (int y = 0; y < 32; ++y)
+            for (int x = 0; x < 64; ++x)
+            {
+                const float dx = ((float) x + 0.5f - 32.0f) / 32.0f, dy = ((float) y + 0.5f - 16.0f) / 16.0f;
+                const float d2 = dx * dx + dy * dy;
+                const float a = d2 >= 1.0f ? 0.0f : std::pow (1.0f - d2, 2.2f);
+                *bd.getPixelPointer (x, y) = (uint8) jlimit (0, 255, (int) (a * 255.0f));
+            }
+    }
+}
+
 void GrainField::paint (Graphics& g)
 {
     const auto r = getLocalBounds().toFloat();
-    Path clip; clip.addRoundedRectangle (r, 10.0f);
-    g.setColour (Palette::panel);
-    g.fillAll();
-    g.reduceClipRegion (clip);
-
-    // deep background with a soft breathing core
     const float breathe = 0.5f + 0.5f * std::sin (time * 0.8f);
-    g.setGradientFill (ColourGradient (Palette::screen.brighter (0.10f + 0.10f * pulse + 0.03f * breathe), r.getCentreX(), r.getCentreY(),
-                                       Palette::deep, r.getX(), r.getY(), true));
-    g.fillRect (r);
+    if (fastPaint)
+    {
+        if (cacheTheme != Palette::theme || bgLow.getWidth() != getWidth() || bgLow.getHeight() != getHeight()) rebuildCaches();
+        // deep background with a soft breathing core: blend two cached brightness levels
+        g.drawImageAt (bgLow, 0, 0);
+        const float k = jlimit (0.0f, 1.0f, (0.10f * pulse + 0.03f * breathe) / 0.13f);
+        if (k > 0.01f) { g.setOpacity (k); g.drawImageAt (bgHigh, 0, 0); g.setOpacity (1.0f); }
+        Path clip; clip.addRoundedRectangle (r, 10.0f);
+        g.reduceClipRegion (clip);
+    }
+    else
+    {
+        Path clip; clip.addRoundedRectangle (r, 10.0f);
+        g.setColour (Palette::panel);
+        g.fillAll();
+        g.reduceClipRegion (clip);
+        g.setGradientFill (ColourGradient (Palette::screen.brighter (0.10f + 0.10f * pulse + 0.03f * breathe), r.getCentreX(), r.getCentreY(),
+                                           Palette::deep, r.getX(), r.getY(), true));
+        g.fillRect (r);
+    }
 
     const auto in = inner();
     const float mid = in.getCentreY();
@@ -825,7 +876,7 @@ void GrainField::paint (Graphics& g)
 
         // glow
         g.setColour (col.withAlpha (fade * (0.10f + 0.12f * bloom + 0.15f * smear)));
-        g.strokePath (kite, PathStrokeType (Wd * (2.5f + 3.0f * smear), PathStrokeType::curved, PathStrokeType::rounded));
+            g.strokePath (kite, PathStrokeType (Wd * (2.5f + 3.0f * smear), PathStrokeType::curved, PathStrokeType::rounded));
         g.setColour (col.withAlpha (fade * (0.85f - 0.35f * smear)));
         g.fillPath (kite);
         g.setColour (Colours::white.withAlpha (fade * 0.45f));
@@ -849,9 +900,13 @@ void GrainField::paint (Graphics& g)
     }
 
     // vignette
-    g.setGradientFill (ColourGradient (Colours::transparentBlack, r.getCentreX(), r.getCentreY(),
-                                       Palette::deep.withAlpha (0.55f), r.getX(), r.getY(), true));
-    g.fillRect (r);
+    if (fastPaint) g.drawImageAt (vignette, 0, 0);
+    else
+    {
+        g.setGradientFill (ColourGradient (Colours::transparentBlack, r.getCentreX(), r.getCentreY(),
+                                           Palette::deep.withAlpha (0.55f), r.getX(), r.getY(), true));
+        g.fillRect (r);
+    }
 
     if (! grainsOn)
     {
