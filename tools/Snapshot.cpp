@@ -166,7 +166,9 @@ int main (int argc, char** argv)
         auto dir = GranulumProcessor::factorySampleDir();
         dir.createDirectory();
         const File src (argv[3]);
-        for (auto n : { "Atmo 3 F", "Dust Cathedral", "Frozen Lake" }) src.copyFileTo (dir.getChildFile (String (n) + ".wav"));
+        dir.deleteRecursively(); dir.createDirectory();
+        for (auto n : { "Atmo 3 F", "Dust Cathedral", "Frozen Lake", "Night Harbour" }) { dir.getChildFile ("Atmos").createDirectory(); src.copyFileTo (dir.getChildFile ("Atmos").getChildFile (String (n) + ".wav")); }
+        for (auto n : { "Glass Rain", "Paper Wind", "Static Choir" }) { dir.getChildFile ("Textures").createDirectory(); src.copyFileTo (dir.getChildFile ("Textures").getChildFile (String (n) + ".wav")); }
         setP (ParamID::osc3On, 0.0f);
         p.loadAdjacentFactorySample (+1);
         run (p, ed, 60);
@@ -178,6 +180,9 @@ int main (int argc, char** argv)
         run (p, ed, 10);
         for (int st = 0; st < 3; ++st) { ed->previewDropState (st); run (p, ed, 2); save (*base, outDir, ("drop-" + String (st) + ".png").toRawUTF8()); }
         ed->previewDropState (0);
+        ed->openSampleMenuForPreview();
+        run (p, ed, 2);
+        save (*base, outDir, "sounds-menu.png");
     }
 
     // design preview: "Snapshot <dir> scope" -> filter view with a low, resonant cutoff

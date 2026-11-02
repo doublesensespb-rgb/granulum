@@ -2961,7 +2961,14 @@ GranulumEditor::GranulumEditor (GranulumProcessor& p)
     rndBars.onClick      = [this] { proc.randomizeSection (3); };
     randomButton.onClick = [this] { proc.randomize(); };
     initButton.onClick   = [this] { proc.resetToInit(); lfoEditor.setLfo (selectedLfo); };
-    loadButton.onClick   = [this] { launchChooser(); };
+    loadButton.onClick   = [this] { toggleSampleMenu (! sampleMenu.isVisible()); };
+    loadButton.setTooltip ("Factory sounds, or load your own file");
+    addChildComponent (sampleMenu);
+    sampleMenu.onPick = [this] (const File& f)
+    {
+        toggleSampleMenu (false);
+        if (f == File()) launchChooser(); else openFile (f);
+    };
     for (auto* b : { &samplePrev, &sampleNext }) addAndMakeVisible (*b);
     samplePrev.onClick = [this] { proc.loadAdjacentFactorySample (-1); repaint(); };
     sampleNext.onClick = [this] { proc.loadAdjacentFactorySample (+1); repaint(); };
@@ -3121,6 +3128,127 @@ void GranulumEditor::showChordPicker()
     auto picker = std::make_unique<ChordPicker> (proc);
     picker->setLookAndFeel (&look);
     CallOutBox::launchAsynchronously (std::move (picker), chordButton.getBounds(), this);
+}
+
+// ============================================================================
+// SampleMenu
+
+void SampleMenu::rebuild()
+{
+    rows.clear();
+    const auto root = GranulumProcessor::factorySampleDir();
+    auto addFiles = [this] (const File& dir, bool recursive)
+    {
+        auto files = dir.findChildFiles (File::findFiles, recursive, "*.wav;*.flac;*.aif;*.aiff");
+        files.sort();
+        for (auto& f : files) rows.push_back ({ f.getFileNameWithoutExtension().toUpperCase(), f, 1 });
+    };
+    if (root.isDirectory())
+    {
+        auto loose = root.findChildFiles (File::findFiles, false, "*.wav;*.flac;*.aif;*.aiff");
+        if (! loose.isEmpty()) { rows.push_back ({ "FACTORY", {}, 0 }); addFiles (root, false); }
+        auto dirs = root.findChildFiles (File::findDirectories, false);
+        dirs.sort();
+        for (auto& d : dirs) { rows.push_back ({ d.getFileName().toUpperCase(), {}, 0 }); addFiles (d, true); }
+    }
+    if (rows.empty()) rows.push_back ({ "NO FACTORY SOUNDS INSTALLED", {}, 0 });
+    rows.push_back ({ String::fromUTF8 ("YOUR OWN FILE\xe2\x80\xa6"), {}, 2 });
+    hover = -1;
+}
+
+float SampleMenu::rowY (int i) const
+{
+    float y = 6.0f;
+    for (int k = 0; k < i; ++k) y += rowH (k) + (rows[(size_t) k + 1].kind != 1 && k + 1 < (int) rows.size() ? 4.0f : 0.0f);
+    return y;
+}
+
+int SampleMenu::preferredHeight() const
+{
+    return rows.empty() ? 40 : (int) (rowY ((int) rows.size() - 1) + rowH ((int) rows.size() - 1) + 6.0f);
+}
+
+int SampleMenu::rowAt (float y) const
+{
+    for (int i = 0; i < (int) rows.size(); ++i)
+        if (y >= rowY (i) && y < rowY (i) + rowH (i)) return rows[(size_t) i].kind == 0 ? -1 : i;
+    return -1;
+}
+
+void SampleMenu::paint (Graphics& g)
+{
+    auto r = getLocalBounds().toFloat();
+    g.setColour (Colours::black.withAlpha (0.35f));
+    g.fillRoundedRectangle (r.translated (0, 3.0f), 9.0f);
+    g.setColour (Palette::panel.brighter (0.06f));
+    g.fillRoundedRectangle (r, 9.0f);
+    g.setColour (Palette::edge.withMultipliedAlpha (2.0f));
+    g.drawRoundedRectangle (r.reduced (0.5f), 9.0f, 1.0f);
+
+    File current;
+    { const auto n = proc.getSampleName(); if (n.isNotEmpty() && proc.isFactorySample()) current = GranulumProcessor::factorySampleDir(); }
+    for (int i = 0; i < (int) rows.size(); ++i)
+    {
+        const auto& row = rows[(size_t) i];
+        auto rr = Rectangle<float> (6.0f, rowY (i), r.getWidth() - 12.0f, rowH (i));
+        if (row.kind == 0)
+        {
+            g.setColour (Palette::label);
+            g.setFont (uiFont (9.5f, false, 0.18f));
+            g.drawText (row.text, rr.withTrimmedLeft (8.0f), Justification::centredLeft, false);
+            continue;
+        }
+        if (row.kind == 2)
+        {
+            g.setColour (Palette::edge.withMultipliedAlpha (2.0f));
+            g.drawHorizontalLine ((int) rr.getY() - 3, rr.getX() + 4.0f, rr.getRight() - 4.0f);
+        }
+        const bool sel = row.kind == 1 && proc.getSampleName() == row.file.getFileName() && proc.isFactorySample();
+        if (i == hover)
+        {
+            g.setColour (Palette::buttonHi);
+            g.fillRoundedRectangle (rr, 5.0f);
+        }
+        if (sel)
+        {
+            g.setColour (Palette::accent);
+            g.fillEllipse (Rectangle<float> (6.0f, 6.0f).withCentre ({ rr.getX() + 11.0f, rr.getCentreY() }));
+        }
+        g.setColour (row.kind == 2 ? Palette::accentSoft : (sel || i == hover ? Palette::hi : Palette::text));
+        g.setFont (uiFont (11.5f, sel, 0.08f));
+        g.drawText (row.text, rr.withTrimmedLeft (22.0f), Justification::centredLeft, true);
+    }
+}
+
+void SampleMenu::mouseMove (const MouseEvent& e)
+{
+    const int h = rowAt (e.position.y);
+    if (h != hover) { hover = h; repaint(); }
+}
+
+void SampleMenu::mouseUp (const MouseEvent& e)
+{
+    const int i = rowAt (e.position.y);
+    if (i < 0) return;
+    if (onPick) onPick (rows[(size_t) i].kind == 2 ? File() : rows[(size_t) i].file);
+}
+
+void GranulumEditor::toggleSampleMenu (bool show)
+{
+    if (show)
+    {
+        sampleMenu.rebuild();
+        const float sc = (float) getWidth() / 1080.0f;
+        const int w = (int) (230 * sc), h = sampleMenu.preferredHeight();
+        auto b = loadButton.getBounds();
+        int x = jmin (b.getRight() - w, getWidth() - w - 6), y = b.getBottom() + (int) (4 * sc);
+        if (y + h > getHeight() - 6) y = b.getY() - h - (int) (4 * sc);
+        sampleMenu.setBounds (x, y, w, h);
+        sampleMenu.setVisible (true);
+        sampleMenu.toFront (false);
+    }
+    else sampleMenu.setVisible (false);
+    loadButton.setToggleState (show, dontSendNotification);
 }
 
 void GranulumEditor::launchChooser()
@@ -3690,6 +3818,7 @@ void GranulumEditor::mouseExit (const MouseEvent&)
 
 void GranulumEditor::mouseDown (const MouseEvent& e)
 {
+    if (sampleMenu.isVisible()) { toggleSampleMenu (false); return; }
     if (dropZone.contains (e.getPosition())) launchChooser();   // click the sample box = choose a file
 }
 

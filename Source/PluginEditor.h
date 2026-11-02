@@ -446,6 +446,29 @@ private:
     juce::Rectangle<int> body;
 };
 
+// Factory sample menu, opened from the SOUNDS button in OSC 2: folders as headers, then "your own file"
+class SampleMenu final : public juce::Component
+{
+public:
+    explicit SampleMenu (GranulumProcessor& p) : proc (p) {}
+    void rebuild();                           // rescan the factory folder
+    int preferredHeight() const;
+    void paint (juce::Graphics&) override;
+    void mouseMove (const juce::MouseEvent&) override;
+    void mouseExit (const juce::MouseEvent&) override { hover = -1; repaint(); }
+    void mouseUp (const juce::MouseEvent&) override;
+    std::function<void (const juce::File&)> onPick;   // empty file = "load your own"
+    std::function<void()> onClose;
+private:
+    struct Row { juce::String text; juce::File file; int kind; };   // 0 header, 1 sample, 2 own file
+    int rowAt (float y) const;
+    float rowY (int i) const;
+    float rowH (int i) const { return rows[(size_t) i].kind == 0 ? 22.0f : 24.0f; }
+    GranulumProcessor& proc;
+    std::vector<Row> rows;
+    int hover = -1;
+};
+
 // AMP tab in the LFO strip: speaker icon + "AMP"
 class AmpTab final : public juce::Component, public juce::SettableTooltipClient
 {
@@ -542,11 +565,16 @@ private:
     using ComboAtt  = juce::AudioProcessorValueTreeState::ComboBoxAttachment;
 
     FilterScope filterScope { proc };
+    SampleMenu sampleMenu { proc };
+    void toggleSampleMenu (bool show);
+public:
+    void openSampleMenuForPreview() { toggleSampleMenu (true); }
+private:
     juce::TextButton samplePrev { juce::String::fromUTF8 ("\xe2\x97\x80") }, sampleNext { juce::String::fromUTF8 ("\xe2\x96\xb6") };
     Lamp osc1Lamp { "OSC 1", "ADDITIVE" }, osc2Lamp { "OSC 2", "SAMPLE" }, osc3Lamp { "OSC 3", "NOISE" };
     std::unique_ptr<ButtonAtt> osc1LampA, osc2LampA, osc3LampA;
 
-    juce::TextButton initButton { "INIT" }, randomButton { "RANDOM ALL" }, loadButton { "LOAD" }, chordButton { "CHORD: OFF" };
+    juce::TextButton initButton { "INIT" }, randomButton { "RANDOM ALL" }, loadButton { juce::String::fromUTF8 ("SOUNDS \xe2\x96\xbe") }, chordButton { "CHORD: OFF" };
     juce::TextButton rndGrains { "RANDOM" }, rndFx { "RANDOM" }, rndBars { "RANDOM" };
     juce::TextButton osc1Grain { "GRAIN" }, osc2Grain { "GRAIN" }, osc3Grain { "GRAIN" };
     juce::TextButton polyButton { "POLY" }, monoButton { "MONO" };
