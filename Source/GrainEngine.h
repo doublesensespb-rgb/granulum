@@ -140,6 +140,7 @@ struct Grain
     float  gainL = 0.7f, gainR = 0.7f;
     float  pan = 0.0f;
     uint8_t kind = 0;   // 0 normal, 1 shimmer, 2 reverse
+    bool   perc = false; // SHIMMER "ping": sharp attack, ringing decay (glass / bells)
 };
 
 // A grain that was just born — the UI turns these into flying shards.
@@ -306,6 +307,7 @@ public:
         const float releaseCoef = (float) std::exp (-6.907755 / (std::max (0.003f, releaseSec) * sr));   // -60 dB over RELEASE
 
         const bool chimeOn = p.grainOn && p.chime > 0.001f;
+        const float strikeDecay = (float) std::exp (-1.0 / (0.0015 * sr));
         const float chimeT   = std::clamp ((p.chime - 0.55f) / 0.45f, 0.0f, 1.0f); // harmonic -> bell
         const float chimeT60 = 0.08f + 2.2f * p.chime * p.chime;                    // ring time (s)
         const float chimeAmt = 3.6f * std::pow (p.chime, 1.3f);
@@ -417,6 +419,14 @@ public:
                     v.travel += (double) p.speed * spacing * fileRate / (double) N;
                     v.travel -= std::floor (v.travel);
                     spacing *= 1.0 + (double) p.scatter * 0.6 * (double) rng.bipolar();
+                    // high SCATTER breaks the stream: quick bursts and holes of silence
+                    const float brk = std::clamp ((p.scatter - 0.4f) / 0.6f, 0.0f, 1.0f);
+                    if (brk > 0.0f)
+                    {
+                        const float u = rng.uni();
+                        if (u < 0.25f * brk)       spacing *= 1.8 + 4.5 * (double) rng.uni();   // hole
+                        else if (u < 0.60f * brk)  spacing *= 0.18 + 0.2 * (double) rng.uni();  // burst
+                    }
                     v.nextGrainIn += std::max (8.0, spacing);
                 }
 
@@ -424,7 +434,7 @@ public:
                 for (auto& g : v.grains)
                 {
                     if (! g.active) continue;
-                    const float w = window (g.age, g.length, g.fade);
+                    const float w = g.perc ? percWindow (g.age, g.length) * 1.6f : window (g.age, g.length, g.fade);
                     float l, r;
                     readHermite (srcL, srcR, N, g.pos, l, r);
                     sumL += l * w * g.gainL;
@@ -438,13 +448,16 @@ public:
                 float gl = sumL * ga, gr = sumR * ga;
                 if (chimeOn)
                 {
+                    // hammer: a 1-2 ms noise click that rings the resonators even on smooth pads
+                    const float strikeNow = v.strike * rng.bipolar() * (0.4f + 1.6f * p.chime);
+                    v.strike *= strikeDecay;
                     float rl = 0.0f, rr = 0.0f;
                     for (int m = 0; m < kChimeModes; ++m)
                     {
                         const auto& c = v.chimeCoef[(size_t) m];
                         if (c.gain == 0.0f) continue;
                         auto& st = v.chimeState[(size_t) m];
-                        const float ex = 0.5f * (gl + gr);
+                        const float ex = 0.5f * (gl + gr) + strikeNow;
                         const float yl = c.gain * ex + c.a1L * st[0] + c.a2 * st[1];
                         const float yr = c.gain * ex + c.a1R * st[2] + c.a2 * st[3];
                         st[1] = st[0]; st[0] = yl;
@@ -467,6 +480,14 @@ public:
         int n = 0;
         for (auto& v : voices) n += v.active ? 1 : 0;
         return n;
+    }
+
+    // percussive grain: 2 ms attack, exponential decay over the grain
+    inline float percWindow (int age, int length) const
+    {
+        const float att = std::min (1.0f, (float) (age + 1) / (float) (0.002 * sr));
+        const float t = (float) age / (float) std::max (1, length);
+        return att * std::exp (-5.0f * t) * std::min (1.0f, (float) (length - age) / 64.0f);
     }
 
     static inline float window (int age, int length, int fade)
@@ -493,6 +514,7 @@ private:
         int      glideLen = 0, glideAge = 0;
         double   travel = 0.0;
         double   nextGrainIn = 0.0;
+        float    strike = 0.0f;       // CHIME hammer: a short click every time a grain is born
         double   playPos = 0.0;
         int64_t  age = 0;
         uint64_t startStamp = 0;
@@ -593,7 +615,7 @@ private:
         holdMs *= (1.0 + 1.5 * bloom) * (1.0 + 3.0 * smear * smear);
         holdMs *= 1.0 + 0.4 * drift * v.walk[2];
         holdMs = std::min (holdMs, 2500.0);
-        const int length = std::max (32, (int) (holdMs * 0.001 * sr));
+        int length = std::max (32, (int) (holdMs * 0.001 * sr));
 
         // softness: SMEAR + BLOOM
         const float soft = std::clamp (0.15f + 0.85f * (smear * 0.9f + bloom * 0.5f), 0.0f, 1.0f);
@@ -601,17 +623,26 @@ private:
         // pitch: SMEAR blur + DRIFT wander + SHIMMER octave/fifth sparkles
         double cents = (double) (smear * 25.0f * rng.bipolar()) + (double) (drift * 12.0f * v.walk[1]);
         uint8_t kind = 0;
-        if (p.shimmer > 0.0f && rng.uni() < p.shimmer * 0.55f)
+        bool perc = false;
+        if (p.shimmer > 0.0f && rng.uni() < p.shimmer * 0.6f)
         {
-            cents += rng.uni() < 0.35f ? 1900.0 : 1200.0;
+            // more SHIMMER = higher, glassier jumps (always in key: octaves, fifths, a third)
+            const float hi = p.shimmer, u = rng.uni();
+            if      (u < 0.06f * hi)        cents -= 1200.0;                 // rare low drop
+            else if (u < 0.40f - 0.15f * hi) cents += 1200.0;
+            else if (u < 0.62f - 0.10f * hi) cents += 1900.0;
+            else if (u < 0.85f)              cents += 2400.0;
+            else                             cents += rng.uni() < 0.5f ? 2786.0 : 3100.0;
             kind = 1;
+            // above ~40% part of the sparkles become short "pings": bells / glass
+            perc = rng.uni() < std::clamp ((hi - 0.35f) / 0.65f, 0.0f, 1.0f) * 0.7f;
         }
         bool reverse = p.shimmer > 0.0f && rng.uni() < p.shimmer * 0.3f;
         if (reverse && kind == 0) kind = 2;
         const double ratio = baseRatio * std::exp2 (cents / 1200.0);
 
         // position: POSITION + travel + SCATTER/SMEAR/BLOOM jitter + DRIFT wander
-        const float jitter = scatter * 0.2f + smear * 0.12f + bloom * 0.08f;
+        const float jitter = scatter * 0.15f + scatter * scatter * 0.45f + smear * 0.12f + bloom * 0.08f;
         double start = (double) p.position + v.travel + (double) (jitter * rng.bipolar()) + (double) (drift * 0.12f * v.walk[0]);
         start = wrap (start, 1.0) * (double) N;
 
@@ -630,6 +661,14 @@ private:
         g->gainR = std::sin (a) * 1.41421356f;
         g->pan = pan;
         g->kind = kind;
+        g->perc = perc;
+        if (perc)
+        {
+            g->length = length = std::max (64, (int) ((0.06 + 0.35 * rng.uni()) * sr));
+            g->pos = reverse ? start + ratio * (double) length : start;
+        }
+        // CHIME hammer: every grain strikes the bells (pings and sharp grains hit harder)
+        v.strike = std::max (v.strike, perc ? 1.0f : 0.25f + 0.75f * (1.0f - soft));
 
         const double overlap = std::min ((double) kGrainsPerVoice, (double) length / std::max (1.0, spacing));
         v.norm = (float) (1.0 / std::sqrt (std::max (1.0, overlap * (0.5 + 0.5 * (1.0 - soft * 0.5)))));

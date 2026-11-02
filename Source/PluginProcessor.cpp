@@ -1393,16 +1393,34 @@ void GranulumProcessor::randomizeSection (int section)
 
     if (section == 0)
     {
-        set (ParamID::bloom,    range (0.1f, 0.9f));
-        set (ParamID::smear,    range (0.0f, 0.8f));
-        set (ParamID::scatter,  range (0.1f, 0.9f));
-        set (ParamID::shimmer,  maybe (0.5f, range (0.1f, 0.6f)));
-        set (ParamID::drift,    range (0.0f, 0.8f));
-        set (ParamID::gsize,    range (0.2f, 0.8f));
-        set (ParamID::density,  range (0.25f, 0.8f));
-        set (ParamID::speed,    r.nextFloat() < 0.25f ? 0.0f : range (-0.5f, 1.2f));
-        set (ParamID::position, range (0.0f, 0.8f));
-        set (ParamID::chime,    maybe (0.4f, range (0.15f, 0.8f)));
+        // pick a CHARACTER first, then vary it, so every press sounds clearly different
+        enum { Cloud, Shatter, Bells, Freeze, Stutter, Tape, NumCharacters };
+        static int lastCharacter = -1;
+        int c = r.nextInt (NumCharacters);
+        if (c == lastCharacter) c = (c + 1 + r.nextInt (NumCharacters - 1)) % NumCharacters;
+        lastCharacter = c;
+        auto v = [&] (float centre, float spread) { return jlimit (0.0f, 1.0f, centre + spread * (2.0f * r.nextFloat() - 1.0f)); };
+        float bloom = 0, smear = 0, scatter = 0, shimmer = 0, drift = 0, size = 0.5f, dens = 0.5f, speed = 0.0f, pos = range (0.0f, 0.8f), chime = 0;
+        switch (c)
+        {
+            case Cloud:   bloom = v (0.75f, 0.2f); smear = v (0.6f, 0.25f); scatter = v (0.3f, 0.2f); shimmer = maybe (0.5f, v (0.25f, 0.15f));
+                          drift = v (0.5f, 0.3f); size = v (0.75f, 0.15f); dens = v (0.65f, 0.15f); speed = range (0.0f, 0.3f); chime = maybe (0.3f, v (0.3f, 0.15f)); break;
+            case Shatter: bloom = v (0.2f, 0.2f); smear = v (0.1f, 0.1f); scatter = v (0.9f, 0.1f); shimmer = v (0.35f, 0.25f);
+                          drift = v (0.3f, 0.3f); size = v (0.25f, 0.15f); dens = v (0.45f, 0.2f); speed = range (-0.5f, 1.0f); chime = maybe (0.4f, v (0.4f, 0.2f)); break;
+            case Bells:   bloom = v (0.35f, 0.2f); smear = v (0.15f, 0.15f); scatter = v (0.65f, 0.2f); shimmer = v (0.8f, 0.2f);
+                          drift = v (0.25f, 0.2f); size = v (0.35f, 0.2f); dens = v (0.4f, 0.15f); speed = range (0.0f, 0.5f); chime = v (0.7f, 0.25f); break;
+            case Freeze:  bloom = v (0.6f, 0.2f); smear = v (0.85f, 0.15f); scatter = v (0.15f, 0.15f); shimmer = maybe (0.6f, v (0.4f, 0.2f));
+                          drift = v (0.2f, 0.2f); size = v (0.85f, 0.1f); dens = v (0.8f, 0.15f); speed = 0.0f; chime = maybe (0.4f, v (0.45f, 0.2f)); break;
+            case Stutter: bloom = v (0.1f, 0.1f); smear = 0.0f; scatter = v (0.55f, 0.3f); shimmer = maybe (0.4f, v (0.3f, 0.2f));
+                          drift = v (0.1f, 0.1f); size = v (0.2f, 0.12f); dens = v (0.3f, 0.15f); speed = range (0.8f, 1.6f); chime = maybe (0.3f, v (0.3f, 0.2f)); break;
+            default:      bloom = v (0.4f, 0.2f); smear = v (0.45f, 0.25f); scatter = v (0.4f, 0.25f); shimmer = v (0.35f, 0.2f);
+                          drift = v (0.85f, 0.15f); size = v (0.6f, 0.2f); dens = v (0.5f, 0.2f); speed = range (-1.0f, -0.2f); chime = maybe (0.3f, v (0.35f, 0.2f)); break;
+        }
+        set (ParamID::bloom, bloom);     set (ParamID::smear, smear);   set (ParamID::scatter, scatter);
+        set (ParamID::shimmer, shimmer); set (ParamID::drift, drift);   set (ParamID::gsize, size);
+        set (ParamID::density, dens);    set (ParamID::speed, speed);   set (ParamID::position, pos);
+        set (ParamID::chime, chime);
+        set (ParamID::gmix, v (0.85f, 0.15f));
     }
     else if (section == 1)
     {
