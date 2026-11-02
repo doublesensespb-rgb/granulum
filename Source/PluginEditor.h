@@ -27,6 +27,15 @@ namespace Palette
     inline juce::Colour whiteKey;
     inline juce::Colour blackKey;
     inline juce::Colour hit { 0xffd6be9c };   // muted sand / beige
+    // skin extras (themes 5+): strong ink, colour of drawings on screens, knob outline, font, LED style
+    inline juce::Colour hi { 0xffffffff };
+    inline juce::Colour onScreen { 0xffffffff };
+    inline juce::Colour knobRing { 0x00000000 };
+    inline juce::Colour edge { 0x0fffffff };   // thin outline of buttons/boxes
+    inline juce::Colour lfoCol[3] { juce::Colour (0xffbff3ff), juce::Colour (0xff9ee6c4), juce::Colour (0xffd6be9c) };
+    inline juce::String fontName;
+    inline bool flatLed = false;
+    inline int theme = 0;
 
     inline void applyTheme (int t)
     {
@@ -37,15 +46,57 @@ namespace Palette
             { 0xff355872, 0xff2f4f67, 0xff2a475d, 0xff1d3346, 0xff10202d, 0xff284459, 0xff5a87ab, 0xff6896ba, 0xfff7f8f0, 0xffc4d9e8, 0xffdde8f0, 0xffd9dee0, 0xffa5b0b8, 0xff213a4d, 0xff9cd5ff, 0xff7aaace, 0xfff7f8f0, 0xff8aa3b8, 0xfff7f8f0, 0xff5a7f9e },
             { 0xfff7f8f0, 0xffeceee5, 0xffe2e9ec, 0xff2b4a63, 0xff172b3a, 0xffd4e0e8, 0xff7aaace, 0xff8cb8d8, 0xff1f3a50, 0xff4e6a80, 0xff355872, 0xffc3ccd2, 0xff98a5ae, 0xffc9d7e2, 0xff5f9bcc, 0xff9cd5ff, 0xfff7f8f0, 0xff9aaebd, 0xfff7f8f0, 0xff7aaace },
             { 0xff7aaace, 0xff6c9cc1, 0xff355872, 0xff24405a, 0xff142636, 0xff2d4c63, 0xff4b7598, 0xff5b86aa, 0xfff7f8f0, 0xffc8dcec, 0xffe6eef4, 0xffe2e6e2, 0xffaab4bb, 0xff1f384b, 0xff9cd5ff, 0xff7aaace, 0xfff7f8f0, 0xff8aa3b8, 0xfff7f8f0, 0xff55799a },
+            // 5 TE LIGHT: warm light grey body, black ink, black screens, one orange accent
+            { 0xffe3e2de, 0xffdad9d4, 0xffeceae6, 0xff121212, 0xff0a0a0a, 0xffdcdad5, 0xffd2d1cc, 0xffc4c3be, 0xff141414, 0xff74736e, 0xff2e2e2c, 0xfff7f7f5, 0xff1a1a1a, 0xff141414, 0xffff5b1f, 0xffff8a5c, 0xffffffff, 0xffbdbcb6, 0xfff7f7f5, 0xff1c1c1c },
+            // 6 TE DARK: near-black body, white/grey ink, teal accent
+            { 0xff151515, 0xff111111, 0xff1b1b1b, 0xff000000, 0xff000000, 0xff050505, 0xff2a2a2a, 0xff363636, 0xffededed, 0xff8a8a8a, 0xffc9c9c9, 0xff3a3a3a, 0xff222222, 0xfff2f2f2, 0xff4fd6d9, 0xff83c8cc, 0xffffffff, 0xff3c3c3c, 0xffd9d9d9, 0xff1a1a1a },
+            // 7 APPLE: white cards on light grey, graphite accent, no colour
+            { 0xfff5f5f7, 0xffececef, 0xffffffff, 0xff1d1d1f, 0xff111113, 0xfff0f0f3, 0xffe8e8ed, 0xffdcdce1, 0xff1d1d1f, 0xff86868b, 0xff424245, 0xfff0f0f3, 0xffd2d2d7, 0xff1d1d1f, 0xff1d1d1f, 0xff6e6e73, 0xffffffff, 0xffc7c7cc, 0xffffffff, 0xff1d1d1f },
+            // 8 PURE B/W: paper white and black only
+            { 0xffffffff, 0xffffffff, 0xffffffff, 0xff000000, 0xff000000, 0xffffffff, 0xffffffff, 0xfff0f0f0, 0xff000000, 0xff000000, 0xff000000, 0xffffffff, 0xff000000, 0xff000000, 0xff000000, 0xff000000, 0xffffffff, 0xffffffff, 0xffffffff, 0xff000000 },
+            // 9 CREAM: vintage studio gear, cream body, dark brown ink, rust accent
+            { 0xffeee6d4, 0xffe6dcc6, 0xfff5efe1, 0xff1e1912, 0xff120e09, 0xffe4d9c2, 0xffddd1b8, 0xffd1c4a8, 0xff2b2219, 0xff6f6252, 0xff3d3226, 0xfffaf6ec, 0xff2b2219, 0xff2b2219, 0xffc4532f, 0xffd98a68, 0xfffff4e6, 0xffb9ab92, 0xfffaf6ec, 0xff2b2219 },
+            // 10 FOG: nordic pale blue-grey, slate ink, steel blue accent
+            { 0xffdfe5ea, 0xffd6dde3, 0xffeaeff3, 0xff17212b, 0xff0d141b, 0xffdbe3e9, 0xffd0d9e0, 0xffc3ced7, 0xff1f2b36, 0xff5d6c79, 0xff33424f, 0xfff5f8fa, 0xffc7d1d9, 0xff1f2b36, 0xff3f7fb5, 0xff7aa6cc, 0xffeaf4ff, 0xffaab7c2, 0xfff5f8fa, 0xff1f2b36 },
+            // 11 MOSS: deep forest green, sage ink, moss accent
+            { 0xff162019, 0xff121a14, 0xff1c281f, 0xff0a100b, 0xff050805, 0xff121b15, 0xff2b3a2f, 0xff36483a, 0xffe2eadf, 0xff93a597, 0xffc3d0c2, 0xff3a4d3e, 0xff243128, 0xffe2eadf, 0xff9cc77e, 0xff7fa868, 0xfff0ffe6, 0xff3b4a3e, 0xffdfe6dc, 0xff1a241c },
+            // 12 GRAPHITE: dark graphite, warm white ink, copper accent
+            { 0xff222426, 0xff1c1e20, 0xff292b2e, 0xff0e0f10, 0xff080909, 0xff1b1c1e, 0xff3a3d41, 0xff464a4f, 0xffece6df, 0xff9b948c, 0xffd2cbc3, 0xff45484c, 0xff2b2d30, 0xffece6df, 0xffd48c5c, 0xffb8774c, 0xfffff0e4, 0xff4a4d51, 0xffe4e0da, 0xff1e2022 },
+            // 13 BLUEPRINT: cobalt body, white lines, sky accent
+            { 0xff1f4f8f, 0xff1b4782, 0xff23589c, 0xff0f2a52, 0xff0a1f3e, 0xff1a467f, 0xff2f67ad, 0xff3a75bd, 0xfff4f8ff, 0xffa9c4e6, 0xffd8e6f8, 0xff2c63a8, 0xff1d4c8a, 0xfff4f8ff, 0xffa8dcff, 0xff7fc0f0, 0xffffffff, 0xff5d86bd, 0xfff4f8ff, 0xff163a6b },
+            // 14 CONCRETE: light concrete grey, black ink, signal red
+            { 0xffcfcdc8, 0xffc6c4bf, 0xffdcdad6, 0xff141414, 0xff0a0a0a, 0xffcfcdc8, 0xffc4c2bd, 0xffb7b5b0, 0xff111111, 0xff545350, 0xff2a2a29, 0xffe9e8e5, 0xffbab8b3, 0xff111111, 0xffe23b26, 0xffee7a68, 0xffffffff, 0xffa3a19c, 0xffefeeeb, 0xff151515 },
         };
         const auto& c = themes[juce::jlimit (0, (int) std::size (themes) - 1, t)];
         juce::Colour* dst[] = { &bgTop, &bgBottom, &panel, &screen, &deep, &field, &button, &buttonHi, &text, &textDim, &label, &knob, &knobDark, &track, &accent, &accentSoft, &ice, &ledOff, &whiteKey, &blackKey };
         for (size_t i = 0; i < std::size (dst); ++i) *dst[i] = juce::Colour (c[i]);
+        theme = t;
+        const bool light = text.getPerceivedBrightness() < 0.5f;
+        hi = light ? juce::Colours::black : juce::Colours::white;
+        onScreen = juce::Colours::white;
+        knobRing = t == 5 || t == 8 ? juce::Colour (0xff141414) : t == 7 ? juce::Colour (0x22000000)
+                 : t >= 9 ? text.withAlpha (light ? 0.55f : 0.3f) : juce::Colour (0x00000000);
+        flatLed = t >= 5;
+        edge = t == 8 ? juce::Colour (0xff000000) : t == 5 || t == 7 ? juce::Colour (0x1a000000)
+             : (t >= 9 && light) ? text.withAlpha (0.14f) : juce::Colour (0x0fffffff);
+        fontName = t >= 5 ? "Inter" : "";
+        if (t == 5)      { lfoCol[0] = accent; lfoCol[1] = juce::Colour (0xffffffff); lfoCol[2] = juce::Colour (0xff9a9a9a); hit = juce::Colour (0xffff8a5c); }
+        else if (t >= 9)
+        {
+            // accent, a lighter cousin and a neutral; all readable on the panel AND on the dark screens
+            lfoCol[0] = accent; lfoCol[1] = accentSoft.interpolatedWith (juce::Colours::white, 0.25f); lfoCol[2] = juce::Colour (0xff9a9a98);
+            hit = accentSoft.interpolatedWith (juce::Colours::white, 0.35f);
+        }
+        else if (t >= 6) { lfoCol[0] = t == 6 ? accent : juce::Colour (0xff9a9a9a); lfoCol[1] = juce::Colour (0xffbdbdbd); lfoCol[2] = juce::Colour (0xff7a7a7a); hit = t == 6 ? accent : juce::Colour (0xffd0d0d0); }
+        else { lfoCol[0] = juce::Colour (0xffbff3ff); lfoCol[1] = juce::Colour (0xff9ee6c4); lfoCol[2] = juce::Colour (0xffd6be9c); hit = juce::Colour (0xffd6be9c); }
     }
     inline const bool themeReady = (applyTheme (0), true);
 
     // LFO colours: ice, mint, sand
-    inline juce::Colour lfo (int i) { return i == 0 ? juce::Colour (0xffbff3ff) : i == 1 ? juce::Colour (0xff9ee6c4) : juce::Colour (0xffd6be9c); }
+    // text colour that reads on top of the accent colour
+    inline juce::Colour onAccent() { return accent.getPerceivedBrightness() > 0.58f ? juce::Colour (0xff111111) : juce::Colours::white; }
+
+    inline juce::Colour lfo (int i) { return lfoCol[juce::jlimit (0, 2, i)]; }
 
     // signature colour: used ONLY for the per-harmonic GRAIN row
     inline const juce::Colour gold     { 0xffe6cc92 };
