@@ -157,6 +157,27 @@ void GranulumLook::drawButtonBackground (Graphics& g, Button& b, const Colour&, 
             g.fillRoundedRectangle (r.expanded (1.5f), rad + 1.5f);
             g.setColour (c.interpolatedWith (Colours::white, over || open ? 0.10f : 0.0f));
             g.fillRoundedRectangle (r, rad);
+            // a soft light glint sweeps across every few seconds, so the button invites a click
+            if (! open)
+            {
+                const double t = std::fmod (Time::getMillisecondCounterHiRes() * 0.001, 3.6);
+                if (t < 0.9)
+                {
+                    const float k = (float) (t / 0.9);
+                    const float ease = k * k * (3.0f - 2.0f * k);
+                    const float bw = r.getWidth() * 0.38f;
+                    const float x = r.getX() - bw + (r.getWidth() + bw * 2.0f) * ease;
+                    g.saveState();
+                    Path clip; clip.addRoundedRectangle (r, rad);
+                    g.reduceClipRegion (clip);
+                    ColourGradient band (Colours::white.withAlpha (0.0f), x - bw * 0.5f, r.getY(),
+                                         Colours::white.withAlpha (0.0f), x + bw * 0.5f, r.getBottom(), false);
+                    band.addColour (0.5, Colours::white.withAlpha (0.6f * std::sin (k * MathConstants<float>::pi)));
+                    g.setGradientFill (band);
+                    g.fillRect (r);
+                    g.restoreState();
+                }
+            }
             g.setColour (Colours::white.withAlpha (0.12f));
             g.drawRoundedRectangle (r.reduced (0.5f), rad, 1.0f);
             return;
@@ -3335,6 +3356,7 @@ void GranulumEditor::openFile (const File& f)
 
 void GranulumEditor::timerCallback()
 {
+    if (loadButton.isShowing()) loadButton.repaint();   // SOUNDS glint animation
     auto& s = proc.apvts;
 
     const int chord = (int) s.getRawParameterValue (ParamID::chord)->load();

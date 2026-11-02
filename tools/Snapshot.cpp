@@ -193,6 +193,18 @@ int main (int argc, char** argv)
             save (*e2, outDir, ("sounds-style-" + String (st) + ".png").toRawUTF8());
         }
         GranulumEditor::soundsStyle = 4;
+        {
+            // glint animation frames of the OSC 2 strip
+            std::unique_ptr<AudioProcessorEditor> e3 (p.createEditor()); e3->setSize (1080, 800);
+            outDir.getChildFile ("glint").createDirectory();
+            for (int f = 0; f < 60; ++f)
+            {
+                MessageManager::getInstance()->runDispatchLoopUntil (60);
+                auto im = e3->createComponentSnapshot ({ 536, 245, 504, 60 }, true, 2.0f);
+                FileOutputStream os (outDir.getChildFile ("glint").getChildFile (String::formatted ("f%03d.png", f)));
+                PNGImageFormat().writeImageToStream (im, os);
+            }
+        }
         String e3; p.loadSample (dir.getChildFile ("Atmos").getChildFile ("Dust Cathedral Night Choir.wav"), e3);
         run (p, ed, 4);
         save (*base, outDir, "long-name.png");
