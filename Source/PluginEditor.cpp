@@ -144,6 +144,35 @@ void GranulumLook::drawButtonBackground (Graphics& g, Button& b, const Colour&, 
 {
     auto r = b.getLocalBounds().toFloat().reduced (1.5f);
     const float rad = 6.0f;
+    if (b.getProperties().contains ("sounds"))
+    {
+        // the SOUNDS button: copper, with a small "library" icon, so it invites a click
+        const int st = (int) b.getProperties()["sounds"];
+        const bool open = b.getToggleState();
+        if (st >= 3)
+        {
+            g.setColour (Palette::accent.withAlpha (over || open ? 0.30f : 0.18f));
+            g.fillRoundedRectangle (r.expanded (2.0f), rad + 2.0f);
+        }
+        if (st >= 2)
+        {
+            g.setColour (Palette::accent.withAlpha (open ? 0.42f : over ? 0.32f : 0.20f));
+            g.fillRoundedRectangle (r, rad);
+        }
+        else
+        {
+            g.setColour (over || open ? Palette::accent.withAlpha (0.14f) : Colours::transparentBlack);
+            g.fillRoundedRectangle (r, rad);
+        }
+        g.setColour (Palette::accent.withAlpha (over || open ? 1.0f : 0.8f));
+        g.drawRoundedRectangle (r.reduced (0.5f), rad, 1.2f);
+        // icon: three stacked "records" with a waveform line
+        const float ix = r.getX() + 8.0f, iy = r.getCentreY();
+        g.setColour (Palette::accent.brighter (over ? 0.35f : 0.15f));
+        for (int k = 0; k < 3; ++k)
+            g.fillRoundedRectangle (ix - 2.5f, iy - 4.0f + (float) k * 3.2f, 6.0f - (float) k * 1.2f, 1.7f, 0.8f);
+        return;
+    }
     if (b.getToggleState())
     {
         switch (toggleStyle)
@@ -201,6 +230,13 @@ void GranulumLook::drawButtonBackground (Graphics& g, Button& b, const Colour&, 
 
 void GranulumLook::drawButtonText (Graphics& g, TextButton& b, bool over, bool)
 {
+    if (b.getProperties().contains ("sounds"))
+    {
+        g.setFont (uiFont (10.5f, true, 0.06f));
+        g.setColour (over || b.getToggleState() ? Palette::hi : Palette::accent.brighter (0.35f));
+        g.drawText (b.getButtonText().upToFirstOccurrenceOf (" ", false, false), b.getLocalBounds().withTrimmedLeft (12), Justification::centred, false);
+        return;
+    }
     g.setFont (uiFont (b.getHeight() < 30 ? 11.5f : 13.5f, false, 0.08f));
     const auto onText = toggleStyle == 0 ? Palette::screen : toggleStyle == 2 ? Palette::accent.brighter (0.2f)
                       : toggleStyle >= 5 ? (Palette::theme >= 5 ? Palette::onAccent() : Colours::white) : Palette::ice;
@@ -2963,6 +2999,7 @@ GranulumEditor::GranulumEditor (GranulumProcessor& p)
     initButton.onClick   = [this] { proc.resetToInit(); lfoEditor.setLfo (selectedLfo); };
     loadButton.onClick   = [this] { toggleSampleMenu (! sampleMenu.isVisible()); };
     loadButton.setTooltip ("Factory sounds, or load your own file");
+    loadButton.getProperties().set ("sounds", soundsStyle);
     addChildComponent (sampleMenu);
     sampleMenu.onPick = [this] (const File& f)
     {

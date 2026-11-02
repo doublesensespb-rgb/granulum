@@ -569,6 +569,7 @@ private:
     void toggleSampleMenu (bool show);
 public:
     void openSampleMenuForPreview (bool show = true) { toggleSampleMenu (show); }
+    static inline int soundsStyle = 2;   // 1 copper outline + icon, 2 copper tint + icon, 3 tint + glow
 private:
     juce::TextButton samplePrev { juce::String::fromUTF8 ("\xe2\x97\x80") }, sampleNext { juce::String::fromUTF8 ("\xe2\x96\xb6") };
     Lamp osc1Lamp { "OSC 1", "ADDITIVE" }, osc2Lamp { "OSC 2", "SAMPLE" }, osc3Lamp { "OSC 3", "NOISE" };

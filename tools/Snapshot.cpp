@@ -185,6 +185,14 @@ int main (int argc, char** argv)
         save (*base, outDir, "sounds-menu.png");
         ed->openSampleMenuForPreview (false);
         ed->previewDropState (0);
+        for (int st = 1; st <= 3; ++st)
+        {
+            GranulumEditor::soundsStyle = st;
+            std::unique_ptr<AudioProcessorEditor> e2 (p.createEditor()); e2->setSize (1080, 800);
+            run (p, dynamic_cast<GranulumEditor*> (e2.get()), 3);
+            save (*e2, outDir, ("sounds-style-" + String (st) + ".png").toRawUTF8());
+        }
+        GranulumEditor::soundsStyle = 2;
         String e3; p.loadSample (dir.getChildFile ("Atmos").getChildFile ("Dust Cathedral Night Choir.wav"), e3);
         run (p, ed, 4);
         save (*base, outDir, "long-name.png");
