@@ -261,6 +261,21 @@ void GranulumLook::drawButtonBackground (Graphics& g, Button& b, const Colour&, 
     g.drawRoundedRectangle (r.reduced (0.5f), rad, 1.0f);
 }
 
+// Text with a trailing dropdown arrow: the arrow is drawn as a shape, because the embedded font has no "▾" glyph
+static void drawTextWithArrow (Graphics& g, const String& text, Rectangle<int> area)
+{
+    const String arrowGlyph = String::fromUTF8 ("\xe2\x96\xbe");
+    if (! text.endsWith (arrowGlyph)) { g.drawText (text, area, Justification::centred, false); return; }
+    const auto label = text.dropLastCharacters (1).trimEnd();
+    const float tw = (float) GlyphArrangement::getStringWidthInt (g.getCurrentFont(), label);
+    const float aw = jmax (5.0f, g.getCurrentFont().getHeight() * 0.42f), gap = 4.0f;
+    const float x0 = (float) area.getCentreX() - (tw + gap + aw) * 0.5f;
+    g.drawText (label, Rectangle<float> (x0, (float) area.getY(), tw + 2.0f, (float) area.getHeight()), Justification::centredLeft, false);
+    const float ax = x0 + tw + gap, ay = (float) area.getCentreY() + 0.5f;
+    Path tri; tri.addTriangle (ax, ay - aw * 0.32f, ax + aw, ay - aw * 0.32f, ax + aw * 0.5f, ay + aw * 0.36f);
+    g.fillPath (tri);
+}
+
 void GranulumLook::drawButtonText (Graphics& g, TextButton& b, bool over, bool)
 {
     if (b.getProperties().contains ("sounds") && (int) b.getProperties()["sounds"] == 4)
@@ -272,7 +287,7 @@ void GranulumLook::drawButtonText (Graphics& g, TextButton& b, bool over, bool)
         while (fs > 8.5f && (float) GlyphArrangement::getStringWidthInt (uiFont (fs, false, 0.06f), text) > room) fs -= 0.25f;
         g.setFont (uiFont (fs, false, 0.06f));
         g.setColour (Palette::onAccent());
-        g.drawText (text, b.getLocalBounds(), Justification::centred, false);
+        drawTextWithArrow (g, text, b.getLocalBounds());
         return;
     }
     if (b.getProperties().contains ("sounds"))
@@ -286,7 +301,7 @@ void GranulumLook::drawButtonText (Graphics& g, TextButton& b, bool over, bool)
     const auto onText = toggleStyle == 0 ? Palette::screen : toggleStyle == 2 ? Palette::accent.brighter (0.2f)
                       : toggleStyle >= 5 ? (Palette::theme >= 5 ? Palette::onAccent() : Colours::white) : Palette::ice;
     g.setColour (b.getToggleState() ? onText : (over ? Palette::hi : Palette::text));
-    g.drawText (b.getButtonText(), b.getLocalBounds(), Justification::centred, false);
+    drawTextWithArrow (g, b.getButtonText(), b.getLocalBounds());
 }
 
 void GranulumLook::drawComboBox (Graphics& g, int w, int h, bool, int, int, int, int, ComboBox& box)
