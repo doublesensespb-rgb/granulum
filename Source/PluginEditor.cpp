@@ -1,13 +1,23 @@
 #include "PluginEditor.h"
+#include "BinaryData.h"
 
 using namespace juce;
 
 namespace
 {
+    // Inter (OFL) is embedded, so every computer shows the same font
+    Typeface::Ptr interFace (bool bold)
+    {
+        static Typeface::Ptr reg = Typeface::createSystemTypefaceFor (BinaryData::InterRegular_otf, (size_t) BinaryData::InterRegular_otfSize);
+        static Typeface::Ptr semi = Typeface::createSystemTypefaceFor (BinaryData::InterSemiBold_otf, (size_t) BinaryData::InterSemiBold_otfSize);
+        return bold ? semi : reg;
+    }
+
     Font uiFont (float size, bool bold = false, float kerning = 0.0f)
     {
         if (Palette::fontName.isNotEmpty())
-            return Font { FontOptions (Palette::fontName, size * 0.96f, bold ? Font::bold : Font::plain).withKerningFactor (kerning + 0.02f) };
+            if (auto tf = interFace (bold))
+                return Font { FontOptions (tf).withHeight (size * 0.96f).withKerningFactor (kerning + 0.02f) };
         return Font { FontOptions (size, bold ? Font::bold : Font::plain).withKerningFactor (kerning) };
     }
 

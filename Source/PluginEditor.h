@@ -81,6 +81,12 @@ namespace Palette
              : (t >= 9 && light) ? text.withAlpha (0.14f) : juce::Colour (0x0fffffff);
         fontName = t >= 5 ? "Inter" : "";
         if (t == 5)      { lfoCol[0] = accent; lfoCol[1] = juce::Colour (0xffffffff); lfoCol[2] = juce::Colour (0xff9a9a9a); hit = juce::Colour (0xffff8a5c); }
+        else if (t == 12)
+        {
+            // GRAPHITE: steel blue, sage, ivory - three LFOs that differ from the copper accent (ADSR, buttons) that sit in the palette
+            lfoCol[0] = juce::Colour (0xff8fb4d0); lfoCol[1] = juce::Colour (0xffa9c79a); lfoCol[2] = juce::Colour (0xffe6dccd);
+            hit = juce::Colour (0xffe8c4a6);
+        }
         else if (t >= 9)
         {
             // accent, a lighter cousin and a neutral; all readable on the panel AND on the dark screens
@@ -90,7 +96,7 @@ namespace Palette
         else if (t >= 6) { lfoCol[0] = t == 6 ? accent : juce::Colour (0xff9a9a9a); lfoCol[1] = juce::Colour (0xffbdbdbd); lfoCol[2] = juce::Colour (0xff7a7a7a); hit = t == 6 ? accent : juce::Colour (0xffd0d0d0); }
         else { lfoCol[0] = juce::Colour (0xffbff3ff); lfoCol[1] = juce::Colour (0xff9ee6c4); lfoCol[2] = juce::Colour (0xffd6be9c); hit = juce::Colour (0xffd6be9c); }
     }
-    inline const bool themeReady = (applyTheme (0), true);
+    inline const bool themeReady = (applyTheme (12), true);   // GRAPHITE is the shipping look
 
     // LFO colours: ice, mint, sand
     // text colour that reads on top of the accent colour
