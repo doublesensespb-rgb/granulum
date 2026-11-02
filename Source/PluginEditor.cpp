@@ -244,9 +244,14 @@ void GranulumLook::drawButtonText (Graphics& g, TextButton& b, bool over, bool)
 {
     if (b.getProperties().contains ("sounds") && (int) b.getProperties()["sounds"] == 4)
     {
-        g.setFont (uiFont (b.getHeight() < 30 ? 11.5f : 13.5f, false, 0.08f));
+        // "SOUNDS ▾" with breathing room at both ends: shrink the font until it fits
+        const auto text = b.getButtonText();
+        const float room = (float) b.getWidth() - 16.0f;
+        float fs = b.getHeight() < 30 ? 11.5f : 13.5f;
+        while (fs > 8.5f && (float) GlyphArrangement::getStringWidthInt (uiFont (fs, false, 0.06f), text) > room) fs -= 0.25f;
+        g.setFont (uiFont (fs, false, 0.06f));
         g.setColour (Palette::onAccent());
-        g.drawText (b.getButtonText().upToFirstOccurrenceOf (" ", false, false), b.getLocalBounds(), Justification::centred, false);
+        g.drawText (text, b.getLocalBounds(), Justification::centred, false);
         return;
     }
     if (b.getProperties().contains ("sounds"))
