@@ -592,6 +592,10 @@ GranulumProcessor::GranulumProcessor()
     harmonics[0] = 1.0f;
     for (int l = 0; l < kNumLfos; ++l) setLfoPoints (l, lfoPreset (1));   // triangle
 
+    // OSC 2 is never empty: the first factory sound is ready (a saved project replaces it)
+    loadAdjacentFactorySample (+1);
+    if (auto* on = apvts.getParameter (ParamID::osc2On)) on->setValueNotifyingHost (0.0f);   // INIT keeps OSC 2 off
+
     timerCallback();
     startTimerHz (30);
 }

@@ -3241,8 +3241,8 @@ void GranulumEditor::toggleSampleMenu (bool show)
         sampleMenu.rebuild();
         const float sc = (float) getWidth() / 1080.0f;
         const int w = (int) (230 * sc), h = sampleMenu.preferredHeight();
-        auto b = dropZone;
-        int x = jlimit (6, getWidth() - w - 6, b.getCentreX() - w / 2), y = b.getBottom() + (int) (4 * sc);
+        auto b = loadButton.getBounds();
+        int x = jlimit (6, getWidth() - w - 6, b.getRight() - w), y = b.getBottom() + (int) (4 * sc);
         if (y + h > getHeight() - 6) y = b.getY() - h - (int) (4 * sc);
         sampleMenu.setBounds (x, y, w, h);
         sampleMenu.setVisible (true);
@@ -3429,7 +3429,7 @@ void GranulumEditor::paint (Graphics& g)
             drawDropIcon ({ z.getCentreX(), z.getCentreY() - 6.0f }, 12.0f, dropHover ? Palette::accent : Palette::accentSoft);
             g.setColour (dropHover ? Palette::onScreen : Palette::accentSoft);
             g.setFont (uiFont (10.5f * sc, false, 0.14f));
-            g.drawText ("DROP WAV OR CLICK", z.withTrimmedTop (z.getHeight() * 0.55f), Justification::centred, false);
+            g.drawText ("DROP OR CLICK", z.withTrimmedTop (z.getHeight() * 0.55f), Justification::centred, false);
         }
         else
         {
@@ -3450,7 +3450,7 @@ void GranulumEditor::paint (Graphics& g)
             }
             // (no corner icon here: the box is small; the dashed frame says "drop", hover says CLICK OR DROP)
             const auto name = File::createFileWithoutCheckingPath (proc.getSampleName()).getFileNameWithoutExtension().toUpperCase();
-            const String arrow = String::fromUTF8 (" \xe2\x96\xbe");
+            const String arrow;   // the SOUNDS button opens the menu, so no arrow on the name
             auto nameArea = z.reduced (9.0f, 0.0f).withTrimmedBottom (z.getHeight() * 0.32f);
             // long names: shrink a little, then marquee on hover, else "..." at the end
             float fs = 12.5f * sc;
@@ -3474,8 +3474,7 @@ void GranulumEditor::paint (Graphics& g)
             }
             else
             {
-                g.drawText (name, nameArea.withTrimmedRight (14.0f), Justification::centred, true);
-                g.drawText (arrow.trim(), nameArea, Justification::centredRight, false);
+                g.drawText (name, nameArea, Justification::centred, true);
             }
             g.setColour (dropHover ? Palette::onScreen : Palette::accentSoft.withAlpha (on2 ? 1.0f : 0.5f));
             g.setFont (uiFont (9.5f * sc, false, 0.14f));
@@ -3639,8 +3638,8 @@ void GranulumEditor::resized()
         auto a2 = osc2Area.reduced (S (8), S (4));
         osc2Lamp.setBounds (a2.removeFromLeft (S (118)));
         auto btn2 = a2.removeFromRight (S (62));
-        loadButton.setVisible (false);                                   // the sample box itself opens the sounds menu
-        osc2Grain.setBounds (btn2.withSizeKeepingCentre (S (62), S (26)));
+        loadButton.setBounds (btn2.removeFromBottom (btn2.getHeight() / 2).reduced (0, S (1)));   // SOUNDS menu
+        osc2Grain.setBounds (btn2.reduced (0, S (1)));
         a2.removeFromRight (S (4));
         for (int i = (int) osc2Knobs.size() - 1; i >= 0; --i)
             osc2Knobs[(size_t) i]->setBounds (a2.removeFromRight (S (46)));
@@ -3844,7 +3843,7 @@ void GranulumEditor::mouseExit (const MouseEvent&)
 void GranulumEditor::mouseDown (const MouseEvent& e)
 {
     if (sampleMenu.isVisible()) { toggleSampleMenu (false); return; }
-    if (dropZone.contains (e.getPosition())) toggleSampleMenu (true);   // click the sample box = sounds menu
+    if (dropZone.contains (e.getPosition())) launchChooser();   // click the sample box = choose your own file
 }
 
 void GranulumEditor::fileDragEnter (const StringArray&, int, int) { field.dragHover = fileHover = true;  repaint(); }
