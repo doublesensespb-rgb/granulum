@@ -155,7 +155,8 @@ void GranulumLook::drawButtonBackground (Graphics& g, Button& b, const Colour&, 
             const auto c = Palette::accent;
             g.setColour (c.withAlpha (0.18f));
             g.fillRoundedRectangle (r.expanded (1.5f), rad + 1.5f);
-            g.setColour (c.interpolatedWith (Colours::white, over || open ? 0.10f : 0.0f));
+            // chosen (CHORD set / menu open): a clearly brighter copper
+            g.setColour (c.interpolatedWith (Colours::white, open ? (over ? 0.30f : 0.24f) : over ? 0.10f : 0.0f));
             g.fillRoundedRectangle (r, rad);
             // a soft light glint sweeps across every few seconds, so the button invites a click
             if (! open)
