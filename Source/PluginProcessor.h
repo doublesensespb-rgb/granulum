@@ -35,6 +35,8 @@ namespace ParamID
     inline constexpr const char* drift     = "drift";
     inline constexpr const char* gsize     = "gsize";
     inline constexpr const char* loopMode  = "loopMode";
+    inline constexpr const char* peakGain  = "peakGain";
+    inline constexpr const char* peakGain2 = "peakGain2";
     inline constexpr const char* loopStart = "loopStart";
     inline constexpr const char* loopEnd   = "loopEnd";
     inline constexpr const char* speed     = "speed";
@@ -104,6 +106,7 @@ enum ModTarget
     mtDistDrive, mtDistTone, mtDistMix, mtDelayTime, mtDelayFb, mtDelayTone, mtDelayMix, mtRevMix, mtRevSize, mtRevLowCut,
     mtPorta, mtOutput,
     mtLfo1Rate, mtLfo2Rate, mtLfo3Rate,
+    mtPeakGain, mtPeakGain2,
     kNumModTargets
 };
 
@@ -162,13 +165,13 @@ private:
 class FilterUnit
 {
 public:
-    enum Type { LP12, LP24, HP, BP, Notch, Comb, Vowel };
+    enum Type { LP12, LP24, HP, BP, Peak, Comb, Vowel };   // PEAK took NOTCH's place (same index)
     static const juce::StringArray& typeNames();
     void prepare (double sampleRate);
     void reset();
-    void process (float* L, float* R, int n, int type, float cutoffHz, float q);
+    void process (float* L, float* R, int n, int type, float cutoffHz, float q, float peakGainDb = 0.0f);
     // magnitude (linear) of this filter at frequency hz, for the filter view
-    static float response (int type, float hz, float cutoffHz, float q, double sampleRate);
+    static float response (int type, float hz, float cutoffHz, float q, double sampleRate, float peakGainDb = 0.0f);
 private:
     struct Svf
     {
@@ -318,7 +321,7 @@ public:
     std::atomic<bool>  clipped { false };                 // set when the output hit 0 dBFS; the UI clears it
     std::atomic<float> keyCutoff { 20000.0f };
     // filter view (UI): key-tracked + modulated cutoff/reso of both filters, and a ring of the filter input
-    std::atomic<float> keyCutoff2 { 20000.0f }, viewReso1 { 0.707f }, viewReso2 { 0.707f };
+    std::atomic<float> keyCutoff2 { 20000.0f }, viewReso1 { 0.707f }, viewReso2 { 0.707f }, viewPeak1 { 0.0f }, viewPeak2 { 0.0f };
     static constexpr int kScopeSize = 4096;
     std::array<float, kScopeSize> scopeRing {};
     std::atomic<int> scopeWrite { 0 };

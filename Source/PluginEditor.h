@@ -625,6 +625,7 @@ private:
     std::unique_ptr<juce::FileChooser> chooser;
     juce::TooltipWindow tooltips { this, 600 };
 
+    std::vector<std::unique_ptr<Knob>> peakKnobs;   // GAIN for the PEAK filter type, shown instead of RESO
     std::vector<std::unique_ptr<Knob>> heroKnobs, smallKnobs, osc1Knobs, osc2Knobs, osc3Knobs, filterKnobs, filter2Knobs,
                                        distKnobs, delayKnobs, revKnobs, globalKnobs;
     std::vector<Knob*> allKnobs;

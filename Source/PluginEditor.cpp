@@ -2148,6 +2148,7 @@ void FilterScope::paint (Graphics& g)
     const int  type = (int) s.getRawParameterValue (which == 0 ? ParamID::ftype : ParamID::ftype2)->load();
     const float fc  = (which == 0 ? proc.keyCutoff : proc.keyCutoff2).load (std::memory_order_relaxed);
     const float q   = (which == 0 ? proc.viewReso1 : proc.viewReso2).load (std::memory_order_relaxed);
+    const float pk  = (which == 0 ? proc.viewPeak1 : proc.viewPeak2).load (std::memory_order_relaxed);
     const double sr = proc.getSampleRate() > 0 ? proc.getSampleRate() : 44100.0;
 
     // grid: 100 Hz, 1 kHz, 10 kHz
@@ -2170,7 +2171,7 @@ void FilterScope::paint (Graphics& g)
     {
         const float x = a.getX() + (float) i;
         const float hz = xToHz ((float) i * (float) getWidth() / (float) n);
-        const float resp = on ? Decibels::gainToDecibels (FilterUnit::response (type, hz, fc, q, sr), -100.0f) : 0.0f;
+        const float resp = on ? Decibels::gainToDecibels (FilterUnit::response (type, hz, fc, q, sr, pk), -100.0f) : 0.0f;
         const float sp = specDb[(size_t) jlimit (0, (int) specDb.size() - 1, (int) (x))];
         inSpec.lineTo (x, yOfSpec (sp));
         outSpec.lineTo (x, yOfSpec (sp + resp));
@@ -2210,7 +2211,8 @@ void FilterScope::mouseDown (const MouseEvent& e)
 {
     auto& s = proc.apvts;
     auto* c = s.getParameter (which == 0 ? ParamID::cutoff : ParamID::cutoff2);
-    auto* q = s.getParameter (which == 0 ? ParamID::reso : ParamID::reso2);
+    const bool peak = (int) s.getRawParameterValue (which == 0 ? ParamID::ftype : ParamID::ftype2)->load() == FilterUnit::Peak;
+    auto* q = s.getParameter (peak ? (which == 0 ? ParamID::peakGain : ParamID::peakGain2) : (which == 0 ? ParamID::reso : ParamID::reso2));
     dragCut = c->getValue(); dragRes = q->getValue();
     dragStart = e.position;
     c->beginChangeGesture(); q->beginChangeGesture();
@@ -2220,7 +2222,8 @@ void FilterScope::mouseDrag (const MouseEvent& e)
 {
     auto& s = proc.apvts;
     auto* c = s.getParameter (which == 0 ? ParamID::cutoff : ParamID::cutoff2);
-    auto* q = s.getParameter (which == 0 ? ParamID::reso : ParamID::reso2);
+    const bool peak = (int) s.getRawParameterValue (which == 0 ? ParamID::ftype : ParamID::ftype2)->load() == FilterUnit::Peak;
+    auto* q = s.getParameter (peak ? (which == 0 ? ParamID::peakGain : ParamID::peakGain2) : (which == 0 ? ParamID::reso : ParamID::reso2));
     const auto d = e.position - dragStart;
     c->setValueNotifyingHost (jlimit (0.0f, 1.0f, dragCut + d.x / jmax (40.0f, (float) getWidth())));
     q->setValueNotifyingHost (jlimit (0.0f, 1.0f, dragRes - d.y / 120.0f));
@@ -2230,7 +2233,8 @@ void FilterScope::mouseUp (const MouseEvent&)
 {
     auto& s = proc.apvts;
     s.getParameter (which == 0 ? ParamID::cutoff : ParamID::cutoff2)->endChangeGesture();
-    s.getParameter (which == 0 ? ParamID::reso : ParamID::reso2)->endChangeGesture();
+    const bool peak = (int) s.getRawParameterValue (which == 0 ? ParamID::ftype : ParamID::ftype2)->load() == FilterUnit::Peak;
+    s.getParameter (peak ? (which == 0 ? ParamID::peakGain : ParamID::peakGain2) : (which == 0 ? ParamID::reso : ParamID::reso2))->endChangeGesture();
 }
 
 void LfoEditor::paint (Graphics& g)
@@ -3050,6 +3054,9 @@ GranulumEditor::GranulumEditor (GranulumProcessor& p)
     add (filterKnobs, ParamID::reso,   "Reso");
     add (filter2Knobs, ParamID::cutoff2, "Cutoff");
     add (filter2Knobs, ParamID::reso2,   "Reso");
+    add (peakKnobs, ParamID::peakGain,  "Gain");
+    add (peakKnobs, ParamID::peakGain2, "Gain");
+    for (auto& k : peakKnobs) { k->setVisible (false); k->slider.setTooltip ("PEAK: lift or cut the CUTOFF frequency (-18..+18 dB)"); }
 
     add (distKnobs,  ParamID::distDrive, "Drive",    Knob::Size::Small);
     add (distKnobs,  ParamID::distTone,  "Tone",     Knob::Size::Small);
@@ -3514,6 +3521,19 @@ void GranulumEditor::timerCallback()
     dim ({ &osc3Grain }, o3);
     dimK (heroKnobs, gOn); dimK (smallKnobs, gOn); dim ({ &rndGrains }, gOn);
     dimK (filterKnobs, fOn); dim ({ &filterType, routes[0].get() }, fOn);
+    {
+        // PEAK shows GAIN where RESO is
+        const bool p1 = (int) s.getRawParameterValue (ParamID::ftype)->load() == FilterUnit::Peak;
+        const bool p2 = (int) s.getRawParameterValue (ParamID::ftype2)->load() == FilterUnit::Peak;
+        auto vis = [] (Component& c, bool v) { if (c.isVisible() != v) c.setVisible (v); };
+        vis (*filterKnobs[1],  selectedFilter == 0 && ! p1);
+        vis (*peakKnobs[0],    selectedFilter == 0 && p1);
+        vis (*filter2Knobs[1], selectedFilter == 1 && ! p2);
+        vis (*peakKnobs[1],    selectedFilter == 1 && p2);
+        peakKnobs[0]->setAlpha (fOn ? 1.0f : 0.38f);
+        peakKnobs[1]->setAlpha (f2On ? 1.0f : 0.38f);
+        filterKnobs[0]->slider.setTooltip (p1 ? "PEAK frequency (does not follow the note)" : "Cutoff follows the note you play (set at C3). The readout shows the note where it cuts.");
+    }
     dimK (filter2Knobs, f2On); dim ({ &filterType2, routes[4].get() }, f2On);
     for (auto& t : filterTabs) t->repaint();
     dimK (distKnobs, dOn);  dim ({ &distType, routes[1].get() }, dOn);
@@ -3915,6 +3935,8 @@ void GranulumEditor::resized()
         auto row1 = f.removeFromTop ((int) (f.getHeight() * 0.58f));
         layoutRow (filterKnobs, row1);
         layoutRow (filter2Knobs, row1);
+        peakKnobs[0]->setBounds (filterKnobs[1]->getBounds());
+        peakKnobs[1]->setBounds (filter2Knobs[1]->getBounds());
         f.removeFromTop (S (4));
         filterScope.setBounds (f.removeFromTop (S (38)).reduced (S (4), 0));
         auto row2 = f.withSizeKeepingCentre (f.getWidth(), S (28));

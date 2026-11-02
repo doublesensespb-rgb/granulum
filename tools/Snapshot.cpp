@@ -236,6 +236,13 @@ int main (int argc, char** argv)
         setP (ParamID::ftype, 3.0f); setP (ParamID::cutoff, 1500.0f); setP (ParamID::reso, 2.5f);   // BAND PASS
         run (p, ed, 40);
         save (*base, outDir, "scope-bp.png");
+        setP (ParamID::ftype, 4.0f); setP (ParamID::cutoff, 900.0f); setP (ParamID::peakGain, 12.0f);   // PEAK
+        run (p, ed, 40);
+        save (*base, outDir, "scope-peak.png");
+        setP (ParamID::peakGain, -12.0f);
+        run (p, ed, 40);
+        save (*base, outDir, "scope-peak-cut.png");
+        ed->selectFx (0);
     }
 
     // design preview: "Snapshot <dir> grainrow" -> animation frames of the OSC 1 panel in both GRAIN row styles
