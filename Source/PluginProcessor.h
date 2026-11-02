@@ -247,6 +247,11 @@ public:
     // ---- sources (message thread) ----
     bool loadSample (const juce::File& file, juce::String& error);
     juce::String getSampleName() const;
+    // factory samples (stock atmospheres): Documents/GRAIN FORM/Samples, browsed with < > in OSC 2
+    static juce::File factorySampleDir();
+    bool isFactorySample() const;
+    void loadAdjacentFactorySample (int direction);
+    std::shared_ptr<const WaveformPeaks> getSamplePeaks() const { const juce::ScopedLock sl (infoLock); return smpPeaks; }
     bool hasSample() const { return sampleLoaded.load(); }
     bool showingSample() const;
     std::shared_ptr<const WaveformPeaks> getPeaks() const;

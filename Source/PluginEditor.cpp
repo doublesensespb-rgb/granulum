@@ -2962,6 +2962,11 @@ GranulumEditor::GranulumEditor (GranulumProcessor& p)
     randomButton.onClick = [this] { proc.randomize(); };
     initButton.onClick   = [this] { proc.resetToInit(); lfoEditor.setLfo (selectedLfo); };
     loadButton.onClick   = [this] { launchChooser(); };
+    for (auto* b : { &samplePrev, &sampleNext }) addAndMakeVisible (*b);
+    samplePrev.onClick = [this] { proc.loadAdjacentFactorySample (-1); repaint(); };
+    sampleNext.onClick = [this] { proc.loadAdjacentFactorySample (+1); repaint(); };
+    samplePrev.setTooltip ("Previous factory sample");
+    sampleNext.setTooltip ("Next factory sample. Or drop your own WAV here.");
     chordButton.onClick  = [this] { showChordPicker(); };
     initButton.setTooltip ("Start from scratch: one sine harmonic, everything else off");
     chordButton.setTooltip ("Play a chord or interval from every note (OSC 1)");
@@ -3270,12 +3275,31 @@ void GranulumEditor::paint (Graphics& g)
         }
         else
         {
-            const auto name = File::createFileWithoutCheckingPath (proc.getSampleName()).getFileNameWithoutExtension();
-            g.setColour (Palette::ice);
-            g.drawText (name, z.reduced (12.0f, 0.0f).withTrimmedBottom (z.getHeight() * 0.3f), Justification::centredLeft, true);
-            g.setColour (Palette::accentSoft);
-            g.setFont (uiFont (11.0f * sc, false, 0.05f));
-            g.drawText (String (proc.getSampleLengthSeconds(), 2) + " s", z.reduced (12.0f, 0.0f).withTrimmedTop (z.getHeight() * 0.45f), Justification::centredLeft, false);
+            // mini waveform across the box, name centred on top, FACTORY / YOUR SAMPLE tag
+            const bool on2 = proc.apvts.getRawParameterValue (ParamID::osc2On)->load() > 0.5f;
+            if (auto pk = proc.getSamplePeaks(); pk != nullptr && ! pk->maxs.empty())
+            {
+                auto w = z.reduced (8.0f, 5.0f);
+                const int cols = jmax (2, (int) w.getWidth() / 2);
+                const int bins = (int) pk->maxs.size();
+                g.setColour (Palette::accent.withAlpha (on2 ? 0.30f : 0.12f));
+                for (int x = 0; x < cols; ++x)
+                {
+                    const int b0 = x * bins / cols, b1 = jmax (b0 + 1, (x + 1) * bins / cols);
+                    float m = 0.0f;
+                    for (int b = b0; b < b1 && b < bins; ++b) m = jmax (m, pk->maxs[(size_t) b], -pk->mins[(size_t) b]);
+                    const float hh = jmax (1.0f, m * w.getHeight() * 0.5f);
+                    g.fillRect (w.getX() + (float) x * 2.0f, w.getCentreY() - hh, 1.0f, hh * 2.0f);
+                }
+            }
+            const auto name = File::createFileWithoutCheckingPath (proc.getSampleName()).getFileNameWithoutExtension().toUpperCase();
+            g.setColour (on2 ? Palette::onScreen : Palette::textDim);
+            g.setFont (uiFont (12.5f * sc, true, 0.12f));
+            g.drawText (name, z.reduced (10.0f, 0.0f).withTrimmedBottom (z.getHeight() * 0.32f), Justification::centred, true);
+            g.setColour (Palette::accentSoft.withAlpha (on2 ? 1.0f : 0.5f));
+            g.setFont (uiFont (9.5f * sc, false, 0.14f));
+            g.drawText ((proc.isFactorySample() ? String ("FACTORY") : String ("USER")) + String::fromUTF8 (" \xc2\xb7 ") + String (proc.getSampleLengthSeconds(), 1) + " s",
+                        z.reduced (10.0f, 0.0f).withTrimmedTop (z.getHeight() * 0.55f), Justification::centred, false);
         }
     }
 
@@ -3439,7 +3463,12 @@ void GranulumEditor::resized()
         for (int i = (int) osc2Knobs.size() - 1; i >= 0; --i)
             osc2Knobs[(size_t) i]->setBounds (a2.removeFromRight (S (46)));
         a2.removeFromRight (S (6));
-        dropZone = a2.reduced (0, S (2));
+        {
+            auto z = a2.withSizeKeepingCentre (a2.getWidth(), S (40));
+            samplePrev.setBounds (z.removeFromLeft (S (22)).withSizeKeepingCentre (S (22), S (26)));
+            sampleNext.setBounds (z.removeFromRight (S (22)).withSizeKeepingCentre (S (22), S (26)));
+            dropZone = z.reduced (S (3), 0);
+        }
 
         // OSC 3: one row  [lamp] [noise picker] [vol color] [GRAIN]
         auto a3 = osc3Area.reduced (S (8), S (4));

@@ -160,6 +160,22 @@ int main (int argc, char** argv)
     run (p, ed, 90);
     save (*base, outDir, "ui-playing.png");
 
+    // design preview: "Snapshot <dir> sampler <wav>" -> OSC 2 with factory samples, then a dropped user sample
+    if (argc > 3 && String (argv[2]) == "sampler")
+    {
+        auto dir = GranulumProcessor::factorySampleDir();
+        dir.createDirectory();
+        const File src (argv[3]);
+        for (auto n : { "Atmo 3 F", "Dust Cathedral", "Frozen Lake" }) src.copyFileTo (dir.getChildFile (String (n) + ".wav"));
+        setP (ParamID::osc3On, 0.0f);
+        p.loadAdjacentFactorySample (+1);
+        run (p, ed, 60);
+        save (*base, outDir, "sampler-factory.png");
+        String e2; p.loadSample (makeTestSample(), e2);
+        run (p, ed, 30);
+        save (*base, outDir, "sampler-user.png");
+    }
+
     // design preview: "Snapshot <dir> scope" -> filter view with a low, resonant cutoff
     if (argc > 2 && String (argv[2]) == "scope")
     {

@@ -1213,6 +1213,29 @@ String GranulumProcessor::getSampleName() const
     return samplePath == File() ? String() : samplePath.getFileName();
 }
 
+File GranulumProcessor::factorySampleDir()
+{
+    return File::getSpecialLocation (File::userDocumentsDirectory).getChildFile ("GRAIN FORM").getChildFile ("Samples");
+}
+
+bool GranulumProcessor::isFactorySample() const
+{
+    const ScopedLock sl (infoLock);
+    return samplePath != File() && samplePath.isAChildOf (factorySampleDir());
+}
+
+void GranulumProcessor::loadAdjacentFactorySample (int direction)
+{
+    auto files = factorySampleDir().findChildFiles (File::findFiles, true, "*.wav;*.flac;*.aif;*.aiff");
+    if (files.isEmpty()) return;
+    files.sort();
+    File current; { const ScopedLock sl (infoLock); current = samplePath; }
+    int idx = files.indexOf (current);
+    idx = idx < 0 ? (direction > 0 ? 0 : files.size() - 1) : (idx + direction + files.size()) % files.size();
+    String err;
+    loadSample (files[idx], err);
+}
+
 std::shared_ptr<const WaveformPeaks> GranulumProcessor::getPeaks() const
 {
     const ScopedLock sl (infoLock);
