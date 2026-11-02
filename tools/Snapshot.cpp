@@ -167,7 +167,7 @@ int main (int argc, char** argv)
         dir.createDirectory();
         const File src (argv[3]);
         dir.deleteRecursively(); dir.createDirectory();
-        for (auto n : { "Atmo 3 F", "Dust Cathedral", "Frozen Lake", "Night Harbour" }) { dir.getChildFile ("Atmos").createDirectory(); src.copyFileTo (dir.getChildFile ("Atmos").getChildFile (String (n) + ".wav")); }
+        for (auto n : { "Atmo 3 F", "Dust Cathedral", "Frozen Lake", "Night Harbour", "Dust Cathedral Night Choir" }) { dir.getChildFile ("Atmos").createDirectory(); src.copyFileTo (dir.getChildFile ("Atmos").getChildFile (String (n) + ".wav")); }
         for (auto n : { "Glass Rain", "Paper Wind", "Static Choir" }) { dir.getChildFile ("Textures").createDirectory(); src.copyFileTo (dir.getChildFile ("Textures").getChildFile (String (n) + ".wav")); }
         setP (ParamID::osc3On, 0.0f);
         p.loadAdjacentFactorySample (+1);
@@ -183,6 +183,15 @@ int main (int argc, char** argv)
         ed->openSampleMenuForPreview();
         run (p, ed, 2);
         save (*base, outDir, "sounds-menu.png");
+        ed->openSampleMenuForPreview (false);
+        ed->previewDropState (0);
+        String e3; p.loadSample (dir.getChildFile ("Atmos").getChildFile ("Dust Cathedral Night Choir.wav"), e3);
+        run (p, ed, 4);
+        save (*base, outDir, "long-name.png");
+        ed->previewDropState (1);
+        Thread::sleep (2200); run (p, ed, 2);
+        save (*base, outDir, "long-name-hover.png");
+        ed->previewDropState (0);
     }
 
     // design preview: "Snapshot <dir> scope" -> filter view with a low, resonant cutoff

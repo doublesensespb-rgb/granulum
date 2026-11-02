@@ -3140,7 +3140,8 @@ void SampleMenu::rebuild()
     auto addFiles = [this] (const File& dir, bool recursive)
     {
         auto files = dir.findChildFiles (File::findFiles, recursive, "*.wav;*.flac;*.aif;*.aiff");
-        files.sort();
+        std::sort (files.begin(), files.end(), [] (const File& a, const File& b)
+                   { return a.getFileNameWithoutExtension().compareNatural (b.getFileNameWithoutExtension()) < 0; });
         for (auto& f : files) rows.push_back ({ f.getFileNameWithoutExtension().toUpperCase(), f, 1 });
     };
     if (root.isDirectory())
@@ -3240,8 +3241,8 @@ void GranulumEditor::toggleSampleMenu (bool show)
         sampleMenu.rebuild();
         const float sc = (float) getWidth() / 1080.0f;
         const int w = (int) (230 * sc), h = sampleMenu.preferredHeight();
-        auto b = loadButton.getBounds();
-        int x = jmin (b.getRight() - w, getWidth() - w - 6), y = b.getBottom() + (int) (4 * sc);
+        auto b = dropZone;
+        int x = jlimit (6, getWidth() - w - 6, b.getCentreX() - w / 2), y = b.getBottom() + (int) (4 * sc);
         if (y + h > getHeight() - 6) y = b.getY() - h - (int) (4 * sc);
         sampleMenu.setBounds (x, y, w, h);
         sampleMenu.setVisible (true);
@@ -3249,6 +3250,7 @@ void GranulumEditor::toggleSampleMenu (bool show)
     }
     else sampleMenu.setVisible (false);
     loadButton.setToggleState (show, dontSendNotification);
+    repaint (dropZone.expanded (4));
 }
 
 void GranulumEditor::launchChooser()
@@ -3446,15 +3448,38 @@ void GranulumEditor::paint (Graphics& g)
                     g.fillRect (w.getX() + (float) x * 2.0f, w.getCentreY() - hh, 1.0f, hh * 2.0f);
                 }
             }
-            drawDropIcon ({ z.getRight() - 11.0f, z.getY() + 10.0f }, 8.0f,
-                          dropHover ? Palette::accent : Palette::textDim.withAlpha (0.75f));
+            // (no corner icon here: the box is small; the dashed frame says "drop", hover says CLICK OR DROP)
             const auto name = File::createFileWithoutCheckingPath (proc.getSampleName()).getFileNameWithoutExtension().toUpperCase();
+            const String arrow = String::fromUTF8 (" \xe2\x96\xbe");
+            auto nameArea = z.reduced (9.0f, 0.0f).withTrimmedBottom (z.getHeight() * 0.32f);
+            // long names: shrink a little, then marquee on hover, else "..." at the end
+            float fs = 12.5f * sc;
+            auto widthOf = [&] (float size) { return (float) GlyphArrangement::getStringWidthInt (uiFont (size, true, 0.12f), name + arrow); };
+            while (fs > 10.0f * sc && widthOf (fs) > nameArea.getWidth()) fs -= 0.5f;
+            g.setFont (uiFont (fs, true, 0.12f));
             g.setColour (on2 ? Palette::onScreen : Palette::textDim);
-            g.setFont (uiFont (12.5f * sc, true, 0.12f));
-            g.drawText (name, z.reduced (18.0f, 0.0f).withTrimmedBottom (z.getHeight() * 0.32f), Justification::centred, true);
+            const float tw = widthOf (fs);
+            if (tw <= nameArea.getWidth())
+                g.drawText (name + arrow, nameArea, Justification::centred, false);
+            else if (dropHover || sampleMenu.isVisible())
+            {
+                g.saveState();
+                g.reduceClipRegion (nameArea.toNearestInt());
+                const float travel = tw - nameArea.getWidth() + 20.0f;
+                // pause, scroll to the end, pause, scroll back
+                const float t = (float) std::fmod (Time::getMillisecondCounterHiRes() * 0.001 * 28.0, (double) travel * 2.0 + 60.0);
+                const float off = t < 30.0f ? 0.0f : t < 30.0f + travel ? t - 30.0f : t < 60.0f + travel ? travel : travel - (t - 60.0f - travel);
+                g.drawText (name + arrow, nameArea.withWidth (tw + 4.0f).translated (-off, 0.0f), Justification::centredLeft, false);
+                g.restoreState();
+            }
+            else
+            {
+                g.drawText (name, nameArea.withTrimmedRight (14.0f), Justification::centred, true);
+                g.drawText (arrow.trim(), nameArea, Justification::centredRight, false);
+            }
             g.setColour (dropHover ? Palette::onScreen : Palette::accentSoft.withAlpha (on2 ? 1.0f : 0.5f));
             g.setFont (uiFont (9.5f * sc, false, 0.14f));
-            const String sub = dropHover ? String ("DROP OR CLICK")
+            const String sub = dropHover ? String ("CLICK OR DROP")
                              : (proc.isFactorySample() ? String ("FACTORY") : String ("USER")) + String::fromUTF8 (" \xc2\xb7 ") + String (proc.getSampleLengthSeconds(), 1) + " s";
             g.drawText (sub, z.reduced (8.0f, 0.0f).withTrimmedTop (z.getHeight() * 0.55f), Justification::centred, false);
         }
@@ -3614,8 +3639,8 @@ void GranulumEditor::resized()
         auto a2 = osc2Area.reduced (S (8), S (4));
         osc2Lamp.setBounds (a2.removeFromLeft (S (118)));
         auto btn2 = a2.removeFromRight (S (62));
-        loadButton.setBounds (btn2.removeFromBottom (btn2.getHeight() / 2).reduced (0, S (1)));
-        osc2Grain.setBounds (btn2.reduced (0, S (1)));
+        loadButton.setVisible (false);                                   // the sample box itself opens the sounds menu
+        osc2Grain.setBounds (btn2.withSizeKeepingCentre (S (62), S (26)));
         a2.removeFromRight (S (4));
         for (int i = (int) osc2Knobs.size() - 1; i >= 0; --i)
             osc2Knobs[(size_t) i]->setBounds (a2.removeFromRight (S (46)));
@@ -3819,7 +3844,7 @@ void GranulumEditor::mouseExit (const MouseEvent&)
 void GranulumEditor::mouseDown (const MouseEvent& e)
 {
     if (sampleMenu.isVisible()) { toggleSampleMenu (false); return; }
-    if (dropZone.contains (e.getPosition())) launchChooser();   // click the sample box = choose a file
+    if (dropZone.contains (e.getPosition())) toggleSampleMenu (true);   // click the sample box = sounds menu
 }
 
 void GranulumEditor::fileDragEnter (const StringArray&, int, int) { field.dragHover = fileHover = true;  repaint(); }
