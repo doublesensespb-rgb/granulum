@@ -507,6 +507,11 @@ public:
     void fileDragEnter (const juce::StringArray&, int, int) override;
     void fileDragExit (const juce::StringArray&) override;
     void filesDropped (const juce::StringArray& files, int, int) override;
+    void mouseMove (const juce::MouseEvent&) override;
+    void mouseExit (const juce::MouseEvent&) override;
+    void mouseDown (const juce::MouseEvent&) override;
+    // snapshot tool: 0 normal, 1 mouse over the sample box, 2 a file is being dragged over the plugin
+    void previewDropState (int s) { dropHover = s == 1; fileHover = s == 2; repaint(); }
 
     GrainField& grainField() { return field; }
     HarmonicEditor& harmonicEditor() { return harmonics; }
@@ -587,7 +592,7 @@ private:
     float activity = 0.0f;
     uint32_t shownModVersion = 0;
     juce::String statusText;
-    bool fileHover = false;
+    bool fileHover = false, dropHover = false;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (GranulumEditor)
 };

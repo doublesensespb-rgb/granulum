@@ -174,6 +174,10 @@ int main (int argc, char** argv)
         String e2; p.loadSample (makeTestSample(), e2);
         run (p, ed, 30);
         save (*base, outDir, "sampler-user.png");
+        p.loadAdjacentFactorySample (+1);
+        run (p, ed, 10);
+        for (int st = 0; st < 3; ++st) { ed->previewDropState (st); run (p, ed, 2); save (*base, outDir, ("drop-" + String (st) + ".png").toRawUTF8()); }
+        ed->previewDropState (0);
     }
 
     // design preview: "Snapshot <dir> scope" -> filter view with a low, resonant cutoff

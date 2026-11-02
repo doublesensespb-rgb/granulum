@@ -3247,42 +3247,68 @@ void GranulumEditor::paint (Graphics& g)
         g.fillRoundedRectangle (a.toFloat(), 10.0f);
     }
 
-    // OSC 2 drop zone
+    // OSC 2 drop zone: always shows that a file can be dropped here
     {
         auto z = dropZone.toFloat();
         const bool has = proc.hasSample();
-        g.setColour (Palette::screen.withAlpha (fileHover ? 1.0f : 0.8f));
+        const bool on2 = proc.apvts.getRawParameterValue (ParamID::osc2On)->load() > 0.5f;
+        g.setColour (fileHover ? Palette::screen.interpolatedWith (Palette::accent, 0.16f) : Palette::screen.withAlpha (0.85f));
         g.fillRoundedRectangle (z, 9.0f);
-        if (! has || fileHover)
+
+        // dashed frame: quiet normally, brighter on hover, copper while a file is dragged over the plugin
         {
-            Path border; border.addRoundedRectangle (z.reduced (1.5f), 8.0f);
+            Path border; border.addRoundedRectangle (z.reduced (1.0f), 8.5f);
             Path dashed;
-            const float dl[] = { 5.0f, 4.0f };
-            PathStrokeType (1.2f).createDashedStroke (dashed, border, dl, 2);
-            g.setColour ((fileHover ? Palette::accent : Palette::accentSoft).withAlpha (fileHover ? 0.9f : 0.45f));
+            const float dl[] = { 4.0f, 3.5f };
+            PathStrokeType (fileHover ? 1.6f : 1.1f).createDashedStroke (dashed, border, dl, 2);
+            g.setColour (fileHover ? Palette::accent : dropHover ? Palette::accentSoft.withAlpha (0.85f) : Palette::textDim.withAlpha (0.38f));
             g.fillPath (dashed);
         }
-        g.setFont (uiFont (13.0f * sc, false, 0.05f));
-        if (statusText.isNotEmpty())
+
+        // "drop" icon: an arrow into a tray, top-right corner
+        auto drawDropIcon = [&] (Point<float> c, float s, Colour col)
         {
+            g.setColour (col);
+            const float w = s, h = s;
+            g.drawLine (c.x, c.y - h * 0.5f, c.x, c.y + h * 0.12f, 1.3f);
+            Path head; head.addTriangle (c.x - w * 0.28f, c.y - h * 0.02f, c.x + w * 0.28f, c.y - h * 0.02f, c.x, c.y + h * 0.26f);
+            g.fillPath (head);
+            Path tray;
+            tray.startNewSubPath (c.x - w * 0.5f, c.y + h * 0.12f);
+            tray.lineTo (c.x - w * 0.5f, c.y + h * 0.48f);
+            tray.lineTo (c.x + w * 0.5f, c.y + h * 0.48f);
+            tray.lineTo (c.x + w * 0.5f, c.y + h * 0.12f);
+            g.strokePath (tray, PathStrokeType (1.3f));
+        };
+
+        if (fileHover)
+        {
+            drawDropIcon ({ z.getCentreX(), z.getCentreY() - 6.0f }, 13.0f, Palette::accent);
+            g.setColour (Palette::onScreen);
+            g.setFont (uiFont (11.0f * sc, true, 0.16f));
+            g.drawText ("DROP HERE", z.withTrimmedTop (z.getHeight() * 0.55f), Justification::centred, false);
+        }
+        else if (statusText.isNotEmpty())
+        {
+            g.setFont (uiFont (12.0f * sc, false, 0.05f));
             g.setColour (Palette::hit);
             g.drawText (statusText, z.reduced (10.0f, 0.0f), Justification::centred, true);
         }
         else if (! has)
         {
-            g.setColour (fileHover ? Colours::white : Palette::accentSoft);
-            g.drawText ("Drop a WAV file here", z, Justification::centred, false);
+            drawDropIcon ({ z.getCentreX(), z.getCentreY() - 6.0f }, 12.0f, dropHover ? Palette::accent : Palette::accentSoft);
+            g.setColour (dropHover ? Palette::onScreen : Palette::accentSoft);
+            g.setFont (uiFont (10.5f * sc, false, 0.14f));
+            g.drawText ("DROP WAV OR CLICK", z.withTrimmedTop (z.getHeight() * 0.55f), Justification::centred, false);
         }
         else
         {
-            // mini waveform across the box, name centred on top, FACTORY / YOUR SAMPLE tag
-            const bool on2 = proc.apvts.getRawParameterValue (ParamID::osc2On)->load() > 0.5f;
             if (auto pk = proc.getSamplePeaks(); pk != nullptr && ! pk->maxs.empty())
             {
                 auto w = z.reduced (8.0f, 5.0f);
                 const int cols = jmax (2, (int) w.getWidth() / 2);
                 const int bins = (int) pk->maxs.size();
-                g.setColour (Palette::accent.withAlpha (on2 ? 0.30f : 0.12f));
+                g.setColour (Palette::accent.withAlpha (on2 ? 0.26f : 0.10f));
                 for (int x = 0; x < cols; ++x)
                 {
                     const int b0 = x * bins / cols, b1 = jmax (b0 + 1, (x + 1) * bins / cols);
@@ -3292,14 +3318,17 @@ void GranulumEditor::paint (Graphics& g)
                     g.fillRect (w.getX() + (float) x * 2.0f, w.getCentreY() - hh, 1.0f, hh * 2.0f);
                 }
             }
+            drawDropIcon ({ z.getRight() - 11.0f, z.getY() + 10.0f }, 8.0f,
+                          dropHover ? Palette::accent : Palette::textDim.withAlpha (0.75f));
             const auto name = File::createFileWithoutCheckingPath (proc.getSampleName()).getFileNameWithoutExtension().toUpperCase();
             g.setColour (on2 ? Palette::onScreen : Palette::textDim);
             g.setFont (uiFont (12.5f * sc, true, 0.12f));
-            g.drawText (name, z.reduced (10.0f, 0.0f).withTrimmedBottom (z.getHeight() * 0.32f), Justification::centred, true);
-            g.setColour (Palette::accentSoft.withAlpha (on2 ? 1.0f : 0.5f));
+            g.drawText (name, z.reduced (18.0f, 0.0f).withTrimmedBottom (z.getHeight() * 0.32f), Justification::centred, true);
+            g.setColour (dropHover ? Palette::onScreen : Palette::accentSoft.withAlpha (on2 ? 1.0f : 0.5f));
             g.setFont (uiFont (9.5f * sc, false, 0.14f));
-            g.drawText ((proc.isFactorySample() ? String ("FACTORY") : String ("USER")) + String::fromUTF8 (" \xc2\xb7 ") + String (proc.getSampleLengthSeconds(), 1) + " s",
-                        z.reduced (10.0f, 0.0f).withTrimmedTop (z.getHeight() * 0.55f), Justification::centred, false);
+            const String sub = dropHover ? String ("DROP OR CLICK")
+                             : (proc.isFactorySample() ? String ("FACTORY") : String ("USER")) + String::fromUTF8 (" \xc2\xb7 ") + String (proc.getSampleLengthSeconds(), 1) + " s";
+            g.drawText (sub, z.reduced (8.0f, 0.0f).withTrimmedTop (z.getHeight() * 0.55f), Justification::centred, false);
         }
     }
 
@@ -3646,6 +3675,22 @@ bool GranulumEditor::isInterestedInFileDrag (const StringArray& files)
     for (auto& f : files)
         if (GranulumProcessor::isSupportedAudioFile (f)) return true;
     return false;
+}
+
+void GranulumEditor::mouseMove (const MouseEvent& e)
+{
+    const bool over = dropZone.contains (e.getPosition());
+    if (over != dropHover) { dropHover = over; setMouseCursor (over ? MouseCursor::PointingHandCursor : MouseCursor::NormalCursor); repaint (dropZone.expanded (2)); }
+}
+
+void GranulumEditor::mouseExit (const MouseEvent&)
+{
+    if (dropHover) { dropHover = false; setMouseCursor (MouseCursor::NormalCursor); repaint (dropZone.expanded (2)); }
+}
+
+void GranulumEditor::mouseDown (const MouseEvent& e)
+{
+    if (dropZone.contains (e.getPosition())) launchChooser();   // click the sample box = choose a file
 }
 
 void GranulumEditor::fileDragEnter (const StringArray&, int, int) { field.dragHover = fileHover = true;  repaint(); }
