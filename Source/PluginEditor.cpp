@@ -3662,7 +3662,7 @@ void GranulumEditor::paint (Graphics& g)
             drawDropIcon ({ z.getCentreX(), z.getCentreY() - 6.0f }, 12.0f, dropHover ? Palette::accent : Palette::accentSoft);
             g.setColour (dropHover ? Palette::onScreen : Palette::accentSoft);
             g.setFont (uiFont (10.5f * sc, false, 0.14f));
-            g.drawText ("DROP OR CLICK", z.withTrimmedTop (z.getHeight() * 0.55f), Justification::centred, false);
+            g.drawText ("DROP WAV HERE", z.withTrimmedTop (z.getHeight() * 0.55f), Justification::centred, false);
         }
         else
         {
