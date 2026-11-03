@@ -2012,6 +2012,7 @@ LfoEditor::LfoEditor (GranulumProcessor& p) : proc (p)
 
 void LfoEditor::setLfo (int l)
 {
+    if (l < 0 || l >= kNumLfos) return;   // the ADSR tab (index 3) is not an LFO: INIT / preset load with ADSR open crashed here
     lfo = l;
     pts = proc.getLfoPoints (l);
     dragIndex = hoverIndex = -1;
@@ -3324,7 +3325,7 @@ GranulumEditor::GranulumEditor (GranulumProcessor& p)
                            { ParamID::ampS, "S" }, { ParamID::ampR, "R" } })
     {
         ampKnobs.push_back (std::make_unique<Knob> (proc, id, nm, Knob::Size::Small));
-        ampKnobs.back()->setCompact (true);     // value pops up while turning
+        ampKnobs.back()->setCompact (true, this);     // value pops up while turning (inside the plugin window)
         addChildComponent (*ampKnobs.back());
     }
     lfoEditor.setTooltip ("Drag the points. Drag the small rings to bend a segment, double-click a ring to straighten it.");

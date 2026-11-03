@@ -705,6 +705,7 @@ void GranulumProcessor::resetToInit()
 
 LfoShape GranulumProcessor::getLfoPoints (int l) const
 {
+    if (l < 0 || l >= kNumLfos) return lfoPreset (1);
     const ScopedLock sl (lfoLock);
     return lfoPoints[(size_t) l];
 }

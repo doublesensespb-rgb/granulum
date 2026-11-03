@@ -179,7 +179,8 @@ public:
 
     void refreshMods();
     void tick();
-    void setCompact (bool c) { compact = c; slider.setPopupDisplayEnabled (c, true, nullptr); resized(); }   // no value box: value pops up while dragging
+    // no value box: the value pops up while dragging, inside the plugin window (a desktop popup lags / misbehaves in some hosts)
+    void setCompact (bool c, juce::Component* popupParent = nullptr) { compact = c; slider.setPopupDisplayEnabled (c, false, popupParent); resized(); }
 
     FineSlider slider;
     const int target;       // modulation target index, -1 if not modulatable
@@ -535,10 +536,12 @@ private:
     {
         // repaint only while it is on screen and the envelope moves
         if (! isShowing()) return;
+        // ... or the A/D/S/R knobs move (the curve must follow the knobs at once)
         const float e = proc.engineAdd.vizEnv.load (std::memory_order_relaxed);
-        if (e != lastEnvShown || isMouseButtonDown() || ++idleTicks > 15) { lastEnvShown = e; idleTicks = 0; repaint(); }
+        const float sig = value (ParamID::ampA) + 3.1f * value (ParamID::ampD) + 7.7f * value (ParamID::ampS) + 13.3f * value (ParamID::ampR);
+        if (e != lastEnvShown || sig != lastSig || isMouseButtonDown() || ++idleTicks > 15) { lastEnvShown = e; lastSig = sig; idleTicks = 0; repaint(); }
     }
-    float lastEnvShown = -1.0f; int idleTicks = 0;
+    float lastEnvShown = -1.0f, lastSig = -1.0f; int idleTicks = 0;
     struct Geo { juce::Point<float> p0, p1, p2, p3, p4; juce::Rectangle<float> a; float maxW = 0, plateau = 0; };
     Geo geometry() const;
     float value (const char* id) const;
