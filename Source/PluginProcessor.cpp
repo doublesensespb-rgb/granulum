@@ -630,9 +630,6 @@ GranulumProcessor::GranulumProcessor()
 
     // factory sounds ship inside the plugin and are written to Documents/GRAIN FORM/Samples/Atmos once
     installFactorySamples();
-    // OSC 2 is never empty: the first factory sound is ready (a saved project replaces it)
-    loadAdjacentFactorySample (+1);
-    if (auto* on = apvts.getParameter (ParamID::osc2On)) on->setValueNotifyingHost (0.0f);   // INIT keeps OSC 2 off
 
     timerCallback();
     startTimerHz (30);
