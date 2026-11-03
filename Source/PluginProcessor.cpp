@@ -413,7 +413,7 @@ const StringArray& GranulumProcessor::lfoPresetNames()
     return s;
 }
 
-std::array<LfoPoint, kLfoPoints> GranulumProcessor::lfoPreset (int i)
+LfoShape GranulumProcessor::lfoPreset (int i)
 {
     switch (i)
     {
@@ -701,20 +701,23 @@ void GranulumProcessor::resetToInit()
 }
 
 // ===========================================================================
-// LFO shapes (4 points)
+// LFO shapes (2..16 points)
 
-std::array<LfoPoint, kLfoPoints> GranulumProcessor::getLfoPoints (int l) const
+LfoShape GranulumProcessor::getLfoPoints (int l) const
 {
     const ScopedLock sl (lfoLock);
     return lfoPoints[(size_t) l];
 }
 
-void GranulumProcessor::setLfoPoints (int l, std::array<LfoPoint, kLfoPoints> pts)
+void GranulumProcessor::setLfoPoints (int l, LfoShape pts)
 {
+    if (pts.size() < 2) pts = lfoPreset (1);
+    if (pts.size() > (size_t) kMaxLfoPoints) pts.resize ((size_t) kMaxLfoPoints);
+    const int n = (int) pts.size();
     pts[0].x = 0.0f;
-    pts[kLfoPoints - 1].x = 1.0f;
-    for (int i = 1; i < kLfoPoints - 1; ++i) pts[(size_t) i].x = jlimit (pts[(size_t) i - 1].x, 1.0f, pts[(size_t) i].x);
-    for (int i = kLfoPoints - 2; i > 0; --i) pts[(size_t) i].x = jmin (pts[(size_t) i].x, pts[(size_t) i + 1].x);
+    pts[(size_t) n - 1].x = 1.0f;
+    for (int i = 1; i < n - 1; ++i) pts[(size_t) i].x = jlimit (pts[(size_t) i - 1].x, 1.0f, pts[(size_t) i].x);
+    for (int i = n - 2; i > 0; --i) pts[(size_t) i].x = jmin (pts[(size_t) i].x, pts[(size_t) i + 1].x);
     for (auto& p : pts) { p.y = jlimit (0.0f, 1.0f, p.y); p.curve = jlimit (-1.0f, 1.0f, p.curve); }
     {
         const ScopedLock sl (lfoLock);
@@ -1679,9 +1682,9 @@ void GranulumProcessor::setStateInformation (const void* data, int sizeInBytes)
     for (int l = 0; l < kNumLfos; ++l)
     {
         const auto items = StringArray::fromTokens (shapes[(size_t) l], ";", "");
-        if (items.size() != kLfoPoints) continue;
-        std::array<LfoPoint, kLfoPoints> pts {};
-        for (int i = 0; i < kLfoPoints; ++i)
+        if (items.size() < 2 || items.size() > kMaxLfoPoints) continue;
+        LfoShape pts ((size_t) items.size());
+        for (int i = 0; i < items.size(); ++i)
         {
             const auto vals = StringArray::fromTokens (items[i], ",", "");
             if (vals.size() == 3) pts[(size_t) i] = { vals[0].getFloatValue(), vals[1].getFloatValue(), vals[2].getFloatValue() };

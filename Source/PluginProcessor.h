@@ -93,7 +93,8 @@ namespace ParamID
 static constexpr int kNumLfos = 3;
 static constexpr int kMaxMods = 48;
 static constexpr int kLfoTable = 512;
-static constexpr int kLfoPoints = 4;
+static constexpr int kLfoPoints = 4;        // points in the built-in shapes
+static constexpr int kMaxLfoPoints = 16;    // the owner can add points up to this many
 static constexpr int kNumOscs = 3;
 static constexpr int kNumRouteBlocks = 5;
 static constexpr const char* kRouteBlocks[kNumRouteBlocks] = { "filter", "dist", "delay", "rev", "filter2" };
@@ -116,6 +117,7 @@ struct WaveformPeaks
 };
 
 struct LfoPoint { float x = 0, y = 0, curve = 0; };
+using LfoShape = std::vector<LfoPoint>;   // 2..16 points, x from 0 to 1
 
 // Lock-free hand-over of a source buffer from the message thread to the audio thread
 struct SourceSlot
@@ -304,10 +306,10 @@ public:
     bool isLfoOn (int lfo) const { return pLfoOn[(size_t) lfo]->load() > 0.5f; }
 
     // ---- 4-point LFO shapes ----
-    std::array<LfoPoint, kLfoPoints> getLfoPoints (int lfo) const;
-    void setLfoPoints (int lfo, std::array<LfoPoint, kLfoPoints> pts);
+    LfoShape getLfoPoints (int lfo) const;
+    void setLfoPoints (int lfo, LfoShape pts);
     float lfoShapeAt (int lfo, float phase) const;
-    static std::array<LfoPoint, kLfoPoints> lfoPreset (int index);
+    static LfoShape lfoPreset (int index);
     static const juce::StringArray& lfoPresetNames();
     static float segmentShape (float t, float curve);
     static double divisionBeats (int index);
@@ -372,7 +374,7 @@ private:
     std::array<juce::RangedAudioParameter*, kNumModTargets> modParams {};
     std::array<float, kNumModTargets> lastV {};
 
-    std::array<std::array<LfoPoint, kLfoPoints>, kNumLfos> lfoPoints {};
+    std::array<LfoShape, kNumLfos> lfoPoints {};
     std::array<std::array<std::array<float, kLfoTable + 1>, 2>, kNumLfos> lfoTables {};
     std::array<std::atomic<int>, kNumLfos> lfoTableIndex {};
     mutable juce::CriticalSection lfoLock;

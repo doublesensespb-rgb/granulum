@@ -658,7 +658,7 @@ private:
 
     static inline void readHermite (const float* L, const float* R, int N, double pos, float& outL, float& outR)
     {
-        pos = wrap (pos, (double) N);
+        if (pos < 0.0 || pos >= (double) N) pos = wrap (pos, (double) N);   // fast path: almost always inside already
         const int   i1 = std::min (N - 1, (int) pos);
         const float f  = (float) (pos - (double) i1);
         const int i0 = i1 == 0 ? N - 1 : i1 - 1;

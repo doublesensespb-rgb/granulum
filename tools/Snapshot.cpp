@@ -214,6 +214,16 @@ int main (int argc, char** argv)
         ed->previewDropState (0);
     }
 
+    // design preview: "Snapshot <dir> lfo8" -> an LFO with 8 hand-made points
+    if (argc > 2 && String (argv[2]) == "lfo8")
+    {
+        p.setLfoPoints (0, { { 0, 0.1f, 0 }, { 0.12f, 0.9f, 0.4f }, { 0.25f, 0.3f, 0 }, { 0.38f, 1.0f, -0.5f }, { 0.5f, 0.0f, 0 },
+                             { 0.66f, 0.7f, 0.3f }, { 0.8f, 0.2f, 0 }, { 1, 0.6f, 0 } });
+        ed->repaint();
+        run (p, ed, 20);
+        save (*base, outDir, "lfo8.png");
+    }
+
     // design preview: "Snapshot <dir> loop" -> LOOP region on the grain field
     if (argc > 2 && String (argv[2]) == "loop")
     {

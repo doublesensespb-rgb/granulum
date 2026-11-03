@@ -624,7 +624,10 @@ void GrainField::timerCallback()
     const float dt = (float) jlimit (0.005, 0.06, (now - lastTick) * 0.001);
     lastTick = now;
     simulate (dt);
-    repaint();
+    if (! isShowing()) return;
+    // nothing flying and nothing playing: a calm 10 frames per second is enough
+    const bool busy = ! shards.empty() || ! heads.empty() || dragHover || isMouseButtonDown();
+    if (busy || ++idleTicks >= 5) { idleTicks = 0; repaint(); }
 }
 
 void GrainField::simulate (float dt)
@@ -951,7 +954,7 @@ void GrainField::paint (Graphics& g)
         const auto p = P (sh.x, sh.y);
 
         // trail
-        if (sh.trailN > 2)
+        if (sh.trailN > 2 && ! fastPaint)
         {
             for (int i = 1; i < sh.trailN; ++i)
             {
@@ -961,6 +964,31 @@ void GrainField::paint (Graphics& g)
                 g.setColour (col.withAlpha (fade * k * (0.22f + 0.25f * smear)));
                 g.drawLine ({ a, b }, (1.0f + 3.0f * smear) * k * sh.size);
             }
+        }
+        else if (sh.trailN > 2)
+        {
+            // the same tapering, fading trail as one filled ribbon with a gradient (one fill instead of 6 strokes)
+            std::array<Point<float>, 7> pts;
+            const int n = jmin (sh.trailN, (int) pts.size());
+            for (int i = 0; i < n; ++i) pts[(size_t) i] = P (sh.trail[(size_t) i].x, sh.trail[(size_t) i].y);
+            Path ribbon;
+            std::array<Point<float>, 7> right;
+            for (int i = 0; i < n; ++i)
+            {
+                const auto dir = pts[(size_t) jmin (i + 1, n - 1)] - pts[(size_t) jmax (i - 1, 0)];
+                const float len = jmax (0.001f, dir.getDistanceFromOrigin());
+                const Point<float> nn (-dir.y / len, dir.x / len);
+                const float k = 1.0f - (float) (i + 1) / (float) sh.trailN;
+                const float hw = 0.5f * jmax (0.0f, (1.0f + 3.0f * smear) * k * sh.size);
+                const auto l = pts[(size_t) i] + nn * hw;
+                right[(size_t) i] = pts[(size_t) i] - nn * hw;
+                if (i == 0) ribbon.startNewSubPath (l); else ribbon.lineTo (l);
+            }
+            for (int i = n - 1; i >= 0; --i) ribbon.lineTo (right[(size_t) i]);
+            ribbon.closeSubPath();
+            const float a0 = fade * (0.22f + 0.25f * smear);
+            g.setGradientFill (ColourGradient (col.withAlpha (a0), pts[0], col.withAlpha (0.0f), pts[(size_t) n - 1], false));
+            g.fillPath (ribbon);
         }
 
         // the splinter: a long kite with one bright facet
@@ -980,6 +1008,25 @@ void GrainField::paint (Graphics& g)
 
         // glow
         g.setColour (col.withAlpha (fade * (0.10f + 0.12f * bloom + 0.15f * smear)));
+        if (fastPaint)
+        {
+            // the same halo as a thick rounded stroke around the kite, drawn as one filled outline (much cheaper)
+            const float h = Wd * (2.5f + 3.0f * smear) * 0.5f;
+            Path halo;
+            halo.startNewSubPath (front + d * h);
+            halo.lineTo (front + d * (h * 0.4f) + n * (h * 0.9f));
+            halo.lineTo (sideA + n * h + d * (h * 0.35f));
+            halo.lineTo (sideA + n * h - d * (h * 0.35f));
+            halo.lineTo (back + n * (h * 0.7f));
+            halo.lineTo (back - d * h);
+            halo.lineTo (back - n * (h * 0.7f));
+            halo.lineTo (sideB - n * h - d * (h * 0.35f));
+            halo.lineTo (sideB - n * h + d * (h * 0.35f));
+            halo.lineTo (front + d * (h * 0.4f) - n * (h * 0.9f));
+            halo.closeSubPath();
+            g.fillPath (halo);
+        }
+        else
             g.strokePath (kite, PathStrokeType (Wd * (2.5f + 3.0f * smear), PathStrokeType::curved, PathStrokeType::rounded));
         g.setColour (col.withAlpha (fade * (0.85f - 0.35f * smear)));
         g.fillPath (kite);
@@ -1958,6 +2005,8 @@ LfoEditor::LfoEditor (GranulumProcessor& p) : proc (p)
 {
     pts = proc.getLfoPoints (0);
     setRepaintsOnMouseActivity (false);
+    setTooltip ("Drag points. Double-click an empty spot = add a point (up to 16).\n"
+                "Double-click or right-click a point = delete it. Drag the small circles to bend a segment.");
     startTimerHz (60);
 }
 
@@ -1974,12 +2023,15 @@ void LfoEditor::timerCallback()
     if (dragIndex < 0)
     {
         const auto now = proc.getLfoPoints (lfo);
-        bool same = true;
-        for (int i = 0; i < kLfoPoints; ++i)
-            same &= now[(size_t) i].x == pts[(size_t) i].x && now[(size_t) i].y == pts[(size_t) i].y && now[(size_t) i].curve == pts[(size_t) i].curve;
-        if (! same) pts = now;
+        bool same = now.size() == pts.size();
+        for (size_t i = 0; same && i < now.size(); ++i)
+            same &= now[i].x == pts[i].x && now[i].y == pts[i].y && now[i].curve == pts[i].curve;
+        if (! same) { pts = now; repaint(); return; }
     }
-    repaint();
+    // repaint only while visible and the playhead moves (or while dragging)
+    if (! isShowing()) return;
+    const float ph = proc.lfoPhaseOut[(size_t) lfo].load (std::memory_order_relaxed);
+    if (ph != lastPhaseShown || dragIndex >= 0 || isMouseOver() || ++idleTicks > 20) { lastPhaseShown = ph; idleTicks = 0; repaint(); }
 }
 
 Rectangle<float> LfoEditor::area() const { return getLocalBounds().toFloat().reduced (10.0f, 9.0f); }
@@ -2003,13 +2055,14 @@ int LfoEditor::hitTest (Point<float> m, bool& isHandle) const
     isHandle = false;
     int best = -1;
     float bestD = 11.0f;
-    for (int i = 0; i < kLfoPoints; ++i)
+    const int n = (int) pts.size();
+    for (int i = 0; i < n; ++i)
     {
         const float d = toScreen (pts[(size_t) i].x, pts[(size_t) i].y).getDistanceFrom (m);
         if (d < bestD) { bestD = d; best = i; }
     }
     if (best >= 0) return best;
-    for (int s = 0; s < kLfoPoints - 1; ++s)
+    for (int s = 0; s < n - 1; ++s)
     {
         const float d = handlePos (s).getDistanceFrom (m);
         if (d < bestD) { bestD = d; best = s; isHandle = true; }
@@ -2040,6 +2093,16 @@ void LfoEditor::mouseExit (const MouseEvent&) { hoverIndex = -1; }
 
 void LfoEditor::mouseDown (const MouseEvent& e)
 {
+    // right click on a point (not the ends) = delete it
+    if (e.mods.isPopupMenu())
+    {
+        pts = proc.getLfoPoints (lfo);
+        bool h = false;
+        const int i = hitTest (e.position, h);
+        if (i > 0 && ! h && i < (int) pts.size() - 1) { pts.erase (pts.begin() + i); proc.setLfoPoints (lfo, pts); repaint(); }
+        dragIndex = -1;
+        return;
+    }
     if (false)
     {
         // REMOVE: takes this LFO off every knob (unlike the light, which only pauses it)
@@ -2071,7 +2134,7 @@ void LfoEditor::mouseDrag (const MouseEvent& e)
     {
         auto& p = pts[(size_t) dragIndex];
         p.y = jlimit (0.0f, 1.0f, (a.getBottom() - e.position.y) / a.getHeight());
-        if (dragIndex > 0 && dragIndex < kLfoPoints - 1)
+        if (dragIndex > 0 && dragIndex < (int) pts.size() - 1)
             p.x = jlimit (pts[(size_t) dragIndex - 1].x, pts[(size_t) dragIndex + 1].x, (e.position.x - a.getX()) / a.getWidth());
     }
     proc.setLfoPoints (lfo, pts);
@@ -2082,13 +2145,30 @@ void LfoEditor::mouseUp (const MouseEvent&) { dragIndex = -1; }
 
 void LfoEditor::mouseDoubleClick (const MouseEvent& e)
 {
+    pts = proc.getLfoPoints (lfo);
     bool h = false;
     const int i = hitTest (e.position, h);
-    if (i >= 0 && h)
+    if (i >= 0 && h)                                   // curve handle: straighten the segment
     {
         pts[(size_t) i].curve = 0.0f;
-        proc.setLfoPoints (lfo, pts);
     }
+    else if (i >= 0)                                   // a point: delete it (the two ends stay)
+    {
+        if (i == 0 || i == (int) pts.size() - 1) return;
+        pts.erase (pts.begin() + i);
+    }
+    else if ((int) pts.size() < kMaxLfoPoints)         // empty place: add a point there
+    {
+        const auto a = area();
+        const float x = jlimit (0.001f, 0.999f, (e.position.x - a.getX()) / a.getWidth());
+        const float y = jlimit (0.0f, 1.0f, (a.getBottom() - e.position.y) / a.getHeight());
+        size_t at = 1;
+        while (at < pts.size() && pts[at].x < x) ++at;
+        pts.insert (pts.begin() + (long) at, LfoPoint { x, y, 0.0f });
+    }
+    proc.setLfoPoints (lfo, pts);
+    dragIndex = -1;
+    repaint();
 }
 
 // ============================================================================
@@ -2275,7 +2355,7 @@ void LfoEditor::paint (Graphics& g)
     g.strokePath (p, PathStrokeType (1.8f, PathStrokeType::curved, PathStrokeType::rounded));
 
     // curve handles
-    for (int s = 0; s < kLfoPoints - 1; ++s)
+    for (int s = 0; s < (int) pts.size() - 1; ++s)
     {
         if (pts[(size_t) s + 1].x - pts[(size_t) s].x < 0.02f) continue;
         const auto hp = handlePos (s);
@@ -2286,7 +2366,7 @@ void LfoEditor::paint (Graphics& g)
         g.drawEllipse (Rectangle<float> (hot ? 10.0f : 8.0f, hot ? 10.0f : 8.0f).withCentre (hp), 1.3f);
     }
     // points
-    for (int i = 0; i < kLfoPoints; ++i)
+    for (int i = 0; i < (int) pts.size(); ++i)
     {
         const auto q = toScreen (pts[(size_t) i].x, pts[(size_t) i].y);
         const bool hot = (hoverIndex == i && ! hoverHandle) || (dragIndex == i && ! dragHandle);

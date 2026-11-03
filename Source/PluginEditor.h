@@ -244,6 +244,7 @@ private:
     // speed: the static layers are drawn once and reused every frame
     void rebuildCaches();
     juce::Image bgLow, bgHigh, vignette, glowSprite;
+    int idleTicks = 0;
     int cacheTheme = -1;
 public:
     static inline bool fastPaint = true;   // the snapshot tool flips this to compare old/new drawing
@@ -386,8 +387,9 @@ private:
     int hitTest (juce::Point<float>, bool& isHandle) const;
 
     GranulumProcessor& proc;
-    std::array<LfoPoint, kLfoPoints> pts {};
+    LfoShape pts;
     int dragIndex = -1, hoverIndex = -1;
+    float lastPhaseShown = -1.0f; int idleTicks = 0;
     bool dragHandle = false, hoverHandle = false;
     float dragStartCurve = 0.0f;
     juce::Point<float> dragStart;
@@ -529,7 +531,14 @@ public:
     void mouseDrag (const juce::MouseEvent&) override;
     void mouseUp (const juce::MouseEvent&) override;
 private:
-    void timerCallback() override { repaint(); }
+    void timerCallback() override
+    {
+        // repaint only while it is on screen and the envelope moves
+        if (! isShowing()) return;
+        const float e = proc.engineAdd.vizEnv.load (std::memory_order_relaxed);
+        if (e != lastEnvShown || isMouseButtonDown() || ++idleTicks > 15) { lastEnvShown = e; idleTicks = 0; repaint(); }
+    }
+    float lastEnvShown = -1.0f; int idleTicks = 0;
     struct Geo { juce::Point<float> p0, p1, p2, p3, p4; juce::Rectangle<float> a; float maxW = 0, plateau = 0; };
     Geo geometry() const;
     float value (const char* id) const;
