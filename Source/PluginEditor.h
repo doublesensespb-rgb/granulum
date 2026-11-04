@@ -200,6 +200,7 @@ private:
 class GrainField final : public juce::Component, private juce::Timer
 {
 public:
+    void frame() { timerCallback(); }   // driven by the editor's single 30 fps tick (one repaint pass per frame)
     explicit GrainField (GranulumProcessor&);
     void paint (juce::Graphics&) override;
     void resized() override;
@@ -246,6 +247,24 @@ private:
     void rebuildCaches();
     juce::Image bgLow, bgHigh, vignette, glowSprite;
     int idleTicks = 0;
+    // adaptive detail: if drawing gets slow (many grains, slow machine, several plugin windows), drop the
+    // trails first, then the halos, and bring them back when there is time again
+    float lastPaintMs = 0.0f;
+    int detail = 2;
+public:
+    static inline std::atomic<int> paintCount { 0 };   // diagnostics (load test)
+    static inline std::atomic<double> paintMsTotal { 0.0 };
+    void notePaintTime (float ms)
+    {
+        ++paintCount; paintMsTotal = paintMsTotal + ms;
+        lastPaintMs = lastPaintMs * 0.8f + ms * 0.2f;
+        ++framesSinceChange;
+        if (lastPaintMs > 3.0f && detail > 0 && framesSinceChange > 10) { --detail; framesSinceChange = 0; }
+        else if (lastPaintMs < 0.9f && detail < 2 && framesSinceChange > 90) { ++detail; framesSinceChange = 0; }
+    }
+    int framesSinceChange = 0;
+    static inline int maxShards = 160;
+private:
     int cacheTheme = -1;
 public:
     static inline bool fastPaint = true;   // the snapshot tool flips this to compare old/new drawing
@@ -255,6 +274,7 @@ public:
 class HarmonicEditor final : public juce::Component, public juce::SettableTooltipClient, private juce::Timer
 {
 public:
+    void frame() { timerCallback(); }   // driven by the editor's single 30 fps tick (one repaint pass per frame)
     explicit HarmonicEditor (GranulumProcessor&);
     void paint (juce::Graphics&) override;
     void mouseMove (const juce::MouseEvent&) override;
@@ -295,6 +315,7 @@ public:
 class PeakMeter final : public juce::Component, public juce::SettableTooltipClient, private juce::Timer
 {
 public:
+    void frame() { timerCallback(); }   // driven by the editor's single 30 fps tick (one repaint pass per frame)
     explicit PeakMeter (GranulumProcessor&);
     void paint (juce::Graphics&) override;
     void mouseDown (const juce::MouseEvent&) override;
@@ -345,6 +366,7 @@ private:
 class FilterScope final : public juce::Component, public juce::SettableTooltipClient, private juce::Timer
 {
 public:
+    void frame() { timerCallback(); }   // driven by the editor's single 30 fps tick (one repaint pass per frame)
     explicit FilterScope (GranulumProcessor&);
     void paint (juce::Graphics&) override;
     void mouseDown (const juce::MouseEvent&) override;
@@ -366,6 +388,7 @@ private:
 class LfoEditor final : public juce::Component, public juce::SettableTooltipClient, private juce::Timer
 {
 public:
+    void frame() { timerCallback(); }   // driven by the editor's single 30 fps tick (one repaint pass per frame)
     explicit LfoEditor (GranulumProcessor&);
     void paint (juce::Graphics&) override;
     void mouseMove (const juce::MouseEvent&) override;
@@ -525,6 +548,7 @@ public:
 class AmpEditor final : public juce::Component, public juce::SettableTooltipClient, private juce::Timer
 {
 public:
+    void frame() { timerCallback(); }   // driven by the editor's single 30 fps tick (one repaint pass per frame)
     explicit AmpEditor (GranulumProcessor&);
     void paint (juce::Graphics&) override;
     void mouseMove (const juce::MouseEvent&) override;
@@ -674,6 +698,9 @@ private:
     uint32_t shownModVersion = 0;
     juce::String statusText;
     bool fileHover = false, dropHover = false;
+    int shownTabState = -1;
+    bool rendererChosen = false;
+    juce::String shownDropSig;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (GranulumEditor)
 };

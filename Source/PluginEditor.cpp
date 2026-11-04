@@ -597,12 +597,13 @@ GrainField::GrainField (GranulumProcessor& p) : proc (p)
     setMouseCursor (MouseCursor::PointingHandCursor);
     setOpaque (true);
     shards.reserve (520);
+    lastPaintMs = 0.0f;
     for (int i = 0; i < 46; ++i)
         motes.push_back ({ rng.nextFloat(), rng.nextFloat() * 2.0f - 1.0f,
                            (rng.nextFloat() - 0.5f) * 0.01f, (rng.nextFloat() - 0.5f) * 0.02f,
                            rng.nextFloat() * 6.28f, 0.6f + rng.nextFloat() * 1.4f });
     lastTick = Time::getMillisecondCounterHiRes();
-    startTimerHz (50);
+    // (no own timer: GranulumEditor::timerCallback calls frame() at 30 fps)
 }
 
 Rectangle<float> GrainField::inner() const
@@ -697,7 +698,7 @@ void GrainField::simulate (float dt)
         for (; r != w && budget > 0; ++r, --budget)
         {
             const auto ev = en.events[(size_t) (r % granulum::GrainEngine::kEventRing)];
-            if (shards.size() >= 500) shards.erase (shards.begin());
+            if ((int) shards.size() >= maxShards) shards.erase (shards.begin());
             Shard sh;
             sh.x = jlimit (0.0f, 1.0f, ev.pos);
             const float a = jmax (0.08f, envAt (sh.x));
@@ -812,6 +813,8 @@ void GrainField::rebuildCaches()
 
 void GrainField::paint (Graphics& g)
 {
+    const double paintStart = Time::getMillisecondCounterHiRes();
+    struct PaintTimer { GrainField& f; double t0; ~PaintTimer() { f.notePaintTime ((float) (Time::getMillisecondCounterHiRes() - t0)); } } paintTimer { *this, paintStart };
     const auto r = getLocalBounds().toFloat();
     const float breathe = 0.5f + 0.5f * std::sin (time * 0.8f);
     if (fastPaint)
@@ -954,7 +957,8 @@ void GrainField::paint (Graphics& g)
         const auto p = P (sh.x, sh.y);
 
         // trail
-        if (sh.trailN > 2 && ! fastPaint)
+        if (detail < 1 || fade < 0.12f) {}   // busy: trails are the first thing to go
+        else if (sh.trailN > 2 && ! fastPaint)
         {
             for (int i = 1; i < sh.trailN; ++i)
             {
@@ -1008,7 +1012,8 @@ void GrainField::paint (Graphics& g)
 
         // glow
         g.setColour (col.withAlpha (fade * (0.10f + 0.12f * bloom + 0.15f * smear)));
-        if (fastPaint)
+        if (detail < 2) {}                    // very busy: no halo
+        else if (fastPaint)
         {
             // the same halo as a thick rounded stroke around the kite, drawn as one filled outline (much cheaper)
             const float h = Wd * (2.5f + 3.0f * smear) * 0.5f;
@@ -1211,7 +1216,7 @@ HarmonicEditor::HarmonicEditor (GranulumProcessor& p) : proc (p)
     h = proc.getHarmonics();
     mask = proc.getGrainMask();
     setMouseCursor (MouseCursor::CrosshairCursor);
-    startTimerHz (30);
+    // (no own timer: GranulumEditor::timerCallback calls frame() at 30 fps)
 }
 
 void HarmonicEditor::timerCallback()
@@ -1726,7 +1731,7 @@ void HarmonicEditor::paint (Graphics& g)
 PeakMeter::PeakMeter (GranulumProcessor& p) : proc (p)
 {
     setTooltip ("Output level. The red zone means the sound is hitting the ceiling.\nClick CLIP to reset it.");
-    startTimerHz (40);
+    // (no own timer: GranulumEditor::timerCallback calls frame() at 30 fps)
 }
 
 void PeakMeter::timerCallback()
@@ -2007,7 +2012,7 @@ LfoEditor::LfoEditor (GranulumProcessor& p) : proc (p)
     setRepaintsOnMouseActivity (false);
     setTooltip ("Drag points. Double-click an empty spot = add a point (up to 16).\n"
                 "Double-click or right-click a point = delete it. Drag the small circles to bend a segment.");
-    startTimerHz (60);
+    // (no own timer: GranulumEditor::timerCallback calls frame() at 30 fps)
 }
 
 void LfoEditor::setLfo (int l)
@@ -2180,7 +2185,7 @@ FilterScope::FilterScope (GranulumProcessor& p) : proc (p)
     specDb.fill (-120.0f);
     setMouseCursor (MouseCursor::LeftRightResizeCursor);
     setTooltip ("Filter view. Drag left/right = CUTOFF, up/down = RESO. Faint = what comes in, bright = what passes.");
-    startTimerHz (30);
+    // (no own timer: GranulumEditor::timerCallback calls frame() at 30 fps)
 }
 
 float FilterScope::xToHz (float x) const
@@ -2458,7 +2463,7 @@ void AmpTab::mouseDown (const MouseEvent& e)
 AmpEditor::AmpEditor (GranulumProcessor& p) : proc (p)
 {
     setTooltip ("AMP envelope = the volume of every note.\nDrag the points: attack peak, decay / sustain corner, release end.");
-    startTimerHz (60);
+    // (no own timer: GranulumEditor::timerCallback calls frame() at 30 fps)
 }
 
 float AmpEditor::value (const char* id) const { return proc.apvts.getRawParameterValue (id)->load(); }
@@ -3208,6 +3213,7 @@ GranulumEditor::GranulumEditor (GranulumProcessor& p)
         for (int i = 0; i < 2; ++i)
         {
             filterTabs[(size_t) i] = std::make_unique<FxTab> (proc, fOn[i], fName[i]);
+            filterTabs[(size_t) i]->setRepaintsOnMouseActivity (true);
             filterTabs[(size_t) i]->onSelect = [this, i] { selectFilter (i); };
             addAndMakeVisible (*filterTabs[(size_t) i]);
         }
@@ -3222,6 +3228,7 @@ GranulumEditor::GranulumEditor (GranulumProcessor& p)
     for (int i = 0; i < 3; ++i)
     {
         fxTabs[(size_t) i] = std::make_unique<FxTab> (proc, fxOn[i], fxName[i]);
+        fxTabs[(size_t) i]->setRepaintsOnMouseActivity (true);
         fxTabs[(size_t) i]->onSelect = [this, i] { selectFx (i); };
         addAndMakeVisible (*fxTabs[(size_t) i]);
     }
@@ -3574,8 +3581,33 @@ void GranulumEditor::openFile (const File& f)
 
 void GranulumEditor::timerCallback()
 {
-    if (loadButton.isShowing()) loadButton.repaint();   // SOUNDS / CHORD glint animation
-    if (chordButton.isShowing()) chordButton.repaint();
+   #if JUCE_WINDOWS
+    // JUCE 8 draws with Direct2D by default on Windows; with several animated plugin windows that made the whole
+    // host stutter. The classic software renderer is light and proven in every host.
+    if (! rendererChosen)
+        if (auto* peer = getPeer())
+        {
+            const int sw = peer->getAvailableRenderingEngines().indexOf ("Software Renderer");
+            if (sw >= 0) peer->setCurrentRenderingEngine (sw);
+            rendererChosen = true;
+        }
+   #endif
+
+    // one tick drives every animated part, so each window repaints once per frame
+    field.frame();
+    harmonics.frame();
+    meterView.frame();
+    if (lfoEditor.isVisible()) lfoEditor.frame();
+    if (ampEditor.isVisible()) ampEditor.frame();
+    filterScope.frame();
+
+    // SOUNDS / CHORD glint: repaint only while the glint is passing (and once after)
+    {
+        const double t = Time::getMillisecondCounterHiRes() * 0.001;
+        auto glinting = [t] (double offset) { return std::fmod (t + offset, 1.8) < 1.0; };
+        if (loadButton.isShowing() && glinting (0.0)) loadButton.repaint();
+        if (chordButton.isShowing() && glinting (0.9)) chordButton.repaint();
+    }
     auto& s = proc.apvts;
 
     const int chord = (int) s.getRawParameterValue (ParamID::chord)->load();
@@ -3616,11 +3648,15 @@ void GranulumEditor::timerCallback()
         filterKnobs[0]->slider.setTooltip (p1 ? "PEAK frequency (does not follow the note)" : "Cutoff follows the note you play (set at C3). The readout shows the note where it cuts.");
     }
     dimK (filter2Knobs, f2On); dim ({ &filterType2, routes[4].get() }, f2On);
-    for (auto& t : filterTabs) t->repaint();
+    // tabs: repaint only when a lamp changes (repainting them every frame also repaints the window behind them)
+    const int tabState = (fOn ? 1 : 0) | (f2On ? 2 : 0) | (on (ParamID::distOn) ? 4 : 0) | (lOn ? 8 : 0) | (rOn ? 16 : 0);
+    const bool tabsChanged = tabState != shownTabState;
+    shownTabState = tabState;
+    if (tabsChanged) for (auto& t : filterTabs) t->repaint();
     dimK (distKnobs, dOn);  dim ({ &distType, routes[1].get() }, dOn);
     dimK (delayKnobs, lOn); dim ({ &delaySync, &delayPing, &delayDiv, routes[2].get() }, lOn);
     dimK (revKnobs, rOn);   dim ({ routes[3].get() }, rOn);
-    for (auto& t : fxTabs) t->repaint();
+    if (tabsChanged) for (auto& t : fxTabs) t->repaint();
 
     // delay: TIME knob in free mode, division box when synced
     const bool dsync = on (ParamID::delaySync);
@@ -3645,13 +3681,19 @@ void GranulumEditor::timerCallback()
         for (auto* k : allKnobs) k->refreshMods();
         for (auto& t : lfoTabs) t->repaint();
     }
-    for (auto* k : allKnobs) k->tick();
-    if (selectedLfo < kNumLfos) lfoTabs[(size_t) selectedLfo]->repaint();
+    for (auto* k : allKnobs) if (k->isShowing()) k->tick();
+    if (selectedLfo < kNumLfos) lfoTabs[(size_t) selectedLfo]->repaint();   // its lamp pulses with the LFO
     else repaint (adsrReadout);
 
     meter    = jmax (proc.outputLevel.load(), meter * 0.85f);
     activity = jmax ((float) proc.vizEngine().vizCount.load() / 20.0f, activity * 0.8f);
-    repaint (dropZone);
+    // the sample box: only when something in it can change (hover marquee, drag, new sample, status text)
+    {
+        const String sig = proc.getSampleName() + String ((int) proc.hasSample()) + String ((int) dropHover) + String ((int) fileHover)
+                         + String ((int) sampleMenu.isVisible()) + statusText
+                         + String ((int) (proc.apvts.getRawParameterValue (ParamID::osc2On)->load() > 0.5f));
+        if (sig != shownDropSig || dropHover) { shownDropSig = sig; repaint (dropZone); }
+    }
 }
 
 void GranulumEditor::paint (Graphics& g)
