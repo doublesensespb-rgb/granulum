@@ -10,8 +10,8 @@ on:
         options: [all, windows, mac]
         default: all
       mac_runner:
-        description: "macOS runner (macos-15-intel avoids the busy Apple Silicon queue)"
-        default: macos-15-intel
+        description: "macOS runner (macos-14 had free machines when the others did not)"
+        default: macos-14
 
 permissions:
   contents: write
@@ -57,7 +57,7 @@ jobs:
 
   mac:
     if: inputs.target != 'windows'
-    runs-on: ${{ inputs.mac_runner || 'macos-15-intel' }}
+    runs-on: ${{ inputs.mac_runner || 'macos-14' }}
     steps:
       - uses: actions/checkout@v4
 
