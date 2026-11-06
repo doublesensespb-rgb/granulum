@@ -1,7 +1,7 @@
 # GRAIN FORM (repo: granulum) — guide for AI agents and developers
 
 Read this whole file before changing anything. It describes the product, the code, the build
-pipeline and how the owner wants to work. Current version: **0.98** (`project(... VERSION 0.9.8)` in CMakeLists.txt).
+pipeline and how the owner wants to work. Current version: **0.99.1** (`project(... VERSION 0.9.9)` + display label `set(GRAINFORM_LABEL "0.99.1")` in CMakeLists.txt).
 The UI shows the version on a small plate next to the title (taken from CMake `GRAINFORM_VERSION`, "0.9.8" -> "v0.98").
 
 ## 1. Product
@@ -156,6 +156,12 @@ v0.94: LOOP modes, PEAK filter, FOLD first / RECTIFY gone, INTO GRAINS, one RATE
 v0.95: ~2x faster GRAIN FIELD drawing, ~1.7x faster audio (bit-identical), free LFO points (2..16), INIT with empty OSC 2.
 v0.96: fixed crash (INIT / preset load with the ADSR tab open read a 4th LFO); ADSR curve follows its knobs at once.
 v0.97: FL lag with several instances: Windows uses JUCE's software renderer (not Direct2D), one 30 fps UI tick for all views.
+v0.99 / 0.99.1: OSC order ADDITIVE / SUB / SAMPLE / NOISE (display only; internal osc2 = sample, osc3 = noise, "sub" separate),
+SUB routable to blocks via digit 2 (params `<block>R4`, default off, own FxChain `subChain`), SUB 5 sticks (subH1..5, always
+layered), OCT -3..+1, SEMI; GRAIN switches row (`HarmonicEditor::rowStyle = 11`), quiet first-run hint; LFO on sticks:
+virtual mod targets `harm1..16` (kHarmTarget0 = 1000) and mtSubH1..5, one LFO per stick, wheel = depth, look = style B
+(`lfoStickStyle = 1`); a stick with an LFO is rendered as its own layer (`SampleData::layers`, gain ramped per chunk in the
+engine); PEAK Q (peakQ/peakQ2) + gain ±36 dB, filter view 0 dB centred; no hand cursors anywhere; UI idle optimisations.
 v0.98: OSC 4 SUB (dry), PAN on OSC 1-3, SPREAD, waveform picker, sample clear x, live filter view, Serum-like knob feel,
 CLIP toggle, OUTPUT 0 dB, Serum-like division order, INTO GRAINS click fix, LFO rings outside small knobs, version plate.
 
