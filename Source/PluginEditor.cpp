@@ -113,15 +113,15 @@ void GranulumLook::drawRotarySlider (Graphics& g, int x, int y, int w, int h, fl
         g.fillEllipse (circ (br * 1.12f).translated (br * 0.1f, br * 0.24f));
         // knurled rim
         {
-            ColourGradient rim (Colour (0xffe9eaec), c.x - br * 0.7f, c.y - br, Colour (0xff4d5054), c.x + br * 0.6f, c.y + br, false);
-            rim.addColour (0.5, Colour (0xff9a9da2));
+            ColourGradient rim (Colour (0xffb9bcc0), c.x - br * 0.7f, c.y - br, Colour (0xff2c2e31), c.x + br * 0.6f, c.y + br, false);
+            rim.addColour (0.5, Colour (0xff6c6f74));
             g.setGradientFill (rim);
             g.fillEllipse (circ (br));
             const int teeth = small ? 28 : 48;
             for (int k = 0; k < teeth; ++k)
             {
                 const float a = MathConstants<float>::twoPi * (float) k / (float) teeth;
-                g.setColour (Colours::black.withAlpha (0.28f));
+                g.setColour (Colours::black.withAlpha (0.38f));
                 g.drawLine (Line<float> (c.getPointOnCircumference (br * 0.8f, a), c.getPointOnCircumference (br * 0.99f, a)), 0.7f);
             }
             g.setColour (Colours::black.withAlpha (0.6f));
@@ -130,14 +130,18 @@ void GranulumLook::drawRotarySlider (Graphics& g, int x, int y, int w, int h, fl
         // polished cap: concentric brushing + a bright highlight at the top left
         const float cr = br * 0.74f;
         {
-            ColourGradient cap (Colour (0xfff4f5f6), c.x - cr * 0.6f, c.y - cr * 0.8f, Colour (0xff6b6e73), c.x + cr * 0.7f, c.y + cr, false);
-            cap.addColour (0.55, Colour (0xffb7babe));
+            ColourGradient cap (Colour (0xffd4d6d9), c.x - cr * 0.6f, c.y - cr * 0.8f, Colour (0xff45484c), c.x + cr * 0.7f, c.y + cr, false);
+            cap.addColour (0.5, Colour (0xff8d9095));
             g.setGradientFill (cap);
             g.fillEllipse (circ (cr));
-            g.setColour (Colours::black.withAlpha (0.06f));
-            for (int k = 1; k < 6; ++k) g.drawEllipse (circ (cr * (float) k / 6.0f), 0.6f);
-            g.setColour (Colours::white.withAlpha (0.55f));
-            g.fillEllipse (Rectangle<float> (cr * 0.7f, cr * 0.35f).withCentre (c.translated (-cr * 0.25f, -cr * 0.45f)));
+            // spun-metal brushing: fine concentric rings
+            for (int k = 2; k < 14; ++k)
+            {
+                g.setColour ((k % 2 ? Colours::white : Colours::black).withAlpha (0.05f));
+                g.drawEllipse (circ (cr * (float) k / 14.0f), 0.5f);
+            }
+            g.setColour (Colours::white.withAlpha (0.18f));
+            g.fillEllipse (Rectangle<float> (cr * 0.8f, cr * 0.3f).withCentre (c.translated (-cr * 0.2f, -cr * 0.5f)));
             g.setColour (Colours::black.withAlpha (0.35f));
             g.drawEllipse (circ (cr + 0.3f), 0.8f);
         }
@@ -2559,6 +2563,65 @@ void PeakMeter::mouseDown (const MouseEvent& e)
 
 void PeakMeter::paint (Graphics& g)
 {
+    if (Palette::hardware)
+    {
+        // analog VU: cream face, arc scale with a red zone, black needle, glass; CLIP = a red lamp
+        auto r = getLocalBounds().toFloat();
+        auto lampArea = r.removeFromRight (34.0f);
+        r.removeFromRight (4.0f);
+        auto face = r.reduced (1.0f);
+        g.setColour (Colour (0xff0c0c0d)); g.fillRoundedRectangle (face.expanded (1.0f), 4.0f);
+        auto inner = face.reduced (3.0f);
+        g.setGradientFill (ColourGradient (Colour (0xffeee5cb), inner.getX(), inner.getY(), Colour (0xffc9ba92), inner.getX(), inner.getBottom(), false));
+        g.fillRoundedRectangle (inner, 2.0f);
+        const auto pivot = Point<float> (inner.getCentreX(), inner.getBottom() + inner.getHeight() * 0.22f);
+        const float rad = inner.getHeight() * 0.86f;
+        const float a0 = -0.78f, a1 = 0.78f;   // radians from straight up
+        auto angOf = [a0, a1] (float db) { return a0 + (a1 - a0) * jlimit (0.0f, 1.0f, (db + 20.0f) / 23.0f); };   // -20 .. +3 VU
+        g.saveState();
+        g.reduceClipRegion (inner.toNearestInt());
+        Path arc; arc.addCentredArc (pivot.x, pivot.y, rad, rad, 0.0f, a0, angOf (0.0f), true);
+        g.setColour (Colour (0xff2a2520)); g.strokePath (arc, PathStrokeType (1.1f));
+        Path red; red.addCentredArc (pivot.x, pivot.y, rad, rad, 0.0f, angOf (0.0f), a1, true);
+        g.setColour (Colour (0xffb8322a)); g.strokePath (red, PathStrokeType (2.6f));
+        for (float db : { -20.0f, -10.0f, -7.0f, -5.0f, -3.0f, -2.0f, -1.0f, 0.0f, 1.0f, 2.0f, 3.0f })
+        {
+            const float a = angOf (db);
+            const bool major = db == -20.0f || db == -10.0f || db == -5.0f || db == 0.0f || db == 3.0f;
+            g.setColour (db > 0.0f ? Colour (0xffb8322a) : Colour (0xff2a2520));
+            g.drawLine (Line<float> (pivot.getPointOnCircumference (rad, a), pivot.getPointOnCircumference (rad + (major ? 5.0f : 3.0f), a)), 1.0f);
+        }
+        g.setColour (Colour (0xff2a2520));
+        g.setFont (uiFont (8.0f, true, 0.1f));
+        g.drawText ("VU", inner.withTrimmedTop (inner.getHeight() * 0.5f).withTrimmedBottom (2.0f), Justification::centredBottom, false);
+        // needle (mono level, ballistic smoothing is in timerCallback via level[])
+        const float lv = jmax (level[0], level[1]);
+        const float db = Decibels::gainToDecibels (lv, -60.0f) + 6.0f;   // ~ -6 dBFS reads 0 VU
+        const float na = angOf (db);
+        g.setColour (Colours::black.withAlpha (0.25f));
+        g.drawLine (Line<float> (pivot.translated (1.0f, 0.0f), pivot.getPointOnCircumference (rad + 4.0f, na).translated (1.0f, 1.0f)), 1.2f);
+        g.setColour (Colour (0xff141414));
+        g.drawLine (Line<float> (pivot, pivot.getPointOnCircumference (rad + 4.0f, na)), 1.1f);
+        g.restoreState();
+        // glass glare + bezel
+        g.setGradientFill (ColourGradient (Colours::white.withAlpha (0.25f), inner.getX(), inner.getY(), Colours::transparentWhite, inner.getX(), inner.getCentreY(), false));
+        g.fillRoundedRectangle (inner.withHeight (inner.getHeight() * 0.45f), 2.0f);
+        g.setColour (Colours::black.withAlpha (0.5f)); g.drawRoundedRectangle (inner, 2.0f, 1.0f);
+        g.setColour (Colours::white.withAlpha (0.12f)); g.drawRoundedRectangle (face.expanded (1.0f), 4.0f, 0.8f);
+        // CLIP lamp
+        const bool clipOn = proc.apvts.getRawParameterValue (ParamID::clipOn)->load() > 0.5f;
+        const auto lc = Point<float> (lampArea.getCentreX(), lampArea.getY() + lampArea.getHeight() * 0.38f);
+        const auto lampCol = clipShown ? Colour (0xffff3b2e) : clipOn ? Colour (0xff9c2219) : Colour (0xff3a1714);
+        if (clipShown) { g.setColour (lampCol.withAlpha (0.35f)); g.fillEllipse (Rectangle<float> (20.0f, 20.0f).withCentre (lc)); }
+        g.setColour (Colour (0xff0d0d0e)); g.fillEllipse (Rectangle<float> (13.0f, 13.0f).withCentre (lc));
+        g.setGradientFill (ColourGradient (lampCol.brighter (0.6f), lc.x - 2.0f, lc.y - 3.0f, lampCol.darker (0.4f), lc.x + 3.0f, lc.y + 4.0f, true));
+        g.fillEllipse (Rectangle<float> (9.0f, 9.0f).withCentre (lc));
+        g.setColour (Colours::white.withAlpha (0.5f)); g.fillEllipse (Rectangle<float> (3.0f, 2.0f).withCentre (lc.translated (-1.5f, -2.0f)));
+        g.setColour (clipShown ? Colour (0xffff6b5e) : Colour (0xffc9c3b8));
+        g.setFont (uiFont (8.5f, true, 0.1f));
+        g.drawText ("CLIP", Rectangle<float> (lampArea.getX() - 4.0f, lc.y + 8.0f, lampArea.getWidth() + 8.0f, 11.0f), Justification::centred, false);
+        return;
+    }
     auto r = getLocalBounds().toFloat();
     auto clipBox = r.removeFromRight (34.0f).withSizeKeepingCentre (32.0f, 15.0f);
     r.removeFromRight (6.0f);
@@ -4615,7 +4678,7 @@ void GranulumEditor::paint (Graphics& g)
             ring.addRoundedRectangle (full, 10.0f * sc);
             ring.addRoundedRectangle (full.reduced (f), 6.0f * sc);
             ring.setUsingNonZeroWinding (false);
-            g.setGradientFill (ColourGradient (Colour (0xff6a6d71), 0, 0, Colour (0xff26282b), 0, full.getHeight(), false));
+            g.setGradientFill (ColourGradient (Colour (0xff45474b), 0, 0, Colour (0xff17181a), 0, full.getHeight(), false));
             g.fillPath (ring);
             Random rnd (5);
             g.saveState();
@@ -4627,7 +4690,7 @@ void GranulumEditor::paint (Graphics& g)
                 g.fillRect (rnd.nextFloat() * full.getWidth() - 40.0f, yy, 40.0f + rnd.nextFloat() * 200.0f, 1.0f);
             }
             g.restoreState();
-            g.setColour (Colours::white.withAlpha (0.28f));
+            g.setColour (Colours::white.withAlpha (0.16f));
             g.drawRoundedRectangle (full.reduced (0.6f), 10.0f * sc, 1.0f);
             g.setColour (Colours::black.withAlpha (0.85f));
             g.drawRoundedRectangle (full.reduced (f - 0.5f), 6.0f * sc, 1.6f);
@@ -4922,11 +4985,14 @@ void GranulumEditor::paintOverChildren (Graphics& g)
             const float rad = 6.0f;
             // thick oscilloscope bezel: dark rubber ring with a lit lower lip
             {
-                Path bez; bez.addRoundedRectangle (r.expanded (5.0f), rad + 5.0f); bez.addRoundedRectangle (r, rad); bez.setUsingNonZeroWinding (false);
-                g.setGradientFill (ColourGradient (Colour (0xff0b0b0c), 0, r.getY() - 5.0f, Colour (0xff2e3033), 0, r.getBottom() + 5.0f, false));
+                const float bw = c == &field ? 9.0f : 5.0f;   // the GRAIN FIELD gets a thick CRT bezel
+                Path bez; bez.addRoundedRectangle (r.expanded (bw), rad + bw); bez.addRoundedRectangle (r, rad); bez.setUsingNonZeroWinding (false);
+                g.setGradientFill (ColourGradient (Colour (0xff4a4c50), 0, r.getY() - bw, Colour (0xff141516), 0, r.getBottom() + bw, false));
                 g.fillPath (bez);
-                g.setColour (Colours::white.withAlpha (0.16f));
-                g.drawRoundedRectangle (r.expanded (5.0f), rad + 5.0f, 0.8f);
+                g.setColour (Colour (0xff070708));
+                g.drawRoundedRectangle (r.expanded (2.0f), rad + 2.0f, 3.0f);
+                g.setColour (Colours::white.withAlpha (0.2f));
+                g.drawRoundedRectangle (r.expanded (bw), rad + bw, 0.8f);
                 g.setColour (Colours::black.withAlpha (0.9f));
                 g.drawRoundedRectangle (r.expanded (0.5f), rad, 1.2f);
             }
@@ -4943,6 +5009,9 @@ void GranulumEditor::paintOverChildren (Graphics& g)
             g.fillPath (refl);
             g.setGradientFill (ColourGradient (Colours::black.withAlpha (0.45f), 0, r.getY(), Colours::transparentBlack, 0, r.getY() + jmin (10.0f, r.getHeight() * 0.25f), false));
             g.fillRect (r.withHeight (jmin (10.0f, r.getHeight() * 0.25f)));
+            // glass with a faint phosphor tint
+            g.setColour (Colour (0xff8fd0c0).withAlpha (0.045f));
+            g.fillRect (r);
             // curved glass: corners fall into shadow
             g.setGradientFill (ColourGradient (Colours::transparentBlack, r.getCentreX(), r.getCentreY(), Colours::black.withAlpha (0.38f), r.getX(), r.getY(), true));
             g.fillRect (r);
@@ -4986,7 +5055,7 @@ void GranulumEditor::resized()
     // ---- header ----
     auto header = r.removeFromTop (S (66));
     gemsArea = header.removeFromRight (S (150)).withSizeKeepingCentre (S (150), S (44));
-    meterView.setBounds (gemsArea.withTrimmedTop (S (14)));
+    meterView.setBounds (Palette::hardware ? gemsArea.withY (S (14)).withHeight (S (60)) : gemsArea.withTrimmedTop (S (14)));
     header.removeFromRight (S (6));
     globalKnobs[1]->setBounds (header.removeFromRight (S (68)));   // output
     header.removeFromRight (S (14));
