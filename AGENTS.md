@@ -170,7 +170,8 @@ tag next to the LFO chip (the knob value must stay visible - owner), sticks show
 drag snaps to 1 %); harmonic numbers row under the OSC 1 sticks (`HarmonicEditor::numStyle = 1`, owner's choice A); preset
 folders: `PresetSaveWindow` (in-plugin SAVE: folders, + FOLDER, rename/delete-empty, preset list, REPLACE), menu submenus per
 folder, `presetFolder` state property, `listPresets()` = root then folders; CHIME hammer fix: the strike scales with the real
-grain source level (`SampleData::level/layerLevel`), so all grain sticks down = silence (was phantom bells). Preset change / INIT sets `soundReset`: the audio
+grain source level (`SampleData::level/layerLevel`), so all grain sticks down = silence (was phantom bells). RETRIG/ENV LFOs restart on every note-on (was: only when no key held -> dead
+LFO on legato MONO notes). Preset change / INIT sets `soundReset`: the audio
 thread resets engines + FX chains and glides the last sample to 0 in 128 samples (no tails of the old preset, no click).
 Owner rejected the first factory bass presets: none ship.
 v0.98: OSC 4 SUB (dry), PAN on OSC 1-3, SPREAD, waveform picker, sample clear x, live filter view, Serum-like knob feel,
