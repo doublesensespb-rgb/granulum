@@ -90,7 +90,7 @@ void GranulumLook::drawRotarySlider (Graphics& g, int x, int y, int w, int h, fl
         const float r = jmin (b.getWidth(), b.getHeight()) * 0.5f;
         const auto c = b.getCentre();
         const float angle = start + pos * (end - start);
-        const float br = r * (h < 50 ? 0.9f : 0.78f);
+        const float br = r * (h < 50 ? 0.8f : 0.78f);
         g.setColour (s.isMouseOverOrDragging() ? Palette::knob.brighter (0.12f) : Palette::knob);
         g.fillEllipse (Rectangle<float> (br * 2.0f, br * 2.0f).withCentre (c));
         if (! Palette::knobRing.isTransparent())
@@ -461,10 +461,25 @@ Knob::Dial Knob::dial() const
     Dial d;
     auto* lf = dynamic_cast<Slider::LookAndFeelMethods*> (&slider.getLookAndFeel());
     auto sb = (lf != nullptr ? lf->getSliderLayout (const_cast<FineSlider&> (slider)).sliderBounds : slider.getLocalBounds())
-                  .translated (slider.getX(), slider.getY()).toFloat().reduced (5.0f);
-    d.r = jmin (sb.getWidth(), sb.getHeight()) * 0.5f;
-    d.c = sb.getCentre();
-    d.track = jmax (2.5f, d.r * 0.09f);
+                  .translated (slider.getX(), slider.getY()).toFloat();
+    if (GranulumLook::flatKnobs)
+    {
+        // same geometry as the flat knob drawing, so LFO rings always sit just OUTSIDE the disc, on every knob size
+        const bool small = sb.getHeight() < 50.0f;
+        sb = sb.reduced (small ? 1.5f : 5.0f);
+        const float r = jmin (sb.getWidth(), sb.getHeight()) * 0.5f;
+        const float disc = r * (small ? 0.8f : 0.78f);
+        d.track = jmax (2.0f, r * 0.08f);
+        d.r = disc + d.track * 1.1f;
+        d.c = sb.getCentre();
+    }
+    else
+    {
+        sb = sb.reduced (5.0f);
+        d.r = jmin (sb.getWidth(), sb.getHeight()) * 0.5f;
+        d.c = sb.getCentre();
+        d.track = jmax (2.5f, d.r * 0.09f);
+    }
     const auto rp = slider.getRotaryParameters();
     d.start = rp.startAngleRadians;
     d.end = rp.endAngleRadians;
@@ -536,7 +551,8 @@ void Knob::refreshMods()
     if (target < 0) return;
     anyMod = false;
     const auto d = dial();
-    const float chip = jlimit (13.0f, 17.0f, d.r * 0.42f);
+    const bool smallKnob = d.r < 22.0f;
+    const float chip = smallKnob ? 11.0f : jlimit (13.0f, 17.0f, d.r * 0.42f);
     int shown = 0;
     for (int l = 0; l < kNumLfos; ++l)
     {
@@ -546,7 +562,8 @@ void Knob::refreshMods()
         c->setVisible (on);
         if (! on) continue;
         // chips sit outside the ring, at the upper right
-        const float a = MathConstants<float>::pi * (0.22f + 0.22f * (float) shown++);
+        // small knobs: lower right, so the chip never covers the knob title
+        const float a = MathConstants<float>::pi * (smallKnob ? 0.68f + 0.24f * (float) shown++ : 0.22f + 0.22f * (float) shown++);
         auto pos = d.c.getPointOnCircumference (d.r + chip * 0.55f, a);
         auto rect = Rectangle<float> (chip, chip).withCentre (pos).toNearestInt();
         rect = rect.constrainedWithin (getLocalBounds());
@@ -1150,6 +1167,162 @@ void GrainField::mouseUp (const MouseEvent&)
 }
 
 // ============================================================================
+// OSC 4 SUB sticks
+
+SubBars::SubBars (GranulumProcessor& p) : proc (p)
+{
+    setTooltip ("SUB: 1 = root, 2 = octave, 3 = octave + fifth. Drag the sticks up and down.");
+    setRepaintsOnMouseActivity (true);
+    for (auto* id : { ParamID::subH1, ParamID::subH2, ParamID::subH3, ParamID::subOn }) proc.apvts.addParameterListener (id, this);
+}
+
+SubBars::~SubBars()
+{
+    for (auto* id : { ParamID::subH1, ParamID::subH2, ParamID::subH3, ParamID::subOn }) proc.apvts.removeParameterListener (id, this);
+    cancelPendingUpdate();
+}
+
+RangedAudioParameter* SubBars::param (int i) const
+{
+    return proc.apvts.getParameter (i == 0 ? ParamID::subH1 : i == 1 ? ParamID::subH2 : ParamID::subH3);
+}
+
+void SubBars::paint (Graphics& g)
+{
+    auto r = getLocalBounds().toFloat();
+    g.setColour (Palette::screen);
+    g.fillRoundedRectangle (r, 7.0f);
+    const bool on = proc.apvts.getRawParameterValue (ParamID::subOn)->load() > 0.5f;
+    const auto pl = plot();
+    const float colW = pl.getWidth() / 3.0f;
+    for (int i = 0; i < 3; ++i)
+    {
+        const float v = param (i)->getValue();
+        const float x = pl.getX() + colW * ((float) i + 0.5f);
+        const float yTop = pl.getBottom() - v * (pl.getHeight() - 6.0f);
+        // faint full-height guide
+        g.setColour (Palette::textDim.withAlpha (0.18f));
+        g.drawLine (x, pl.getY() + 3.0f, x, pl.getBottom(), 1.0f);
+        // the string
+        const bool hot = dragging == i || (isMouseOver() && (int) ((getMouseXYRelative().x - pl.getX()) / colW) == i);
+        const auto col = (on ? Palette::accent : Palette::textDim).withAlpha (on ? 1.0f : 0.6f);
+        g.setColour (col.withAlpha (0.25f));
+        g.drawLine (x, yTop, x, pl.getBottom(), 6.0f);
+        g.setColour (hot ? col.brighter (0.3f) : col);
+        g.drawLine (x, yTop, x, pl.getBottom(), 2.0f);
+        g.fillEllipse (Rectangle<float> (7.0f, 7.0f).withCentre ({ x, yTop }));
+        // number
+        g.setColour (Palette::textDim.withAlpha (0.7f));
+        g.setFont (uiFont (8.5f, false, 0.1f));
+        g.drawText (String (i + 1), Rectangle<float> (x + 4.0f, pl.getBottom() - 11.0f, 12.0f, 10.0f), Justification::centredLeft, false);
+    }
+}
+
+void SubBars::setFrom (Point<float> pos)
+{
+    const auto pl = plot();
+    if (dragging < 0) return;
+    const float v = jlimit (0.0f, 1.0f, (pl.getBottom() - pos.y) / (pl.getHeight() - 6.0f));
+    param (dragging)->setValueNotifyingHost (v);
+}
+
+void SubBars::mouseDown (const MouseEvent& e)
+{
+    const auto pl = plot();
+    dragging = jlimit (0, 2, (int) ((e.position.x - pl.getX()) / (pl.getWidth() / 3.0f)));
+    param (dragging)->beginChangeGesture();
+    setFrom (e.position);
+}
+
+void SubBars::mouseDrag (const MouseEvent& e) { setFrom (e.position); }
+
+void SubBars::mouseUp (const MouseEvent&)
+{
+    if (dragging >= 0) param (dragging)->endChangeGesture();
+    dragging = -1;
+    repaint();
+}
+
+// ============================================================================
+// OSC 1 waveforms
+
+std::array<float, granulum::kNumHarmonics> WavePicker::shape (int i)
+{
+    std::array<float, granulum::kNumHarmonics> h {};
+    for (int k = 1; k <= granulum::kNumHarmonics; ++k)
+    {
+        float a = 0.0f;
+        switch (i)
+        {
+            case 0:  a = k == 1 ? 1.0f : 0.0f; break;                         // SINE
+            case 1:  a = 1.0f / (float) k; break;                              // SAW: all harmonics, 1/n
+            case 2:  a = (k % 2 == 1) ? 1.0f / (float) k : 0.0f; break;        // SQUARE: odd, 1/n
+            default: a = (k % 2 == 1) ? 1.0f / (float) (k * k) : 0.0f; break; // TRIANGLE: odd, 1/n^2
+        }
+        h[(size_t) k - 1] = a;
+    }
+    return h;
+}
+
+int WavePicker::matching() const
+{
+    const auto now = proc.getHarmonics();
+    for (int i = 0; i < 4; ++i)
+    {
+        const auto ref = shape (i);
+        bool same = true;
+        for (size_t k = 0; k < ref.size() && same; ++k) same = std::abs (ref[k] - now[k]) < 0.002f;
+        if (same) return i;
+    }
+    return -1;
+}
+
+void WavePicker::paint (Graphics& g)
+{
+    auto r = getLocalBounds().toFloat();
+    g.setColour (Palette::field);
+    g.fillRoundedRectangle (r, 6.0f);
+    const int sel = matching();
+    const float w = r.getWidth() / 4.0f;
+    for (int i = 0; i < 4; ++i)
+    {
+        auto seg = Rectangle<float> (r.getX() + w * (float) i, r.getY(), w, r.getHeight());
+        const bool over = isMouseOver() && segmentAt ((float) getMouseXYRelative().x) == i;
+        if (i == sel)
+        {
+            g.setColour (Palette::buttonHi);
+            g.fillRoundedRectangle (seg.reduced (2.0f), 4.5f);
+        }
+        // the waveform icon
+        auto ic = seg.reduced (seg.getWidth() * 0.22f, seg.getHeight() * 0.30f);
+        Path p;
+        const float x0 = ic.getX(), x1 = ic.getRight(), y0 = ic.getY(), y1 = ic.getBottom(), ym = ic.getCentreY(), xm = ic.getCentreX();
+        switch (i)
+        {
+            case 0:
+                p.startNewSubPath (x0, ym);
+                for (int k = 1; k <= 16; ++k)
+                {
+                    const float t = (float) k / 16.0f;
+                    p.lineTo (x0 + (x1 - x0) * t, ym - (ym - y0) * std::sin (t * MathConstants<float>::twoPi));
+                }
+                break;
+            case 1: p.startNewSubPath (x0, ym); p.lineTo (xm, y0); p.lineTo (xm, y1); p.lineTo (x1, ym); break;
+            case 2: p.startNewSubPath (x0, y1); p.lineTo (x0, y0); p.lineTo (xm, y0); p.lineTo (xm, y1); p.lineTo (x1, y1); p.lineTo (x1, y0); break;
+            default: p.startNewSubPath (x0, ym); p.lineTo (x0 + (x1 - x0) * 0.25f, y0); p.lineTo (x0 + (x1 - x0) * 0.75f, y1); p.lineTo (x1, ym); break;
+        }
+        g.setColour (i == sel ? Palette::accent.brighter (0.2f) : over ? Palette::hi : Palette::textDim);
+        g.strokePath (p, PathStrokeType (1.5f, PathStrokeType::curved, PathStrokeType::rounded));
+    }
+}
+
+void WavePicker::mouseDown (const MouseEvent& e)
+{
+    proc.setHarmonics (shape (segmentAt (e.position.x)));
+    repaint();
+}
+
+// ============================================================================
 // LOOP mode selector
 
 int LoopModeBar::mode() const { return (int) proc.apvts.getRawParameterValue (ParamID::loopMode)->load(); }
@@ -1730,7 +1903,8 @@ void HarmonicEditor::paint (Graphics& g)
 
 PeakMeter::PeakMeter (GranulumProcessor& p) : proc (p)
 {
-    setTooltip ("Output level. The red zone means the sound is hitting the ceiling.\nClick CLIP to reset it.");
+    setTooltip ("Output level (click the bars to reset the peak).\n"
+                "CLIP = soft clipper on the output: lamp on = the sound never goes over 0 dB. Click CLIP to switch it.");
     // (no own timer: GranulumEditor::timerCallback calls frame() at 30 fps)
 }
 
@@ -1747,8 +1921,20 @@ void PeakMeter::timerCallback()
     repaint();
 }
 
-void PeakMeter::mouseDown (const MouseEvent&)
+void PeakMeter::mouseDown (const MouseEvent& e)
 {
+    // CLIP box: switch the output clipper on/off; anywhere else: reset the peak hold and the clip light
+    if (e.position.x > (float) getWidth() - 36.0f)
+    {
+        if (auto* p = proc.apvts.getParameter (ParamID::clipOn))
+        {
+            p->beginChangeGesture();
+            p->setValueNotifyingHost (p->getValue() > 0.5f ? 0.0f : 1.0f);
+            p->endChangeGesture();
+        }
+        repaint();
+        return;
+    }
     clipShown = false;
     proc.clipped.store (false);
     hold[0] = hold[1] = 0.0f;
@@ -1808,16 +1994,18 @@ void PeakMeter::paint (Graphics& g)
         g.drawText (db == 0.0f ? String ("0") : String ((int) db), Rectangle<float> (x - 12.0f, scale.getY(), 24.0f, scale.getHeight()), Justification::centred, false);
     }
 
-    g.setColour (clipShown ? Palette::clip : Palette::track);
+    // CLIP: a button for the output clipper. Lamp on = clipper on. Flashes red when the signal hits 0 dB.
+    const bool clipOn = proc.apvts.getRawParameterValue (ParamID::clipOn)->load() > 0.5f;
+    g.setColour (clipShown ? Palette::clip : Palette::button);
     g.fillRoundedRectangle (clipBox, 4.0f);
-    if (! clipShown)
-    {
-        g.setColour (Palette::clip.withAlpha (0.35f));
-        g.drawRoundedRectangle (clipBox.reduced (0.5f), 4.0f, 1.0f);
-    }
-    g.setColour (clipShown ? Colours::white : Palette::textDim.withAlpha (0.6f));
-    g.setFont (uiFont (9.0f, true, 0.1f));
-    g.drawText ("CLIP", clipBox, Justification::centred, false);
+    g.setColour (clipShown ? Palette::clip : clipOn ? Palette::clip.withAlpha (0.55f) : Palette::edge.withMultipliedAlpha (2.0f));
+    g.drawRoundedRectangle (clipBox.reduced (0.5f), 4.0f, 1.0f);
+    auto led = Rectangle<float> (5.0f, 5.0f).withCentre ({ clipBox.getX() + 6.5f, clipBox.getCentreY() });
+    if (clipOn) { g.setColour (clipShown ? Colours::white : Palette::clip); g.fillEllipse (led); }
+    else        { g.setColour (Palette::textDim.withAlpha (0.7f)); g.drawEllipse (led, 1.0f); }
+    g.setColour (clipShown ? Colours::white : clipOn ? Palette::text : Palette::textDim.withAlpha (0.6f));
+    g.setFont (uiFont (8.5f, true, 0.08f));
+    g.drawText ("CLIP", clipBox.withTrimmedLeft (9.0f), Justification::centred, false);
 }
 
 // ============================================================================
@@ -2186,6 +2374,17 @@ FilterScope::FilterScope (GranulumProcessor& p) : proc (p)
     setMouseCursor (MouseCursor::LeftRightResizeCursor);
     setTooltip ("Filter view. Drag left/right = CUTOFF, up/down = RESO. Faint = what comes in, bright = what passes.");
     // (no own timer: GranulumEditor::timerCallback calls frame() at 30 fps)
+    for (auto* id : { ParamID::cutoff, ParamID::cutoff2, ParamID::reso, ParamID::reso2, ParamID::ftype, ParamID::ftype2,
+                      ParamID::peakGain, ParamID::peakGain2, ParamID::filterOn, ParamID::filter2On })
+        proc.apvts.addParameterListener (id, this);
+}
+
+FilterScope::~FilterScope()
+{
+    for (auto* id : { ParamID::cutoff, ParamID::cutoff2, ParamID::reso, ParamID::reso2, ParamID::ftype, ParamID::ftype2,
+                      ParamID::peakGain, ParamID::peakGain2, ParamID::filterOn, ParamID::filter2On })
+        proc.apvts.removeParameterListener (id, this);
+    cancelPendingUpdate();
 }
 
 float FilterScope::xToHz (float x) const
@@ -2232,9 +2431,19 @@ void FilterScope::paint (Graphics& g)
     auto& s = proc.apvts;
     const bool on   = s.getRawParameterValue (which == 0 ? ParamID::filterOn : ParamID::filter2On)->load() > 0.5f;
     const int  type = (int) s.getRawParameterValue (which == 0 ? ParamID::ftype : ParamID::ftype2)->load();
-    const float fc  = (which == 0 ? proc.keyCutoff : proc.keyCutoff2).load (std::memory_order_relaxed);
-    const float q   = (which == 0 ? proc.viewReso1 : proc.viewReso2).load (std::memory_order_relaxed);
-    const float pk  = (which == 0 ? proc.viewPeak1 : proc.viewPeak2).load (std::memory_order_relaxed);
+    // straight from the knobs when nothing modulates them (instant), else what the audio thread computed
+    auto modulated = [this] (const char* id) { const int t = GranulumProcessor::modIndexOf (id);
+                                               for (int l = 0; l < kNumLfos; ++l) if (t >= 0 && proc.hasModulation (t, l)) return true; return false; };
+    const char* cutId  = which == 0 ? ParamID::cutoff : ParamID::cutoff2;
+    const char* resId  = which == 0 ? ParamID::reso : ParamID::reso2;
+    const char* gainId = which == 0 ? ParamID::peakGain : ParamID::peakGain2;
+    const float keyMul = type == FilterUnit::Peak ? 1.0f : std::exp2 ((proc.engineAdd.lastNote.load (std::memory_order_relaxed) - 60.0f) / 12.0f);
+    const float fc  = modulated (cutId)  ? (which == 0 ? proc.keyCutoff : proc.keyCutoff2).load (std::memory_order_relaxed)
+                                         : s.getRawParameterValue (cutId)->load() * keyMul;
+    const float q   = modulated (resId)  ? (which == 0 ? proc.viewReso1 : proc.viewReso2).load (std::memory_order_relaxed)
+                                         : s.getRawParameterValue (resId)->load();
+    const float pk  = modulated (gainId) ? (which == 0 ? proc.viewPeak1 : proc.viewPeak2).load (std::memory_order_relaxed)
+                                         : s.getRawParameterValue (gainId)->load();
     const double sr = proc.getSampleRate() > 0 ? proc.getSampleRate() : 44100.0;
 
     // grid: 100 Hz, 1 kHz, 10 kHz
@@ -3133,6 +3342,8 @@ GranulumEditor::GranulumEditor (GranulumProcessor& p)
     add (osc2Knobs, ParamID::osc2Vol,  "Vol",  Knob::Size::Small);
     add (osc2Knobs, ParamID::osc2Oct,  "Oct",  Knob::Size::Small);
     add (osc2Knobs, ParamID::osc2Semi, "Semi", Knob::Size::Small);
+    add (subKnobs, ParamID::subVol, "Vol", Knob::Size::Small);
+    add (subKnobs, ParamID::subOct, "Oct", Knob::Size::Small);
     add (osc3Knobs, ParamID::osc3Vol,   "Vol",   Knob::Size::Small);
     add (osc3Knobs, ParamID::osc3Color, "Pitch", Knob::Size::Small);
 
@@ -3147,7 +3358,6 @@ GranulumEditor::GranulumEditor (GranulumProcessor& p)
     add (distKnobs,  ParamID::distDrive, "Drive",    Knob::Size::Small);
     add (distKnobs,  ParamID::distTone,  "Tone",     Knob::Size::Small);
     add (distKnobs,  ParamID::distMix,   "Mix",      Knob::Size::Small);
-    for (auto& k : distKnobs) { k->slider.baseSensitivity = 1100; k->slider.setMouseDragSensitivity (1100); }   // distortion: very heavy
     add (delayKnobs, ParamID::delayTime, "Time",     Knob::Size::Small);
     add (delayKnobs, ParamID::delayFb,   "Feedback", Knob::Size::Small);
     add (delayKnobs, ParamID::delayTone, "Tone",     Knob::Size::Small);
@@ -3168,6 +3378,7 @@ GranulumEditor::GranulumEditor (GranulumProcessor& p)
     osc3Knobs[1]->slider.setTooltip ("COLOR: left = darker, right = brighter");
     for (auto& k : osc3Knobs) k->setCompact (true);
     for (auto& k : osc2Knobs) k->setCompact (true);
+    for (auto& k : subKnobs)  k->setCompact (true);
 
     // lamps
     for (auto* l : { &osc1Lamp, &osc2Lamp, &osc3Lamp }) addAndMakeVisible (*l);
@@ -3176,6 +3387,10 @@ GranulumEditor::GranulumEditor (GranulumProcessor& p)
     osc1LampA   = std::make_unique<ButtonAtt> (s, ParamID::osc1On,   osc1Lamp);
     osc2LampA   = std::make_unique<ButtonAtt> (s, ParamID::osc2On,   osc2Lamp);
     osc3LampA   = std::make_unique<ButtonAtt> (s, ParamID::osc3On,   osc3Lamp);
+    osc4LampA   = std::make_unique<ButtonAtt> (s, ParamID::subOn,    osc4Lamp);
+    addAndMakeVisible (osc4Lamp);
+    addAndMakeVisible (subBars);
+    osc4Lamp.setTooltip ("OSC 4 SUB: a clean low layer. It goes straight to the output: no grains, no filters, no effects.");
 
     for (auto* b : { &osc1Grain, &osc2Grain, &osc3Grain, &delaySync, &delayPing })
     {
@@ -3264,6 +3479,7 @@ GranulumEditor::GranulumEditor (GranulumProcessor& p)
     loadButton.getProperties().set ("sounds", soundsStyle);
     addChildComponent (sampleMenu);
     addAndMakeVisible (loopBar);
+    addAndMakeVisible (wavePicker);
     sampleMenu.onPick = [this] (const File& f)
     {
         toggleSampleMenu (false);
@@ -3354,9 +3570,9 @@ GranulumEditor::GranulumEditor (GranulumProcessor& p)
     selectLfo (0);
 
     setResizable (true, true);
-    getConstrainer()->setFixedAspectRatio (1080.0 / 800.0);
-    setResizeLimits (864, 640, 1620, 1200);
-    setSize (1080, 800);
+    getConstrainer()->setFixedAspectRatio (1080.0 / 860.0);   // 860: room for the OSC 4 SUB row
+    setResizeLimits (864, 688, 1620, 1290);
+    setSize (1080, 860);
     selectFx (0);
     selectFilter (0);
     startTimerHz (30);
@@ -3626,7 +3842,11 @@ void GranulumEditor::timerCallback()
     const bool gOn = (o1 && on (ParamID::osc1Grain)) || (o2 && on (ParamID::osc2Grain)) || (o3 && on (ParamID::osc3Grain));
     const bool fOn = on (ParamID::filterOn), f2On = on (ParamID::filter2On);
     const bool dOn = on (ParamID::distOn), lOn = on (ParamID::delayOn), rOn = on (ParamID::revOn);
-    dimK (osc1Knobs, o1); dim ({ &harmonics, &chordButton, &rndBars }, o1);
+    dimK (osc1Knobs, o1); dim ({ &harmonics, &chordButton, &rndBars, &wavePicker }, o1);
+    {
+        const bool o4 = on (ParamID::subOn);
+        dimK (subKnobs, o4); dim ({ &subBars }, o4);
+    }
     dimK (osc2Knobs, o2);
     dimK (osc3Knobs, o3); dim ({ &noisePicker }, o3);
     dim ({ &osc1Grain }, o1);
@@ -3726,11 +3946,24 @@ void GranulumEditor::paint (Graphics& g)
     g.drawText ("GRAIN FIELD", screenFrame.getX() + (int) (18 * sc), screenFrame.getY() + (int) (8 * sc), (int) (160 * sc), (int) (26 * sc), Justification::centredLeft);
 
 
-    for (auto a : { osc1Area, osc2Area, osc3Area })
+    for (auto a : { osc1Area, osc2Area, osc3Area, osc4Area })
     {
         if (Palette::theme == 8) { g.setColour (Palette::edge); g.drawRoundedRectangle (a.toFloat().reduced (0.5f), 10.0f, 1.0f); continue; }
         g.setColour (Colours::black.withAlpha (Palette::theme == 5 || Palette::theme == 7 ? 0.045f : 0.14f));
         g.fillRoundedRectangle (a.toFloat(), 10.0f);
+    }
+
+    // OSC 4: "DRY" tag where the other rows have GRAIN (the sub never goes through grains / filters / effects)
+    {
+        const bool subOn = proc.apvts.getRawParameterValue (ParamID::subOn)->load() > 0.5f;
+        g.setColour (Palette::edge.withMultipliedAlpha (2.0f));
+        g.drawRoundedRectangle (subTag.toFloat().reduced (0.5f), 6.0f, 1.0f);
+        g.setColour (subOn ? Palette::label : Palette::textDim.withAlpha (0.6f));
+        g.setFont (uiFont (10.0f, true, 0.14f));
+        g.drawText ("DRY", subTag.withTrimmedBottom (subTag.getHeight() / 2 - 1), Justification::centredBottom, false);
+        g.setColour (Palette::textDim.withAlpha (subOn ? 0.9f : 0.5f));
+        g.setFont (uiFont (7.5f, false, 0.08f));
+        g.drawText ("NO FX", subTag.withTrimmedTop (subTag.getHeight() / 2 + 1), Justification::centredTop, false);
     }
 
     // OSC 2 drop zone: always shows that a file can be dropped here
@@ -3807,7 +4040,7 @@ void GranulumEditor::paint (Graphics& g)
             // (no corner icon here: the box is small; the dashed frame says "drop", hover says CLICK OR DROP)
             const auto name = File::createFileWithoutCheckingPath (proc.getSampleName()).getFileNameWithoutExtension().toUpperCase();
             const String arrow;   // the SOUNDS button opens the menu, so no arrow on the name
-            auto nameArea = z.reduced (9.0f, 0.0f).withTrimmedBottom (z.getHeight() * 0.32f);
+            auto nameArea = z.reduced (9.0f + (float) clearRect().getWidth() * 0.7f, 0.0f).withTrimmedBottom (z.getHeight() * 0.32f);
             // long names: shrink a little, then marquee on hover, else "..." at the end
             float fs = 12.5f * sc;
             auto widthOf = [&] (float size) { return (float) GlyphArrangement::getStringWidthInt (uiFont (size, true, 0.12f), name + arrow); };
@@ -3831,6 +4064,17 @@ void GranulumEditor::paint (Graphics& g)
             else
             {
                 g.drawText (name, nameArea, Justification::centred, true);
+            }
+            // x in the top-right corner: remove the sample
+            {
+                const auto xr = clearRect().toFloat();
+                const bool xh = clearHover;
+                g.setColour (xh ? Palette::accent : Palette::panel.withAlpha (0.9f));
+                g.fillEllipse (xr);
+                g.setColour (xh ? Palette::onAccent() : Palette::textDim);
+                const auto c = xr.getCentre(); const float k = xr.getWidth() * 0.2f;
+                g.drawLine (c.x - k, c.y - k, c.x + k, c.y + k, 1.4f);
+                g.drawLine (c.x - k, c.y + k, c.x + k, c.y - k, 1.4f);
             }
             g.setColour (dropHover ? Palette::onScreen : Palette::accentSoft.withAlpha (on2 ? 1.0f : 0.5f));
             g.setFont (uiFont (9.5f * sc, false, 0.14f));
@@ -3971,7 +4215,9 @@ void GranulumEditor::resized()
     loopBar.setBounds (screenFrame.getX() + S (150), screenFrame.getY() + S (9), inside.getRight() - screenFrame.getX() - S (150), S (22));
 
     {
-        const int rowH = S (54);
+        const int rowH = S (52);
+        osc4Area = oscCol.removeFromBottom (rowH);
+        oscCol.removeFromBottom (S (6));
         osc3Area = oscCol.removeFromBottom (rowH);
         oscCol.removeFromBottom (S (6));
         osc2Area = oscCol.removeFromBottom (rowH);
@@ -3985,6 +4231,8 @@ void GranulumEditor::resized()
         osc1Grain.setBounds (h1.removeFromRight (S (60)).reduced (0, S (1)));
         h1.removeFromRight (S (6));
         chordButton.setBounds (h1.removeFromRight (S (124)).reduced (0, S (1)));
+        h1.removeFromRight (S (6));
+        wavePicker.setBounds (h1.removeFromRight (S (92)).reduced (0, S (1)));
         osc1Lamp.setBounds (h1);
         a1.removeFromTop (S (4));
         auto k1 = a1.removeFromRight (S (150));
@@ -4019,6 +4267,16 @@ void GranulumEditor::resized()
             osc3Knobs[(size_t) i]->setBounds (a3.removeFromRight (S (46)));
         a3.removeFromRight (S (6));
         noisePicker.setBounds (a3.withSizeKeepingCentre (a3.getWidth(), S (38)));
+
+        // OSC 4 SUB: [lamp] [3 sticks] [vol oct] [DRY]
+        auto a4 = osc4Area.reduced (S (8), S (4));
+        osc4Lamp.setBounds (a4.removeFromLeft (S (118)));
+        subTag = a4.removeFromRight (S (62)).withSizeKeepingCentre (S (62), S (30));
+        a4.removeFromRight (S (4));
+        for (int i = (int) subKnobs.size() - 1; i >= 0; --i)
+            subKnobs[(size_t) i]->setBounds (a4.removeFromRight (S (46)));
+        a4.removeFromRight (S (6));
+        subBars.setBounds (a4.withSizeKeepingCentre (jmin (a4.getWidth(), S (150)), S (40)).withX (a4.getX() + S (22)));
     }
 
     // ---- blocks ----
@@ -4191,9 +4449,19 @@ bool GranulumEditor::isInterestedInFileDrag (const StringArray& files)
     return false;
 }
 
+Rectangle<int> GranulumEditor::clearRect() const
+{
+    const int d = jmax (12, dropZone.getHeight() / 3);
+    return { dropZone.getRight() - d - 3, dropZone.getY() + 3, d, d };
+}
+
 void GranulumEditor::mouseMove (const MouseEvent& e)
 {
     if (e.eventComponent != this) return;
+    {
+        const bool xh = proc.hasSample() && clearRect().expanded (2).contains (e.getPosition());
+        if (xh != clearHover) { clearHover = xh; repaint (dropZone.expanded (2)); }
+    }
     const bool over = dropZone.contains (e.getPosition());
     if (over != dropHover) { dropHover = over; setMouseCursor (over ? MouseCursor::PointingHandCursor : MouseCursor::NormalCursor); repaint (dropZone.expanded (2)); }
 }
@@ -4209,6 +4477,13 @@ void GranulumEditor::mouseDown (const MouseEvent& e)
     proc.undoManager.beginNewTransaction();          // each click (on any control) is one undo step
     if (e.eventComponent != this) return;            // clicks on children only start the undo step
     if (sampleMenu.isVisible()) { toggleSampleMenu (false); return; }
+    if (proc.hasSample() && clearRect().expanded (2).contains (e.getPosition()))
+    {
+        proc.clearSample();               // x: remove the sample from OSC 2
+        clearHover = false;
+        repaint (dropZone.expanded (2));
+        return;
+    }
     if (dropZone.contains (e.getPosition())) launchChooser();   // click the sample box = choose your own file
 }
 

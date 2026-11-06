@@ -156,6 +156,7 @@ struct Grain
     uint8_t kind = 0;   // 0 normal, 1 shimmer, 2 reverse
     bool   perc = false; // SHIMMER "ping": sharp attack, ringing decay (glass / bells)
     double lph[3] {};    // INTO GRAINS: this grain's own position in each LFO's rhythm
+    float  gvs = -1.0f;  // INTO GRAINS: smoothed volume (no clicks on hard LFO edges)
 };
 
 // A grain that was just born — the UI turns these into flying shards.
@@ -323,6 +324,7 @@ public:
 
         const bool chimeOn = p.grainOn && p.chime > 0.001f;
         const float strikeDecay = (float) std::exp (-1.0 / (0.0015 * sr));
+        const float gvSlew = 1.0f - (float) std::exp (-1.0 / (0.0015 * sr));
         const float chimeT   = std::clamp ((p.chime - 0.55f) / 0.45f, 0.0f, 1.0f); // harmonic -> bell
         const float chimeT60 = 0.08f + 2.2f * p.chime * p.chime;                    // ring time (s)
         const float chimeAmt = 3.6f * std::pow (p.chime, 1.3f);
@@ -485,7 +487,10 @@ public:
                             vn += L.depth * L.rise * (L.table[i0] + (L.table[i0 + 1] - L.table[i0]) * f);
                             g.lph[k] += L.inc;
                         }
-                        gv = std::clamp (vn, 0.0f, 1.0f) * p.volScale;
+                        // ~1.5 ms smoothing: square / hard-edged LFOs at high rates no longer click inside the grains
+                        const float target = std::clamp (vn, 0.0f, 1.0f) * p.volScale;
+                        g.gvs = g.gvs < 0.0f ? target : g.gvs + (target - g.gvs) * gvSlew;
+                        gv = g.gvs;
                     }
                     sumL += l * w * g.gainL * gv;
                     sumR += r * w * g.gainR * gv;
@@ -738,6 +743,7 @@ private:
         g->pan = pan;
         g->kind = kind;
         g->perc = perc;
+        g->gvs = -1.0f;
         if (p.volInGrains)
         {
             // this grain's slice of the LFO rhythm comes from a moment up to ~1 s back (SCATTER), or right now

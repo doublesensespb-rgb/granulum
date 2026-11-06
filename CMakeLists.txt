@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.22)
-project(Granulum VERSION 0.9.7)
+project(Granulum VERSION 0.9.8)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)

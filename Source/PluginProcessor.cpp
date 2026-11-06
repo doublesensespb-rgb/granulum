@@ -33,7 +33,8 @@ namespace
         ParamID::revMix, ParamID::revSize, ParamID::revLowCut,
         ParamID::porta, ParamID::output,
         "lfo1Rate", "lfo2Rate", "lfo3Rate",
-        ParamID::peakGain, ParamID::peakGain2
+        ParamID::peakGain, ParamID::peakGain2,
+        ParamID::subVol
     };
 
     String hzWithNote (float hz)
@@ -388,15 +389,16 @@ std::vector<int> GranulumProcessor::chordIntervals (int i)
 
 const StringArray& GranulumProcessor::divisionNames()
 {
-    static const StringArray s { "4/1", "2/1", "1/1", "1/2", "1/4", "1/8", "1/16", "1/32",
-                                 "1/2T", "1/4T", "1/8T", "1/16T", "1/2D", "1/4D", "1/8D" };
+    // slow -> fast; each dotted (D) and triplet (T) sits right next to its straight note value, like Serum
+    static const StringArray s { "4/1", "2/1", "1/1", "1/2D", "1/2", "1/2T", "1/4D", "1/4", "1/4T", "1/8D", "1/8", "1/8T",
+                                 "1/16D", "1/16", "1/16T", "1/32", "1/32T", "1/64" };
     return s;
 }
 
 double GranulumProcessor::divisionBeats (int i)
 {
-    static const double b[] = { 16.0, 8.0, 4.0, 2.0, 1.0, 0.5, 0.25, 0.125,
-                                4.0 / 3.0, 2.0 / 3.0, 1.0 / 3.0, 1.0 / 6.0, 3.0, 1.5, 0.75 };
+    static const double b[] = { 16.0, 8.0, 4.0, 3.0, 2.0, 4.0 / 3.0, 1.5, 1.0, 2.0 / 3.0, 0.75, 0.5, 1.0 / 3.0,
+                                0.375, 0.25, 1.0 / 6.0, 0.125, 1.0 / 12.0, 0.0625 };
     return b[jlimit (0, (int) std::size (b) - 1, i)];
 }
 
@@ -516,7 +518,7 @@ AudioProcessorValueTreeState::ParameterLayout GranulumProcessor::createLayout()
     ps.push_back (std::make_unique<P> (ParameterID { ParamID::delayTime, 1 }, "Delay Time", skewed (5.0f, 2000.0f, 300.0f), 375.0f,
                                        A().withStringFromValueFunction ([] (float v, int) { return v < 1000.0f ? fmt (v, 0, " ms") : fmt (v / 1000.0f, 2, " s"); })));
     ps.push_back (std::make_unique<B> (ParameterID { ParamID::delaySync, 1 }, "Delay Sync", true));
-    ps.push_back (std::make_unique<AudioParameterChoice> (ParameterID { ParamID::delayDiv, 1 }, "Delay Division", divisionNames(), 14));
+    ps.push_back (std::make_unique<AudioParameterChoice> (ParameterID { ParamID::delayDiv, 1 }, "Delay Division", divisionNames(), divisionNames().indexOf ("1/8D")));
     ps.push_back (std::make_unique<P> (ParameterID { ParamID::delayFb, 1 },   "Delay Feedback", NormalisableRange<float> (0.0f, 0.95f), 0.4f, pct));
     ps.push_back (std::make_unique<P> (ParameterID { ParamID::delayTone, 1 }, "Delay Tone",     NormalisableRange<float> (0.0f, 1.0f), 0.6f, pct));
     ps.push_back (std::make_unique<P> (ParameterID { ParamID::delayMix, 1 },  "Delay Mix",      NormalisableRange<float> (0.0f, 1.0f), 0.3f, pct));
@@ -547,7 +549,16 @@ AudioProcessorValueTreeState::ParameterLayout GranulumProcessor::createLayout()
     ps.push_back (std::make_unique<B> (ParameterID { ParamID::mono, 1 }, "Mono", false));
     ps.push_back (std::make_unique<P> (ParameterID { ParamID::porta, 1 }, "Portamento", skewed (0.0f, 3000.0f, 200.0f), 0.0f,
                                        A().withStringFromValueFunction ([] (float v, int) { return v < 0.5f ? String ("OFF") : v < 1000.0f ? fmt (v, 0, " ms") : fmt (v / 1000.0f, 2, " s"); })));
-    ps.push_back (std::make_unique<P> (ParameterID { ParamID::output, 1 }, "Output", NormalisableRange<float> (-36.0f, 12.0f, 0.1f), -6.0f,
+    ps.push_back (std::make_unique<B> (ParameterID { ParamID::clipOn, 1 }, "Output Clipper", true));
+    // OSC 4 SUB
+    ps.push_back (std::make_unique<B> (ParameterID { ParamID::subOn, 1 },  "Sub On", false));
+    ps.push_back (std::make_unique<P> (ParameterID { ParamID::subVol, 1 }, "Sub Volume", NormalisableRange<float> (0.0f, 1.0f), 0.7f, pct));
+    ps.push_back (std::make_unique<P> (ParameterID { ParamID::subOct, 1 }, "Sub Octave", NormalisableRange<float> (-2.0f, 0.0f, 1.0f), -1.0f,
+                                       A().withStringFromValueFunction ([] (float v, int) { return String (roundToInt (v)) + " oct"; })));
+    ps.push_back (std::make_unique<P> (ParameterID { ParamID::subH1, 1 }, "Sub Harmonic 1", NormalisableRange<float> (0.0f, 1.0f), 1.0f, pct));
+    ps.push_back (std::make_unique<P> (ParameterID { ParamID::subH2, 1 }, "Sub Harmonic 2", NormalisableRange<float> (0.0f, 1.0f), 0.0f, pct));
+    ps.push_back (std::make_unique<P> (ParameterID { ParamID::subH3, 1 }, "Sub Harmonic 3", NormalisableRange<float> (0.0f, 1.0f), 0.0f, pct));
+    ps.push_back (std::make_unique<P> (ParameterID { ParamID::output, 1 }, "Output", NormalisableRange<float> (-36.0f, 12.0f, 0.1f), 0.0f,
                                        A().withStringFromValueFunction ([] (float v, int) { return fmt (v, 1, " dB"); })));
 
     // LFOs
@@ -557,7 +568,7 @@ AudioProcessorValueTreeState::ParameterLayout GranulumProcessor::createLayout()
         ps.push_back (std::make_unique<P> (ParameterID { ParamID::lfo (l, "Rate"), 1 }, n + "Rate", skewed (0.02f, 30.0f, 2.0f), 1.0f,
                                            A().withStringFromValueFunction ([] (float v, int) { return fmt (v, v < 1.0f ? 2 : 1, " Hz"); })));
         ps.push_back (std::make_unique<B> (ParameterID { ParamID::lfo (l, "Sync"), 1 }, n + "Sync", true));
-        ps.push_back (std::make_unique<AudioParameterChoice> (ParameterID { ParamID::lfo (l, "Div"), 1 }, n + "Division", divisionNames(), 4));
+        ps.push_back (std::make_unique<AudioParameterChoice> (ParameterID { ParamID::lfo (l, "Div"), 1 }, n + "Division", divisionNames(), divisionNames().indexOf ("1/4")));
         ps.push_back (std::make_unique<AudioParameterChoice> (ParameterID { ParamID::lfo (l, "Mode"), 1 }, n + "Mode", StringArray { "FREE", "RETRIG", "ENV" }, 0));
         ps.push_back (std::make_unique<P> (ParameterID { ParamID::lfo (l, "Rise"), 1 }, n + "Rise", skewed (0.0f, 8.0f, 1.5f), 0.0f, secFmt));
         ps.push_back (std::make_unique<B> (ParameterID { ParamID::lfo (l, "On"), 1 }, n + "On", true));
@@ -620,6 +631,10 @@ GranulumProcessor::GranulumProcessor()
         pLfoGrains[(size_t) l] = apvts.getRawParameterValue (ParamID::lfo (l, "Grains"));
     }
 
+    pClipOn    = apvts.getRawParameterValue (ParamID::clipOn);
+    pSubOn     = apvts.getRawParameterValue (ParamID::subOn);
+    pSubOct    = apvts.getRawParameterValue (ParamID::subOct);
+    pSubH      = { apvts.getRawParameterValue (ParamID::subH1), apvts.getRawParameterValue (ParamID::subH2), apvts.getRawParameterValue (ParamID::subH3) };
     pLoopMode  = apvts.getRawParameterValue (ParamID::loopMode);
     pLoopStart = apvts.getRawParameterValue (ParamID::loopStart);
     pLoopEnd   = apvts.getRawParameterValue (ParamID::loopEnd);
@@ -651,6 +666,7 @@ void GranulumProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
     engineAddClean.prepare (sampleRate);
     engineSmp.prepare (sampleRate);
     engineNoise.prepare (sampleRate);
+    engineSub.prepare (sampleRate);
 
     dsp::ProcessSpec spec { sampleRate, (uint32) jmax (kChunk, samplesPerBlock), 2 };
     for (auto& c : chains)
@@ -670,7 +686,7 @@ void GranulumProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
     outGain.setCurrentAndTargetValue (Decibels::decibelsToGain (apvts.getRawParameterValue (ParamID::output)->load()));
 
     const int n = jmax (kChunk, samplesPerBlock);
-    for (auto* b : { &addBuf, &smpBuf, &noiseBuf, &work, &wetBuf }) b->setSize (2, n, false, true, true);
+    for (auto* b : { &addBuf, &smpBuf, &noiseBuf, &work, &wetBuf, &subBuf }) b->setSize (2, n, false, true, true);
     colorLp[0] = colorLp[1] = colorHp[0] = colorHp[1] = 0.0f;
 
     heldNotes = 0;
@@ -926,6 +942,18 @@ granulum::Params GranulumProcessor::voiceParams (const float* v, int osc) const
     return p;
 }
 
+granulum::Params GranulumProcessor::subParams (const float* v) const
+{
+    // OSC 4 SUB: same notes, envelope and glide as the synth; root note only (no chord), never granulated
+    auto p = voiceParams (v, 0);
+    p.grainOn = false;
+    p.chordSize = 1;
+    p.chord = { 0, 0, 0, 0, 0 };
+    p.chime = 0.0f;
+    p.transpose = std::round (pSubOct->load()) * 12.0f;
+    return p;
+}
+
 void GranulumProcessor::noteOn (int note, float velocity)
 {
     if (heldNotes == 0)
@@ -943,6 +971,7 @@ void GranulumProcessor::noteOn (int note, float velocity)
     engineAddClean.noteOn (note, velocity, voiceParams (lastV.data(), 0));
     engineSmp.noteOn   (note, velocity, voiceParams (lastV.data(), 1));
     engineNoise.noteOn (note, velocity, voiceParams (lastV.data(), 2));
+    engineSub.noteOn (note, velocity, subParams (lastV.data()));
 }
 
 void GranulumProcessor::noteOff (int note)
@@ -952,6 +981,7 @@ void GranulumProcessor::noteOff (int note)
     engineAddClean.noteOff (note, voiceParams (lastV.data(), 0));
     engineSmp.noteOff   (note, voiceParams (lastV.data(), 1));
     engineNoise.noteOff (note, voiceParams (lastV.data(), 2));
+    engineSub.noteOff (note, subParams (lastV.data()));
 }
 
 void GranulumProcessor::processBlock (AudioBuffer<float>& buffer, MidiBuffer& midi)
@@ -963,11 +993,12 @@ void GranulumProcessor::processBlock (AudioBuffer<float>& buffer, MidiBuffer& mi
     addCleanSlot.swapOnAudioThread();
     smpSlot.swapOnAudioThread();
     noiseSlot.swapOnAudioThread();
+    subSlot.swapOnAudioThread();
     keyboardState.processNextMidiBuffer (midi, 0, numSamples, true);
 
     if (work.getNumSamples() < numSamples)
-        for (auto* b : { &addBuf, &smpBuf, &noiseBuf, &work, &wetBuf }) b->setSize (2, numSamples, false, false, true);
-    for (auto* b : { &addBuf, &smpBuf, &noiseBuf, &work }) b->clear();
+        for (auto* b : { &addBuf, &smpBuf, &noiseBuf, &work, &wetBuf, &subBuf }) b->setSize (2, numSamples, false, false, true);
+    for (auto* b : { &addBuf, &smpBuf, &noiseBuf, &work, &subBuf }) b->clear();
 
     hostBpm = 120.0; hostPpq = -1.0; hostPlaying = false;
     if (auto* ph = getPlayHead())
@@ -991,7 +1022,7 @@ void GranulumProcessor::processBlock (AudioBuffer<float>& buffer, MidiBuffer& mi
         else if (m.isAllNotesOff() || m.isAllSoundOff())
         {
             heldNotes = 0;
-            engineAdd.allNotesOff(); engineAddClean.allNotesOff(); engineSmp.allNotesOff(); engineNoise.allNotesOff();
+            engineAdd.allNotesOff(); engineAddClean.allNotesOff(); engineSmp.allNotesOff(); engineNoise.allNotesOff(); engineSub.allNotesOff();
         }
     }
     renderRange (pos, numSamples);
@@ -1033,8 +1064,9 @@ void GranulumProcessor::processChunk (int from, int len)
     {
         float* L = bufs[o]->getWritePointer (0) + from;
         float* R = bufs[o]->getWritePointer (1) + from;
-        const bool audible = g[o] > 0.0001f || *lastG[o] > 0.0001f;
+        bool audible = g[o] > 0.0001f || *lastG[o] > 0.0001f;
         auto vp = voiceParams (v, o);
+        const bool oscOn = (o == 0 ? pOsc1On : o == 1 ? pOsc2On : pOsc3On)->load() > 0.5f;
         auto ramp = [&] (float* l, float* r)
         {
             for (int i = 0; i < len; ++i)
@@ -1045,7 +1077,9 @@ void GranulumProcessor::processChunk (int from, int len)
         };
 
         // INTO GRAINS: LFOs on this OSC's volume whose rhythm the grains should cut up
-        if (vp.grainOn && g[o] > 0.0f)
+        // (gate on the OSC switch, not on g[o]: a deep LFO pulls g[o] to 0 for a chunk, and switching
+        //  between in-grain volume and the plain ramp at that moment was the click at fast LFO rates)
+        if (vp.grainOn && oscOn)
         {
             float base = modParams[(size_t) volTarget[o]]->getValue();
             for (auto& m : mods)
@@ -1073,6 +1107,7 @@ void GranulumProcessor::processChunk (int from, int len)
                 vp.volScale = o == 2 ? 1.4f : 1.0f;
                 vp.level = g[o];
                 vp.levelPrev = *lastG[o];
+                audible = true;
             }
         }
 
@@ -1183,17 +1218,36 @@ void GranulumProcessor::processChunk (int from, int len)
         for (int i = 0; i < len; ++i) { outL[i] += L[i]; outR[i] += R[i]; }
     }
 
+    // ---- OSC 4 SUB: straight to the output (no grains, no filters, no effects) ----
+    {
+        const float gs = pSubOn->load() > 0.5f ? v[mtSubVol] : 0.0f;
+        if (gs > 0.0001f || lastGSub > 0.0001f)
+        {
+            float* SL = subBuf.getWritePointer (0) + from;
+            float* SR = subBuf.getWritePointer (1) + from;
+            engineSub.render (SL, SR, len, subParams (v), subSlot.active.get());
+            for (int i = 0; i < len; ++i)
+            {
+                const float gg = lastGSub + (gs - lastGSub) * (float) (i + 1) / (float) len;
+                outL[i] += SL[i] * gg;
+                outR[i] += SR[i] * gg;
+            }
+        }
+        lastGSub = gs;
+    }
+
     // ---- output ----
     outGain.setTargetValue (Decibels::decibelsToGain (v[mtOutput]));
     float pl = 0.0f, pr = 0.0f;
+    const bool clipper = pClipOn->load() > 0.5f;   // CLIP button: soft clipper on the output (never over 0 dB)
     for (int i = 0; i < len; ++i)
     {
         const float gg = outGain.getNextValue();
         const float l = outL[i] * gg, r = outR[i] * gg;
         pl = jmax (pl, std::abs (l));
         pr = jmax (pr, std::abs (r));
-        outL[i] = std::tanh (l);
-        outR[i] = std::tanh (r);
+        outL[i] = clipper ? std::tanh (l) : l;
+        outR[i] = clipper ? std::tanh (r) : r;
         blockPeak = jmax (blockPeak, std::abs (outL[i]), std::abs (outR[i]));
     }
     if (pl > peakL.load (std::memory_order_relaxed)) peakL.store (pl, std::memory_order_relaxed);
@@ -1273,6 +1327,21 @@ bool GranulumProcessor::loadSample (const File& file, String& error)
     return true;
 }
 
+void GranulumProcessor::clearSample()
+{
+    auto silent = std::make_shared<granulum::SampleData>();
+    silent->sampleRate = 44100.0;
+    silent->channels.assign (2, std::vector<float> (256, 0.0f));
+    {
+        const ScopedLock sl (infoLock);
+        samplePath = File();
+        smpPeaks = nullptr;
+        smpSeconds = 0.0;
+    }
+    smpSlot.push (std::move (silent));
+    sampleLoaded.store (false);
+}
+
 void GranulumProcessor::setHarmonics (const std::array<float, granulum::kNumHarmonics>& h)
 {
     harmonics = h;
@@ -1347,6 +1416,7 @@ void GranulumProcessor::timerCallback()
 {
     addSlot.collect();
     addCleanSlot.collect();
+    subSlot.collect();
     smpSlot.collect();
     noiseSlot.collect();
 
@@ -1354,6 +1424,18 @@ void GranulumProcessor::timerCallback()
     {
         shownNoise = t;
         noiseSlot.push (noises[(size_t) t]);
+    }
+
+    // OSC 4 SUB source: 3 harmonics (rebuilt when the sticks move)
+    {
+        const std::array<float, 3> now { pSubH[0]->load(), pSubH[1]->load(), pSubH[2]->load() };
+        if (now != subShown)
+        {
+            subShown = now;
+            std::array<float, granulum::kNumHarmonics> amps {};
+            amps[0] = now[0]; amps[1] = now[1]; amps[2] = now[2];
+            subSlot.push (std::make_shared<granulum::SampleData> (granulum::renderAdditiveSplit (amps, 0xffffu).first));
+        }
     }
 
     if (harmonicsDirty.exchange (false))
@@ -1628,6 +1710,24 @@ void GranulumProcessor::setStateInformation (const void* data, int sizeInBytes)
     if (xml == nullptr || ! xml->hasTagName (apvts.state.getType())) return;
 
     auto state = ValueTree::fromXml (*xml);
+    // before 0.9.8 the note values were in another order: map the old index -> name -> new index
+    {
+        const String ver = state.getProperty ("pluginVersion", "0").toString();
+        if (ver.compareNatural ("0.9.8") < 0)
+        {
+            static const StringArray oldNames { "4/1", "2/1", "1/1", "1/2", "1/4", "1/8", "1/16", "1/32",
+                                                "1/2T", "1/4T", "1/8T", "1/16T", "1/2D", "1/4D", "1/8D" };
+            for (auto child : state)
+            {
+                const String id = child.getProperty ("id").toString();
+                if (id == ParamID::delayDiv || id == "lfo1Div" || id == "lfo2Div" || id == "lfo3Div")
+                {
+                    const int o = jlimit (0, oldNames.size() - 1, (int) std::round ((double) child.getProperty ("value")));
+                    child.setProperty ("value", jmax (0, divisionNames().indexOf (oldNames[o])), nullptr);
+                }
+            }
+        }
+    }
     // before 0.9.4 the distortion menu was TUBE, HARD CLIP, FOLD, BITCRUSH, RECTIFY; now FOLD, TUBE, HARD CLIP, BITCRUSH
     {
         const String ver = state.getProperty ("pluginVersion", "0").toString();
