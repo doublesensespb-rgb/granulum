@@ -284,6 +284,7 @@ public:
     void mouseDrag (const juce::MouseEvent&) override;
     void mouseUp (const juce::MouseEvent&) override;
     void mouseMove (const juce::MouseEvent&) override;
+    void mouseWheelMove (const juce::MouseEvent&, const juce::MouseWheelDetails&) override;
     void frame() { if (anyMod()) repaint(); }   // editor's 30 fps tick: sticks with an LFO move live
     // LFO on a sub stick (same as on OSC 1 sticks)
     bool isInterestedInDragSource (const SourceDetails& s) override { return s.description.toString().startsWith ("lfo:"); }
@@ -328,7 +329,9 @@ public:
     int lfoDropBar = -1;        // stick under a dragged LFO
     struct ChipHit { int harm = -1, lfo = -1; };
     ChipHit chipAt (juce::Point<float>) const;
-    juce::Rectangle<float> chipRect (int harm, int slot) const;
+    float lfoLineX (int harm, int slot) const;
+    void mouseWheelMove (const juce::MouseEvent&, const juce::MouseWheelDetails&) override;
+    static inline int lfoStickStyle = 1;   // owner's choice B (ghost of the stick). 0 line left, 2 dotted rail + bead, 3 rail + dot
     ChipHit chipDrag; float chipStartDepth = 0.0f, chipStartY = 0.0f;
     bool showHint = true;       // first-run hint over the dots
     float introT = 0.0f;        // time since open, drives the one-off light wave
@@ -353,7 +356,7 @@ private:
     std::vector<Crystal> crystals;
     juce::Random rng;
 public:
-    int rowStyle = 11;   // 0.99: little switches (owner's choice B); drag across to set several
+    int rowStyle = 11;   // 0.99.1: horizontal switches (owner's choice): copper = into the grains, grey = clean; drag across to set several (16 = vertical, tried)
     int hintStyle = 0;   // first-run call-out: 0 dark with copper frame, 1 solid copper
     static inline int barStyle = 5;   // 5 strings, 0 sand wave, 1 frosted glass, 2 capsule + filament, 3 line + cap, 4 fade   // 0 = pearl beads, 1 = glowing line (design preview)
 };

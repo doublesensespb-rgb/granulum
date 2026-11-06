@@ -357,6 +357,59 @@ int main (int argc, char** argv)
         setP (ParamID::filterOn, 1.0f); setP (ParamID::ftype, 4.0f); setP (ParamID::cutoff, 1200.0f); setP (ParamID::peakGain, 24.0f); setP (ParamID::peakQ, 4.0f);
         p.keyboardState.noteOn (1, 48, 0.9f);
         ed->harmonicEditor().showHint = false;
+        if (argc > 3 && String (argv[3]) == "vsw")
+        {
+            // horizontal vs vertical GRAIN switches, LFO style B (one LFO per stick)
+            auto& he = ed->harmonicEditor();
+            for (int st : { 11, 16 })
+            {
+                he.rowStyle = st; he.resized(); he.hoverBar = 4;
+                run (p, ed, 25);
+                const auto area = ed->getLocalArea (&he, he.getLocalBounds()).expanded (6, 6);
+                auto img = base->createComponentSnapshot (area, true, 3.0f);
+                PNGImageFormat png;
+                outDir.getChildFile ("sw" + String (st) + ".png").deleteFile();
+                FileOutputStream os (outDir.getChildFile ("sw" + String (st) + ".png"));
+                png.writeImageToStream (img, os);
+            }
+            he.hoverBar = -1;
+            run (p, ed, 20);
+            save (*base, outDir, "full-vertical.png");
+            return 0;
+        }
+        if (argc > 3 && String (argv[3]) == "multi")
+        {
+            // B with several LFOs: stick 3 gets LFO 1 + 2, stick 7 gets LFO 1 + 2 + 3
+            setP (ParamID::lfo (1, "On").toRawUTF8(), 1.0f); setP (ParamID::lfo (2, "On").toRawUTF8(), 1.0f);
+            p.setModulation (kHarmTarget0 + 2, 1, 0.3f);
+            p.setModulation (kHarmTarget0 + 6, 1, 0.35f); p.setModulation (kHarmTarget0 + 6, 2, -0.15f);
+            HarmonicEditor::lfoStickStyle = 1;
+            auto& he = ed->harmonicEditor();
+            const auto area = ed->getLocalArea (&he, he.getLocalBounds()).expanded (6, 6);
+            run (p, ed, 25);
+            auto img = base->createComponentSnapshot (area, true, 3.0f);
+            PNGImageFormat png;
+            outDir.getChildFile ("lfoB-multi.png").deleteFile();
+            FileOutputStream os (outDir.getChildFile ("lfoB-multi.png"));
+            png.writeImageToStream (img, os);
+            return 0;
+        }
+        if (argc > 3 && String (argv[3]) == "styles")
+        {
+            auto& he = ed->harmonicEditor();
+            const auto area = ed->getLocalArea (&he, he.getLocalBounds()).expanded (6, 6);
+            for (int st = 0; st < 4; ++st)
+            {
+                HarmonicEditor::lfoStickStyle = st;
+                run (p, ed, 25);
+                auto img = base->createComponentSnapshot (area, true, 3.0f);
+                PNGImageFormat png;
+                outDir.getChildFile ("lfostyle" + String (st) + ".png").deleteFile();
+                FileOutputStream os (outDir.getChildFile ("lfostyle" + String (st) + ".png"));
+                png.writeImageToStream (img, os);
+            }
+            return 0;
+        }
         run (p, ed, 60);
         save (*base, outDir, "v0991.png");
         return 0;

@@ -1301,8 +1301,17 @@ std::pair<int, int> SubBars::chipAt (Point<float> pos) const
     for (int i = 0; i < 3; ++i)
     {
         int slot = 0;
+        const auto pl = plot();
+        const float colW = pl.getWidth() / 3.0f, x = pl.getX() + colW * ((float) i + 0.5f);
         for (int l = 0; l < kNumLfos; ++l)
-            if (proc.hasModulation (mtSubH1 + i, l)) { if (chipRect (i, slot).expanded (2.0f).contains (pos)) return { i, l }; ++slot; }
+            if (proc.hasModulation (mtSubH1 + i, l))
+            {
+                auto yOf = [&pl] (float vv) { return pl.getBottom() - jlimit (0.0f, 1.0f, vv) * (pl.getHeight() - 6.0f); };
+                const float y0 = yOf (param (i)->getValue()), y1 = yOf (param (i)->getValue() + proc.getModulationDepth (mtSubH1 + i, l));
+                // the range above/below the stick head only, so dragging the stick itself still moves the stick
+                if (Rectangle<float> (x - 5.0f, jmin (y0, y1) - 3.0f, 10.0f, std::abs (y1 - y0) + 6.0f).contains (pos) && std::abs (pos.y - y0) > 5.0f) return { i, l };
+                ++slot;
+            }
     }
     return { -1, -1 };
 }
@@ -1312,9 +1321,24 @@ void SubBars::itemDropped (const SourceDetails& s)
     const int i = colAt ((float) s.localPosition.x);
     const int l = s.description.toString().fromFirstOccurrenceOf ("lfo:", false, false).getIntValue();
     dropCol = -1;
+    for (int o = 0; o < kNumLfos; ++o) if (o != l && proc.hasModulation (mtSubH1 + i, o)) proc.removeModulation (mtSubH1 + i, o);   // one LFO per stick
     if (! proc.hasModulation (mtSubH1 + i, l))
         proc.setModulation (mtSubH1 + i, l, param (i)->getValue() > 0.5f ? -0.5f : 0.5f);
     repaint();
+}
+
+void SubBars::mouseWheelMove (const MouseEvent& e, const MouseWheelDetails& w)
+{
+    const int i = colAt (e.position.x);
+    for (int l = 0; l < kNumLfos; ++l)
+        if (proc.hasModulation (mtSubH1 + i, l))
+        {
+            const float d = jlimit (-1.0f, 1.0f, proc.getModulationDepth (mtSubH1 + i, l) + (w.deltaY > 0 ? 0.03f : -0.03f) * (w.isReversed ? -1.0f : 1.0f));
+            proc.setModulation (mtSubH1 + i, l, d);
+            repaint();
+            return;
+        }
+    Component::mouseWheelMove (e, w);
 }
 
 void SubBars::mouseMove (const MouseEvent& e)
@@ -1322,7 +1346,7 @@ void SubBars::mouseMove (const MouseEvent& e)
     const auto c = chipAt (e.position);
     if (c.first >= 0)
     {
-        setTooltip ("LFO " + String (c.second + 1) + " on SUB stick " + String (c.first + 1) + ":  drag up / down = depth,  right-click = remove");
+        setTooltip ("LFO " + String (c.second + 1) + " on SUB stick " + String (c.first + 1) + ":  mouse wheel or drag = depth,  right-click = remove");
         setMouseCursor (MouseCursor::UpDownResizeCursor);
     }
     else
@@ -1397,18 +1421,17 @@ void SubBars::paint (Graphics& g)
             const auto col = Palette::lfo (l).withMultipliedAlpha (proc.isLfoOn (l) ? 1.0f : 0.35f);
             const float base = param (i)->getValue(), depth = proc.getModulationDepth (mtSubH1 + i, l);
             auto yOf = [&pl] (float vv) { return pl.getBottom() - jlimit (0.0f, 1.0f, vv) * (pl.getHeight() - 6.0f); };
+            // same look as OSC 1 (style B): a ghost of the stick in the LFO colour over its range + a glow at the live level
+            const float y0 = yOf (base), y1 = yOf (base + depth);
+            g.setColour (col.withAlpha (0.22f));
+            g.fillRoundedRectangle (Rectangle<float> (x - 3.0f, jmin (y0, y1), 6.0f, std::abs (y1 - y0)), 2.5f);
             g.setColour (col.withAlpha (0.55f));
-            g.drawLine (x + 5.0f + (float) slot * 2.5f, yOf (base), x + 5.0f + (float) slot * 2.5f, yOf (base + depth), 2.0f);
-            const auto cr = chipRect (i, slot);
-            g.setColour (col); g.fillEllipse (cr);
-            g.setColour (Palette::deep); g.setFont (uiFont (7.5f, true));
-            g.drawText (String (l + 1), cr, Justification::centred, false);
-            if (slot == 0)
-            {
-                const float live = proc.modNorm[(size_t) (mtSubH1 + i)].load (std::memory_order_relaxed);
-                g.setColour (Colours::white.withAlpha (0.9f));
-                g.fillRoundedRectangle (Rectangle<float> (10.0f, 2.5f).withCentre ({ x, yOf (live) }), 1.2f);
-            }
+            g.fillRoundedRectangle (Rectangle<float> (x - 3.0f, y1 - 0.75f, 6.0f, 1.5f), 0.7f);
+            const float live = proc.modNorm[(size_t) (mtSubH1 + i)].load (std::memory_order_relaxed);
+            g.setColour (col.withAlpha (0.35f));
+            g.fillEllipse (Rectangle<float> (12.0f, 6.0f).withCentre ({ x, yOf (live) }));
+            g.setColour (col);
+            g.fillRoundedRectangle (Rectangle<float> (10.0f, 1.8f).withCentre ({ x, yOf (live) }), 0.9f);
             ++slot;
         }
     }
@@ -1661,14 +1684,14 @@ Rectangle<float> HarmonicEditor::barArea() const
 {
     auto r = getLocalBounds().toFloat().reduced (7.0f, 6.0f);
     r.removeFromLeft (kGrainLabelW - 7.0f);
-    r.removeFromBottom (rowStyle >= 10 ? 26.0f : 20.0f);
+    r.removeFromBottom (rowStyle == 16 ? 28.0f : rowStyle >= 10 ? 26.0f : 20.0f);
     return r;
 }
 
 Rectangle<float> HarmonicEditor::pillRow() const
 {
     auto a = barArea();
-    return { a.getX(), a.getBottom() + 5.0f, a.getWidth(), rowStyle >= 10 ? 19.0f : 13.0f };
+    return { a.getX(), a.getBottom() + 5.0f, a.getWidth(), rowStyle == 16 ? 21.0f : rowStyle >= 10 ? 19.0f : 13.0f };
 }
 
 int HarmonicEditor::barAt (float x) const
@@ -1721,32 +1744,56 @@ void HarmonicEditor::itemDropped (const SourceDetails& s)
     const int k = barAt ((float) s.localPosition.x);
     const int l = s.description.toString().fromFirstOccurrenceOf ("lfo:", false, false).getIntValue();
     lfoDropBar = -1;
+    // one LFO per stick: a new one replaces the old one
+    for (int o = 0; o < kNumLfos; ++o) if (o != l && proc.hasModulation (kHarmTarget0 + k, o)) proc.removeModulation (kHarmTarget0 + k, o);
     if (! proc.hasModulation (kHarmTarget0 + k, l))
         proc.setModulation (kHarmTarget0 + k, l, h[(size_t) k] > 0.5f ? -0.5f : 0.5f);   // always audible: down from a tall stick, up from a short one
     repaint();
 }
 
-Rectangle<float> HarmonicEditor::chipRect (int harm, int slot) const
+float HarmonicEditor::lfoLineX (int harm, int slot) const
 {
     const auto a = barArea();
     const float cw = a.getWidth() / (float) granulum::kNumHarmonics;
-    const float d = jmin (11.0f, cw - 2.0f);
-    return Rectangle<float> (d, d).withCentre ({ a.getX() + cw * ((float) harm + 0.5f), a.getY() + d * 0.5f + 1.0f + (float) slot * (d + 2.0f) });
+    return a.getX() + cw * ((float) harm + 0.5f) - jmin (5.0f, cw * 0.32f) - (float) slot * 2.5f;
 }
 
+// the LFO line next to a stick: hovering it explains, dragging it up/down sets depth, right-click removes
 HarmonicEditor::ChipHit HarmonicEditor::chipAt (Point<float> pos) const
 {
+    const auto a = barArea();
+    auto yOf = [&a] (float v) { return a.getBottom() - jlimit (0.0f, 1.0f, v) * a.getHeight(); };
     for (int k = 0; k < granulum::kNumHarmonics; ++k)
     {
         int slot = 0;
         for (int l = 0; l < kNumLfos; ++l)
             if (proc.hasModulation (kHarmTarget0 + k, l))
             {
-                if (chipRect (k, slot).expanded (2.0f).contains (pos)) return { k, l };
+                const float y0 = yOf (h[(size_t) k]), y1 = yOf (h[(size_t) k] + proc.getModulationDepth (kHarmTarget0 + k, l));
+                const float cx = a.getX() + a.getWidth() / (float) granulum::kNumHarmonics * ((float) k + 0.5f);
+                const float hx = lfoStickStyle == 1 || lfoStickStyle == 2 ? cx : lfoLineX (k, slot);
+                const auto r = Rectangle<float> (hx - 4.0f, jmin (y0, y1) - 3.0f, 8.0f, std::abs (y1 - y0) + 6.0f);
+                if (r.contains (pos)) return { k, l };
                 ++slot;
             }
     }
     return {};
+}
+
+// mouse wheel over a stick that has an LFO: deeper / shallower
+void HarmonicEditor::mouseWheelMove (const MouseEvent& e, const MouseWheelDetails& w)
+{
+    if (e.position.y >= pillRow().getY() - 3.0f) return;
+    const int k = barAt (e.position.x);
+    for (int l = 0; l < kNumLfos; ++l)
+    {
+        if (! proc.hasModulation (kHarmTarget0 + k, l)) continue;
+        const float d = jlimit (-1.0f, 1.0f, proc.getModulationDepth (kHarmTarget0 + k, l) + (w.deltaY > 0 ? 0.03f : -0.03f) * (w.isReversed ? -1.0f : 1.0f));
+        proc.setModulation (kHarmTarget0 + k, l, d);
+        repaint();
+        return;
+    }
+    Component::mouseWheelMove (e, w);
 }
 
 void HarmonicEditor::mouseMove (const MouseEvent& e)
@@ -1754,7 +1801,7 @@ void HarmonicEditor::mouseMove (const MouseEvent& e)
     if (const auto c = chipAt (e.position); c.harm >= 0)
     {
         hoverBar = -1;
-        setTooltip ("LFO " + String (c.lfo + 1) + " on harmonic " + String (c.harm + 1) + ":  drag up / down = depth,  right-click = remove");
+        setTooltip ("LFO " + String (c.lfo + 1) + " on harmonic " + String (c.harm + 1) + ":  mouse wheel or drag = depth,  right-click = remove");
         setMouseCursor (MouseCursor::UpDownResizeCursor);
         return;
     }
@@ -2070,44 +2117,89 @@ void HarmonicEditor::paint (Graphics& g)
         }
     }
 
-    // ---- LFO on sticks: range line, live level, chips ----
+    // ---- LFO on sticks (no numbers; colour = which LFO). Style picked by lfoStickStyle (design preview) ----
     {
         const float cw = a.getWidth() / (float) granulum::kNumHarmonics;
         auto yOf = [&a] (float v) { return a.getBottom() - jlimit (0.0f, 1.0f, v) * a.getHeight(); };
         if (lfoDropBar >= 0)
         {
-            g.setColour (Colours::white.withAlpha (0.10f));
+            g.setColour (Colours::white.withAlpha (0.08f));
             g.fillRoundedRectangle (Rectangle<float> (a.getX() + cw * (float) lfoDropBar, a.getY(), cw, a.getHeight()), 3.0f);
         }
         for (int k = 0; k < granulum::kNumHarmonics; ++k)
         {
-            int slot = 0;
             const float cx = a.getX() + cw * ((float) k + 0.5f);
+            const float base = h[(size_t) k];
+            const float live = proc.harmLive[(size_t) k].load (std::memory_order_relaxed);
+            int slot = 0, count = 0;
+            for (int l = 0; l < kNumLfos; ++l) count += proc.hasModulation (kHarmTarget0 + k, l) ? 1 : 0;
             for (int l = 0; l < kNumLfos; ++l)
             {
                 if (! proc.hasModulation (kHarmTarget0 + k, l)) continue;
                 const auto col = Palette::lfo (l).withMultipliedAlpha (proc.isLfoOn (l) ? 1.0f : 0.35f);
                 const float depth = proc.getModulationDepth (kHarmTarget0 + k, l);
-                // range: from the stick level to level + depth, a thin line just right of the stick
-                const float lx = cx + jmin (5.0f, cw * 0.3f) + (float) slot * 2.5f;
-                g.setColour (col.withAlpha (0.55f));
-                g.drawLine (lx, yOf (h[(size_t) k]), lx, yOf (h[(size_t) k] + depth), 2.0f);
-                // chip with the LFO number
-                const auto cr = chipRect (k, slot);
-                g.setColour (col);
-                g.fillEllipse (cr);
-                g.setColour (Palette::deep);
-                g.setFont (uiFont (cr.getHeight() * 0.72f, true));
-                g.drawText (String (l + 1), cr, Justification::centred, false);
+                const float y0 = yOf (base), y1 = yOf (base + depth);
+                const float lx = lfoLineX (k, slot);
+                switch (lfoStickStyle)
+                {
+                    case 0:   // A: a thin line in the LFO colour LEFT of the stick = the range; a short tick = where it is now
+                    {
+                        g.setColour (col.withAlpha (0.85f));
+                        g.drawLine (lx, jmin (y0, y1), lx, jmax (y0, y1), 1.4f);
+                        if (slot == 0)
+                        {
+                            g.setColour (col);
+                            g.fillRoundedRectangle (Rectangle<float> (5.0f, 2.0f).withCentre ({ lx, yOf (live) }), 1.0f);
+                        }
+                        break;
+                    }
+                    case 1:   // B: a soft ghost of the stick in the LFO colour over its range. Several LFOs: thin ghosts side by side
+                    {         // (one lane each, never mixed), and ONE glow across the stick at the summed live level
+                        const float laneW = count > 1 ? 3.5f : 6.0f;
+                        const float lx0 = cx - laneW * 0.5f * (float) count + laneW * (float) slot;
+                        auto ghost = Rectangle<float> (lx0 + 0.4f, jmin (y0, y1), laneW - 0.8f, std::abs (y1 - y0));
+                        g.setColour (col.withAlpha (0.22f));
+                        g.fillRoundedRectangle (ghost, laneW * 0.4f);
+                        g.setColour (col.withAlpha (0.55f));
+                        g.fillRoundedRectangle (ghost.withHeight (1.5f).withY (y1 - 0.75f), 0.7f);   // end of this LFO's reach
+                        if (slot == count - 1)
+                        {
+                            const auto glow = count > 1 ? Colour (0xfff1e4cb) : col;   // summed level of all LFOs: ivory when several
+                            g.setColour (glow.withAlpha (0.35f));
+                            g.fillEllipse (Rectangle<float> (12.0f, 6.0f).withCentre ({ cx, yOf (live) }));
+                            g.setColour (glow);
+                            g.fillRoundedRectangle (Rectangle<float> (jmin (10.0f, cw * 0.7f), 1.8f).withCentre ({ cx, yOf (live) }), 0.9f);
+                        }
+                        break;
+                    }
+                    case 2:   // C: a dotted rail in the LFO colour right on the stick's axis, a glowing bead at the live level
+                    {
+                        Path rail; rail.startNewSubPath (cx, y0); rail.lineTo (cx, y1);
+                        Path dashed; const float dl[] = { 1.5f, 2.5f };
+                        PathStrokeType (1.2f).createDashedStroke (dashed, rail, dl, 2);
+                        g.setColour (col.withAlpha (0.8f)); g.fillPath (dashed);
+                        if (slot == 0)
+                        {
+                            const auto pt = Point<float> (cx, yOf (live));
+                            g.setColour (col.withAlpha (0.3f)); g.fillEllipse (Rectangle<float> (10.0f, 10.0f).withCentre (pt));
+                            g.setColour (col); g.fillEllipse (Rectangle<float> (4.5f, 4.5f).withCentre (pt));
+                        }
+                        break;
+                    }
+                    default:  // D: faint rail left of the stick, a small LFO-coloured dot riding on it
+                    {
+                        g.setColour (col.withAlpha (0.28f));
+                        g.drawLine (lx, jmin (y0, y1), lx, jmax (y0, y1), 1.0f);
+                        if (slot == 0)
+                        {
+                            const auto pt = Point<float> (lx, yOf (live));
+                            g.setColour (col.withAlpha (0.35f)); g.fillEllipse (Rectangle<float> (8.0f, 8.0f).withCentre (pt));
+                            g.setColour (col); g.fillEllipse (Rectangle<float> (4.0f, 4.0f).withCentre (pt));
+                        }
+                        break;
+                    }
+                }
                 ++slot;
-            }
-            if (slot > 0)
-            {
-                // live level of this stick (stick + LFO)
-                const float live = proc.harmLive[(size_t) k].load (std::memory_order_relaxed);
-                const float y = yOf (live);
-                g.setColour (Colours::white.withAlpha (0.9f));
-                g.fillRoundedRectangle (Rectangle<float> (jmin (12.0f, cw * 0.8f), 2.5f).withCentre ({ cx, y }), 1.2f);
             }
         }
     }
@@ -2180,6 +2272,20 @@ void HarmonicEditor::paint (Graphics& g)
                     const auto c = chip.getCentre(); const float a2 = jmin (chip.getWidth(), chip.getHeight()) * 0.2f;
                     g.drawLine (c.x - a2, c.y, c.x + a2, c.y, 1.1f); g.drawLine (c.x, c.y - a2, c.x, c.y + a2, 1.1f);
                 }
+            }
+            else if (rowStyle == 16)
+            {
+                // vertical switches: knob UP = into the grains (copper), DOWN = clean
+                auto tr = cell.withSizeKeepingCentre (8.0f, jmin (cell.getHeight() - 1.0f, 17.0f));
+                g.setColour (on ? cu.withAlpha (alpha) : Palette::button.withAlpha (alpha));
+                g.fillRoundedRectangle (tr, 4.0f);
+                if (hotK) { g.setColour (Colours::white.withAlpha (0.5f * alpha)); g.drawRoundedRectangle (tr.expanded (1.0f), 5.0f, 1.0f); }
+                const float kr = 3.1f;
+                const auto kc = Point<float> (tr.getCentreX(), on ? tr.getY() + 4.0f : tr.getBottom() - 4.0f);
+                g.setColour (Colours::black.withAlpha (0.25f * alpha));
+                g.fillEllipse (Rectangle<float> (kr * 2.0f, kr * 2.0f).withCentre (kc.translated (0.0f, 0.6f)));
+                g.setColour ((on ? Colours::white : Palette::textDim).withAlpha (alpha));
+                g.fillEllipse (Rectangle<float> (kr * 2.0f, kr * 2.0f).withCentre (kc));
             }
             else if (rowStyle == 11)
             {
