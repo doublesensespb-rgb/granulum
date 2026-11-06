@@ -343,6 +343,25 @@ int main (int argc, char** argv)
         return 0;
     }
 
+    // design preview: "Snapshot <dir> v0991" -> LFO on OSC 1 / SUB sticks, PEAK with Q, version plate
+    if (argc > 2 && String (argv[2]) == "v0991")
+    {
+        setP (ParamID::osc1On, 1.0f); setP (ParamID::osc1Grain, 1.0f);
+        p.setHarmonics (WavePicker::shape (1));
+        p.setGrainMask (0xffc4u);
+        p.setModulation (kHarmTarget0 + 2, 0, 0.5f);
+        p.setModulation (kHarmTarget0 + 6, 0, 0.6f);
+        p.setModulation (kHarmTarget0 + 4, 1, 0.45f);
+        setP (ParamID::subOn, 1.0f); setP (ParamID::subH2, 0.45f); setP (ParamID::subH3, 0.2f);
+        p.setModulation (GranulumProcessor::modIndexOf (ParamID::subH2), 2, 0.4f);
+        setP (ParamID::filterOn, 1.0f); setP (ParamID::ftype, 4.0f); setP (ParamID::cutoff, 1200.0f); setP (ParamID::peakGain, 24.0f); setP (ParamID::peakQ, 4.0f);
+        p.keyboardState.noteOn (1, 48, 0.9f);
+        ed->harmonicEditor().showHint = false;
+        run (p, ed, 60);
+        save (*base, outDir, "v0991.png");
+        return 0;
+    }
+
     // design preview: "Snapshot <dir> rows" -> GRAIN row variants A..F, each: first open (hint) and in use (hover)
     if (argc > 2 && String (argv[2]) == "rows")
     {

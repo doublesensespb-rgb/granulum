@@ -273,8 +273,8 @@ public:
 };
 
 // OSC 4 SUB: three harmonic sticks (fundamental, octave, octave + fifth), same look as the OSC 1 strings
-class SubBars final : public juce::Component, public juce::SettableTooltipClient, private juce::AudioProcessorValueTreeState::Listener,
-                      private juce::AsyncUpdater
+class SubBars final : public juce::Component, public juce::SettableTooltipClient, public juce::DragAndDropTarget,
+                      private juce::AudioProcessorValueTreeState::Listener, private juce::AsyncUpdater
 {
 public:
     explicit SubBars (GranulumProcessor&);
@@ -283,7 +283,20 @@ public:
     void mouseDown (const juce::MouseEvent&) override;
     void mouseDrag (const juce::MouseEvent&) override;
     void mouseUp (const juce::MouseEvent&) override;
+    void mouseMove (const juce::MouseEvent&) override;
+    void frame() { if (anyMod()) repaint(); }   // editor's 30 fps tick: sticks with an LFO move live
+    // LFO on a sub stick (same as on OSC 1 sticks)
+    bool isInterestedInDragSource (const SourceDetails& s) override { return s.description.toString().startsWith ("lfo:"); }
+    void itemDragMove (const SourceDetails& s) override { dropCol = colAt ((float) s.localPosition.x); repaint(); }
+    void itemDragExit (const SourceDetails&) override { dropCol = -1; repaint(); }
+    void itemDropped (const SourceDetails&) override;
 private:
+    int colAt (float x) const { const auto pl = plot(); return juce::jlimit (0, 2, (int) ((x - pl.getX()) / (pl.getWidth() / 3.0f))); }
+    bool anyMod() const;
+    juce::Rectangle<float> chipRect (int col, int slot) const;
+    std::pair<int, int> chipAt (juce::Point<float>) const;   // {col, lfo} or {-1,-1}
+    int dropCol = -1;
+    std::pair<int, int> chipDrag { -1, -1 }; float chipStartDepth = 0.0f, chipStartY = 0.0f;
     void parameterChanged (const juce::String&, float) override { triggerAsyncUpdate(); }
     void handleAsyncUpdate() override { repaint(); }
     juce::RangedAudioParameter* param (int i) const;
@@ -294,9 +307,14 @@ private:
 };
 
 // Additive bars: draw the 16 harmonic amplitudes; the gold GRAIN row below picks which harmonics are granulated
-class HarmonicEditor final : public juce::Component, public juce::SettableTooltipClient, private juce::Timer
+class HarmonicEditor final : public juce::Component, public juce::SettableTooltipClient, public juce::DragAndDropTarget, private juce::Timer
 {
 public:
+    // LFO on a stick: drop an LFO tab onto a stick; its chip at the top: drag up/down = depth, right-click = remove
+    bool isInterestedInDragSource (const SourceDetails&) override;
+    void itemDragMove (const SourceDetails&) override;
+    void itemDragExit (const SourceDetails&) override;
+    void itemDropped (const SourceDetails&) override;
     void frame() { timerCallback(); }   // driven by the editor's single 30 fps tick (one repaint pass per frame)
     explicit HarmonicEditor (GranulumProcessor&);
     void paint (juce::Graphics&) override;
@@ -307,6 +325,11 @@ public:
     void mouseExit (const juce::MouseEvent&) override;
 
     int hoverBar = -1;          // public so the snapshot tool can show the hover look
+    int lfoDropBar = -1;        // stick under a dragged LFO
+    struct ChipHit { int harm = -1, lfo = -1; };
+    ChipHit chipAt (juce::Point<float>) const;
+    juce::Rectangle<float> chipRect (int harm, int slot) const;
+    ChipHit chipDrag; float chipStartDepth = 0.0f, chipStartY = 0.0f;
     bool showHint = true;       // first-run hint over the dots
     float introT = 0.0f;        // time since open, drives the one-off light wave
 
@@ -712,6 +735,10 @@ private:
     juce::TooltipWindow tooltips { this, 600 };
 
     std::vector<std::unique_ptr<Knob>> peakKnobs;   // GAIN for the PEAK filter type, shown instead of RESO
+    std::vector<std::unique_ptr<Knob>> peakQKnobs;  // Q (width) for the PEAK filter type
+    juce::Rectangle<int> filterRow1;
+    bool peakLayout[2] { false, false };
+    void layoutFilterKnobs();
     std::vector<std::unique_ptr<Knob>> subKnobs;   // OSC 4 SUB: VOL, OCT
     std::vector<std::unique_ptr<Knob>> heroKnobs, smallKnobs, osc1Knobs, osc2Knobs, osc3Knobs, filterKnobs, filter2Knobs,
                                        distKnobs, delayKnobs, revKnobs, globalKnobs;

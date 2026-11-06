@@ -35,7 +35,9 @@ namespace
         "lfo1Rate", "lfo2Rate", "lfo3Rate",
         ParamID::peakGain, ParamID::peakGain2,
         ParamID::subVol,
-        ParamID::osc1Pan, ParamID::osc2Pan, ParamID::osc3Pan, ParamID::spread
+        ParamID::osc1Pan, ParamID::osc2Pan, ParamID::osc3Pan, ParamID::spread,
+        ParamID::subH1, ParamID::subH2, ParamID::subH3,
+        ParamID::peakQ, ParamID::peakQ2
     };
 
     String hzWithNote (float hz)
@@ -154,7 +156,7 @@ float FilterUnit::response (int type, float hz, float fc, float q, double sr, fl
         case LP12:  return (float) std::abs (svf (hz, fcl, q, 0));
         case HP:    return (float) std::abs (svf (hz, fcl, q, 1));
         case BP:    return (float) std::abs (svf (hz, fcl, q, 2));
-        case Peak:  { const double a2m1 = std::pow (10.0, peakGainDb / 20.0) - 1.0; return (float) std::abs (1.0 + a2m1 * svf (hz, fcl, 1.0, 2)); }
+        case Peak:  { const double a2m1 = std::pow (10.0, peakGainDb / 20.0) - 1.0; return (float) std::abs (1.0 + a2m1 * svf (hz, fcl, jlimit (0.3, 16.0, (double) q), 2)); }
         case LP24:  return (float) (std::abs (svf (hz, fcl, 0.54, 0)) * std::abs (svf (hz, fcl, q * 1.3, 0)));
         case Comb:
         {
@@ -203,7 +205,7 @@ void FilterUnit::process (float* L, float* R, int n, int type, float fc, float q
         {
             // EQ bell: boost or cut one frequency, medium width (Q 1)
             const float a2m1 = Decibels::decibelsToGain (peakGainDb) - 1.0f;
-            for (auto& s : s1) s.set (fc, 1.0f, sr);
+            for (auto& s : s1) s.set (fc, jlimit (0.3f, 16.0f, q), sr);   // q = the PEAK's own Q knob
             for (int c = 0; c < 2; ++c)
                 for (int i = 0; i < n; ++i)
                 {
@@ -357,10 +359,21 @@ void Delay::process (float* L, float* R, int n, float timeMs, float feedback, fl
 // ===========================================================================
 // Static helpers
 
-const char* GranulumProcessor::modTargetId (int t) { return (t >= 0 && t < kNumModTargets) ? kModTargetIds[t] : ""; }
+const char* GranulumProcessor::modTargetId (int t)
+{
+    static const char* const harmIds[16] = { "harm1", "harm2", "harm3", "harm4", "harm5", "harm6", "harm7", "harm8",
+                                             "harm9", "harm10", "harm11", "harm12", "harm13", "harm14", "harm15", "harm16" };
+    if (isHarmTarget (t)) return harmIds[t - kHarmTarget0];
+    return (t >= 0 && t < kNumModTargets) ? kModTargetIds[t] : "";
+}
 
 int GranulumProcessor::modIndexOf (const String& id)
 {
+    if (id.startsWith ("harm"))
+    {
+        const int k = id.substring (4).getIntValue();
+        return k >= 1 && k <= 16 ? kHarmTarget0 + k - 1 : -1;
+    }
     for (int t = 0; t < kNumModTargets; ++t)
         if (id == kModTargetIds[t]) return t;
     return -1;
@@ -494,8 +507,13 @@ AudioProcessorValueTreeState::ParameterLayout GranulumProcessor::createLayout()
     ps.push_back (std::make_unique<P> (ParameterID { ParamID::reso, 1 }, "Resonance", skewed (0.5f, 10.0f, 1.5f), 0.707f,
                                        A().withStringFromValueFunction ([] (float v, int) { return fmt (v, 2, ""); })));
     ps.push_back (std::make_unique<AudioParameterChoice> (ParameterID { ParamID::ftype, 1 }, "Filter Type", FilterUnit::typeNames(), 0));
-    ps.push_back (std::make_unique<P> (ParameterID { ParamID::peakGain, 1 }, "Filter Peak Gain", NormalisableRange<float> (-18.0f, 18.0f), 0.0f,
+    ps.push_back (std::make_unique<P> (ParameterID { ParamID::peakGain, 1 }, "Filter Peak Gain", NormalisableRange<float> (-36.0f, 36.0f), 0.0f,
                                        A().withStringFromValueFunction ([] (float v, int) { return (v > 0.05f ? "+" : "") + String (v, 1) + " dB"; })));
+
+    // PEAK width (Q): 1.0 = the fixed width used before 0.99.1
+    auto qFmt = A().withStringFromValueFunction ([] (float v, int) { return "Q " + fmt (v, v < 10.0f ? 1 : 0, ""); });
+    ps.push_back (std::make_unique<P> (ParameterID { ParamID::peakQ, 1 },  "Filter Peak Q",   skewed (0.3f, 16.0f, 1.5f), 1.0f, qFmt));
+    ps.push_back (std::make_unique<P> (ParameterID { ParamID::peakQ2, 1 }, "Filter 2 Peak Q", skewed (0.3f, 16.0f, 1.5f), 1.0f, qFmt));
 
     // FILTER 2 (same engine, own settings)
     ps.push_back (std::make_unique<B> (ParameterID { ParamID::filter2On, 1 }, "Filter 2 On", false));
@@ -504,7 +522,7 @@ AudioProcessorValueTreeState::ParameterLayout GranulumProcessor::createLayout()
     ps.push_back (std::make_unique<P> (ParameterID { ParamID::reso2, 1 }, "Resonance 2", skewed (0.5f, 10.0f, 1.5f), 0.707f,
                                        A().withStringFromValueFunction ([] (float v, int) { return fmt (v, 2, ""); })));
     ps.push_back (std::make_unique<AudioParameterChoice> (ParameterID { ParamID::ftype2, 1 }, "Filter 2 Type", FilterUnit::typeNames(), 6));
-    ps.push_back (std::make_unique<P> (ParameterID { ParamID::peakGain2, 1 }, "Filter 2 Peak Gain", NormalisableRange<float> (-18.0f, 18.0f), 0.0f,
+    ps.push_back (std::make_unique<P> (ParameterID { ParamID::peakGain2, 1 }, "Filter 2 Peak Gain", NormalisableRange<float> (-36.0f, 36.0f), 0.0f,
                                        A().withStringFromValueFunction ([] (float v, int) { return (v > 0.05f ? "+" : "") + String (v, 1) + " dB"; })));
 
     // DISTORTION
@@ -567,7 +585,7 @@ AudioProcessorValueTreeState::ParameterLayout GranulumProcessor::createLayout()
     // OSC 4 SUB
     ps.push_back (std::make_unique<B> (ParameterID { ParamID::subOn, 1 },  "Sub On", false));
     ps.push_back (std::make_unique<P> (ParameterID { ParamID::subVol, 1 }, "Sub Volume", NormalisableRange<float> (0.0f, 1.0f), 0.7f, pct));
-    ps.push_back (std::make_unique<P> (ParameterID { ParamID::subOct, 1 }, "Sub Octave", NormalisableRange<float> (-2.0f, 0.0f, 1.0f), -1.0f,
+    ps.push_back (std::make_unique<P> (ParameterID { ParamID::subOct, 1 }, "Sub Octave", NormalisableRange<float> (-3.0f, 1.0f, 1.0f), -1.0f,
                                        A().withStringFromValueFunction ([] (float v, int) { return String (roundToInt (v)) + " oct"; })));
     ps.push_back (std::make_unique<P> (ParameterID { ParamID::subH1, 1 }, "Sub Harmonic 1", NormalisableRange<float> (0.0f, 1.0f), 1.0f, pct));
     ps.push_back (std::make_unique<P> (ParameterID { ParamID::subH2, 1 }, "Sub Harmonic 2", NormalisableRange<float> (0.0f, 1.0f), 0.0f, pct));
@@ -657,6 +675,7 @@ GranulumProcessor::GranulumProcessor()
     loadNoises();
     harmonics = {};
     harmonics[0] = 1.0f;
+    for (int k = 0; k < granulum::kNumHarmonics; ++k) harmNow[(size_t) k].store (harmonics[(size_t) k]);
     for (int l = 0; l < kNumLfos; ++l) setLfoPoints (l, lfoPreset (1));   // triangle
 
     // factory sounds ship inside the plugin and are written to Documents/GRAIN FORM/Samples/Atmos once
@@ -792,7 +811,7 @@ float GranulumProcessor::lfoShapeAt (int l, float phase) const
 
 void GranulumProcessor::setModulation (int target, int lfo, float depth)
 {
-    if (target < 0 || target >= kNumModTargets || lfo < 0 || lfo >= kNumLfos) return;
+    if (target < 0 || (target >= kNumModTargets && ! isHarmTarget (target)) || lfo < 0 || lfo >= kNumLfos) return;
     depth = jlimit (-1.0f, 1.0f, depth);
     for (auto& m : mods)
         if (m.target.load() == target && m.lfo.load() == lfo) { m.depth.store (depth); ++modVersion; return; }
@@ -828,6 +847,13 @@ float GranulumProcessor::getModulationDepth (int target, int lfo) const
     return 0.0f;
 }
 
+void GranulumProcessor::removeLfoEverywhere (int lfo)
+{
+    for (auto& m : mods)
+        if (m.target.load() >= 0 && m.lfo.load() == lfo) m.target.store (-1);
+    ++modVersion;
+}
+
 int GranulumProcessor::countModulations (int lfo) const
 {
     int n = 0;
@@ -839,14 +865,20 @@ int GranulumProcessor::countModulations (int lfo) const
 void GranulumProcessor::computeModulated (float* v)
 {
     float off[kNumModTargets] = {};
+    harmOff.fill (0.0f);
     for (auto& m : mods)
     {
         const int t = m.target.load (std::memory_order_acquire);
-        if (t < 0 || t >= kNumModTargets) continue;
+        const bool harm = isHarmTarget (t);
+        if (t < 0 || (t >= kNumModTargets && ! harm)) continue;
         const int l = jlimit (0, kNumLfos - 1, m.lfo.load (std::memory_order_relaxed));
         if (pLfoOn[(size_t) l]->load() < 0.5f) continue;     // LFO switched off: its routings stay, but do nothing
-        off[t] += m.depth.load (std::memory_order_relaxed) * lfoValue[(size_t) l];
+        const float d = m.depth.load (std::memory_order_relaxed) * lfoValue[(size_t) l];
+        if (harm) harmOff[(size_t) (t - kHarmTarget0)] += d;
+        else      off[t] += d;
     }
+    for (int k = 0; k < granulum::kNumHarmonics; ++k)
+        harmLive[(size_t) k].store (jlimit (0.0f, 1.0f, harmNow[(size_t) k].load (std::memory_order_relaxed) + harmOff[(size_t) k]), std::memory_order_relaxed);
     for (int t = 0; t < kNumModTargets; ++t)
     {
         auto* p = modParams[(size_t) t];
@@ -969,6 +1001,8 @@ granulum::Params GranulumProcessor::subParams (const float* v) const
     p.chord = { 0, 0, 0, 0, 0 };
     p.chime = 0.0f;
     p.transpose = std::round (pSubOct->load()) * 12.0f;
+    // the 3 sticks are layers: their level (incl. LFO) moves at play time
+    for (int k = 0; k < 3; ++k) { p.harmGain[(size_t) k] = jlimit (0.0f, 1.0f, v[mtSubH1 + k]); p.harmGainPrev[(size_t) k] = subGainPrev[(size_t) k]; }
     return p;
 }
 
@@ -1084,6 +1118,13 @@ void GranulumProcessor::processChunk (int from, int len)
         float* R = bufs[o]->getWritePointer (1) + from;
         bool audible = g[o] > 0.0001f || *lastG[o] > 0.0001f;
         auto vp = voiceParams (v, o);
+        if (o == 0)
+            for (int k = 0; k < granulum::kNumHarmonics; ++k)
+            {
+                // sticks with an LFO: level now (stick + LFO) and at the last chunk, ramped inside the engine
+                vp.harmGain[(size_t) k] = harmLive[(size_t) k].load (std::memory_order_relaxed);
+                vp.harmGainPrev[(size_t) k] = harmGainPrev[(size_t) k];
+            }
         const bool oscOn = (o == 0 ? pOsc1On : o == 1 ? pOsc2On : pOsc3On)->load() > 0.5f;
         auto ramp = [&] (float* l, float* r)
         {
@@ -1139,6 +1180,7 @@ void GranulumProcessor::processChunk (int from, int len)
             if (vp.volInGrains) ramp (L, R);
         }
         engines[o]->render (L, R, len, vp, audible ? slots[o]->active.get() : nullptr);
+        if (o == 0) harmGainPrev = vp.harmGain;
         if (! vp.volInGrains) ramp (L, R);
         *lastG[o] = g[o];
 
@@ -1177,6 +1219,8 @@ void GranulumProcessor::processChunk (int from, int len)
     viewPeak2.store (v[mtPeakGain2], std::memory_order_relaxed);
     viewReso1.store (v[mtReso], std::memory_order_relaxed);
     viewReso2.store (v[mtReso2], std::memory_order_relaxed);
+    viewPeakQ1.store (v[mtPeakQ], std::memory_order_relaxed);
+    viewPeakQ2.store (v[mtPeakQ2], std::memory_order_relaxed);
     const bool filter2On = pFilter2On->load() > 0.5f;
     const int ft2 = (int) pFtype2->load();
     const bool filterOn = pFilterOn->load() > 0.5f, distOn = pDistOn->load() > 0.5f && v[mtDistMix] > 0.001f;
@@ -1219,6 +1263,7 @@ void GranulumProcessor::processChunk (int from, int len)
         float* SL = subBuf.getWritePointer (0) + from;
         float* SR = subBuf.getWritePointer (1) + from;
         engineSub.render (SL, SR, len, subParams (v), subSlot.active.get());
+        for (int k = 0; k < 3; ++k) subGainPrev[(size_t) k] = jlimit (0.0f, 1.0f, v[mtSubH1 + k]);
         for (int i = 0; i < len; ++i)
         {
             const float gg = lastGSub + (gsSub - lastGSub) * (float) (i + 1) / (float) len;
@@ -1245,9 +1290,9 @@ void GranulumProcessor::processChunk (int from, int len)
         auto routed = [this, o, isSub] (int block) { return (isSub ? pRouteSub[(size_t) block] : pRoute[(size_t) block][(size_t) o])->load() > 0.5f; };
 
         if (filterOn && routed (0))
-            c.filter.process (L, R, len, ft, ft == FilterUnit::Peak ? jlimit (20.0f, (float) (sr * 0.45), v[mtCutoff]) : cut, v[mtReso], v[mtPeakGain]);
+            c.filter.process (L, R, len, ft, ft == FilterUnit::Peak ? jlimit (20.0f, (float) (sr * 0.45), v[mtCutoff]) : cut, ft == FilterUnit::Peak ? v[mtPeakQ] : v[mtReso], v[mtPeakGain]);
         if (filter2On && routed (4))
-            c.filter2.process (L, R, len, ft2, ft2 == FilterUnit::Peak ? jlimit (20.0f, (float) (sr * 0.45), v[mtCutoff2]) : cut2, v[mtReso2], v[mtPeakGain2]);
+            c.filter2.process (L, R, len, ft2, ft2 == FilterUnit::Peak ? jlimit (20.0f, (float) (sr * 0.45), v[mtCutoff2]) : cut2, ft2 == FilterUnit::Peak ? v[mtPeakQ2] : v[mtReso2], v[mtPeakGain2]);
         if (distOn && routed (1))
             c.distortion.process (L, R, len, (int) pDistType->load(), v[mtDistDrive], v[mtDistTone], v[mtDistMix]);
         if (delayOn && routed (2))
@@ -1387,6 +1432,7 @@ void GranulumProcessor::clearSample()
 void GranulumProcessor::setHarmonics (const std::array<float, granulum::kNumHarmonics>& h)
 {
     harmonics = h;
+    for (int k = 0; k < granulum::kNumHarmonics; ++k) harmNow[(size_t) k].store (h[(size_t) k]);
     harmonicsDirty.store (true);
 }
 
@@ -1476,15 +1522,30 @@ void GranulumProcessor::timerCallback()
             subShown = now;
             std::array<float, granulum::kNumHarmonics> amps {};
             amps[0] = now[0]; amps[1] = now[1]; amps[2] = now[2];
-            subSlot.push (std::make_shared<granulum::SampleData> (granulum::renderAdditiveSplit (amps, 0xffffu).first));
+            subSlot.push (std::make_shared<granulum::SampleData> (granulum::renderAdditiveSplit (amps, 0xffffu, 0x7u).first));   // 3 layers: LFO-able
         }
     }
 
+    // sticks with an LFO get their own layer (rebuilt when that set changes)
+    uint32_t layerMask = 0;
+    for (auto& m : mods)
+    {
+        const int t = m.target.load();
+        if (isHarmTarget (t)) layerMask |= 1u << (t - kHarmTarget0);
+    }
+    if (layerMask != layerMaskBuilt) { layerMaskBuilt = layerMask; harmonicsDirty.store (true); }
+
     if (harmonicsDirty.exchange (false))
     {
-        auto parts = granulum::renderAdditiveSplit (harmonics, grainMask.load());
+        auto parts = granulum::renderAdditiveSplit (harmonics, grainMask.load(), layerMaskBuilt);
         granulum::SampleData full = parts.first;
         for (size_t i = 0; i < full.channels[0].size(); ++i) full.channels[0][i] += parts.second.channels[0][i];
+        for (auto* part : { &parts.first, &parts.second })
+            for (size_t j = 0; j < part->layers.size(); ++j)
+            {
+                const float a = harmonics[(size_t) part->layerHarm[j]];
+                for (size_t i = 0; i < full.channels[0].size(); ++i) full.channels[0][i] += a * part->layers[j][i];
+            }
         auto pk = makePeaks (full);
         {
             const ScopedLock sl (infoLock);

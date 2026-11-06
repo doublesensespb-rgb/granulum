@@ -37,6 +37,8 @@ namespace ParamID
     inline constexpr const char* loopMode  = "loopMode";
     inline constexpr const char* peakGain  = "peakGain";
     inline constexpr const char* peakGain2 = "peakGain2";
+    inline constexpr const char* peakQ     = "peakQ";
+    inline constexpr const char* peakQ2    = "peakQ2";
     inline constexpr const char* loopStart = "loopStart";
     inline constexpr const char* loopEnd   = "loopEnd";
     inline constexpr const char* speed     = "speed";
@@ -108,6 +110,9 @@ static constexpr int kLfoTable = 512;
 static constexpr int kLfoPoints = 4;        // points in the built-in shapes
 static constexpr int kMaxLfoPoints = 16;    // the owner can add points up to this many
 static constexpr int kNumOscs = 3;
+// LFO on an OSC 1 stick: "virtual" mod targets (no parameter behind them), saved as "harm1".."harm16"
+static constexpr int kHarmTarget0 = 1000;
+inline bool isHarmTarget (int t) { return t >= kHarmTarget0 && t < kHarmTarget0 + 16; }
 static constexpr int kNumRouteBlocks = 5;
 static constexpr const char* kRouteBlocks[kNumRouteBlocks] = { "filter", "dist", "delay", "rev", "filter2" };
 
@@ -122,6 +127,8 @@ enum ModTarget
     mtPeakGain, mtPeakGain2,
     mtSubVol,
     mtOsc1Pan, mtOsc2Pan, mtOsc3Pan, mtSpread,
+    mtSubH1, mtSubH2, mtSubH3,
+    mtPeakQ, mtPeakQ2,
     kNumModTargets
 };
 
@@ -338,7 +345,7 @@ public:
     std::atomic<bool>  clipped { false };                 // set when the output hit 0 dBFS; the UI clears it
     std::atomic<float> keyCutoff { 20000.0f };
     // filter view (UI): key-tracked + modulated cutoff/reso of both filters, and a ring of the filter input
-    std::atomic<float> keyCutoff2 { 20000.0f }, viewReso1 { 0.707f }, viewReso2 { 0.707f }, viewPeak1 { 0.0f }, viewPeak2 { 0.0f };
+    std::atomic<float> keyCutoff2 { 20000.0f }, viewReso1 { 0.707f }, viewReso2 { 0.707f }, viewPeak1 { 0.0f }, viewPeak2 { 0.0f }, viewPeakQ1 { 1.0f }, viewPeakQ2 { 1.0f };
     static constexpr int kScopeSize = 4096;
     std::array<float, kScopeSize> scopeRing {};
     std::atomic<int> scopeWrite { 0 };
@@ -374,6 +381,14 @@ private:
     int shownNoise = -1;
     juce::String presetName { "INIT" };
     std::array<float, granulum::kNumHarmonics> harmonics {};
+    std::array<std::atomic<float>, granulum::kNumHarmonics> harmNow {};     // stick levels for the audio thread
+    std::array<float, granulum::kNumHarmonics> harmOff {}, harmGainPrev {}; // LFO offsets per stick (audio thread)
+    std::array<float, granulum::kNumHarmonics> subGainPrev {};
+    uint32_t layerMaskBuilt = 0;                                            // sticks that currently have their own layer
+public:
+    std::array<std::atomic<float>, granulum::kNumHarmonics> harmLive {};    // stick level incl. LFO, for the UI
+    void removeLfoEverywhere (int lfo);
+private:
     std::atomic<bool> harmonicsDirty { true };
     std::atomic<bool> sampleLoaded { false };
 

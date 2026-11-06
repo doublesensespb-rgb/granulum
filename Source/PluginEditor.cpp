@@ -86,6 +86,9 @@ GranulumLook::GranulumLook()
 // "0.9.8" -> "0.98", "1.0.0" -> "1.0", "1.2.3" -> "1.23"
 static String versionString()
 {
+   #ifdef GRAINFORM_LABEL
+    if (String (GRAINFORM_LABEL).isNotEmpty()) return GRAINFORM_LABEL;
+   #endif
     auto parts = StringArray::fromTokens (GRAINFORM_VERSION, ".", "");
     if (parts.size() < 3) return GRAINFORM_VERSION;
     return parts[0] + "." + parts[1] + (parts[2] == "0" ? String() : parts[2]);
@@ -1280,6 +1283,55 @@ RangedAudioParameter* SubBars::param (int i) const
     return proc.apvts.getParameter (i == 0 ? ParamID::subH1 : i == 1 ? ParamID::subH2 : ParamID::subH3);
 }
 
+bool SubBars::anyMod() const
+{
+    for (int i = 0; i < 3; ++i) for (int l = 0; l < kNumLfos; ++l) if (proc.hasModulation (mtSubH1 + i, l)) return true;
+    return false;
+}
+
+Rectangle<float> SubBars::chipRect (int col, int slot) const
+{
+    const auto pl = plot();
+    const float colW = pl.getWidth() / 3.0f;
+    return Rectangle<float> (10.0f, 10.0f).withCentre ({ pl.getX() + colW * ((float) col + 0.5f) - 11.0f - (float) slot * 12.0f, pl.getY() + 5.0f });
+}
+
+std::pair<int, int> SubBars::chipAt (Point<float> pos) const
+{
+    for (int i = 0; i < 3; ++i)
+    {
+        int slot = 0;
+        for (int l = 0; l < kNumLfos; ++l)
+            if (proc.hasModulation (mtSubH1 + i, l)) { if (chipRect (i, slot).expanded (2.0f).contains (pos)) return { i, l }; ++slot; }
+    }
+    return { -1, -1 };
+}
+
+void SubBars::itemDropped (const SourceDetails& s)
+{
+    const int i = colAt ((float) s.localPosition.x);
+    const int l = s.description.toString().fromFirstOccurrenceOf ("lfo:", false, false).getIntValue();
+    dropCol = -1;
+    if (! proc.hasModulation (mtSubH1 + i, l))
+        proc.setModulation (mtSubH1 + i, l, param (i)->getValue() > 0.5f ? -0.5f : 0.5f);
+    repaint();
+}
+
+void SubBars::mouseMove (const MouseEvent& e)
+{
+    const auto c = chipAt (e.position);
+    if (c.first >= 0)
+    {
+        setTooltip ("LFO " + String (c.second + 1) + " on SUB stick " + String (c.first + 1) + ":  drag up / down = depth,  right-click = remove");
+        setMouseCursor (MouseCursor::UpDownResizeCursor);
+    }
+    else
+    {
+        setTooltip ("SUB: 1 = root, 2 = octave, 3 = octave + fifth. Drag the sticks up and down. Drop an LFO on a stick to move it.");
+        setMouseCursor (MouseCursor::NormalCursor);
+    }
+}
+
 void SubBars::paint (Graphics& g)
 {
     auto r = getLocalBounds().toFloat();
@@ -1288,6 +1340,34 @@ void SubBars::paint (Graphics& g)
     const bool on = proc.apvts.getRawParameterValue (ParamID::subOn)->load() > 0.5f;
     const auto pl = plot();
     const float colW = pl.getWidth() / 3.0f;
+    // the resulting waveform behind the sticks (like OSC 1): root, octave, octave + fifth (= 3rd harmonic)
+    {
+        float lv[3];
+        for (int i = 0; i < 3; ++i) lv[i] = anyMod() ? proc.modNorm[(size_t) (mtSubH1 + i)].load (std::memory_order_relaxed) : param (i)->getValue();
+        Path wave;
+        const int pts = 120;
+        float peak = 0.0001f;
+        std::vector<float> ys ((size_t) pts);
+        for (int n = 0; n < pts; ++n)
+        {
+            const float ph = MathConstants<float>::twoPi * 2.0f * (float) n / (float) (pts - 1);   // two cycles
+            ys[(size_t) n] = lv[0] * std::sin (ph) + lv[1] * std::sin (2.0f * ph) + lv[2] * std::sin (3.0f * ph);
+            peak = jmax (peak, std::abs (ys[(size_t) n]));
+        }
+        for (int n = 0; n < pts; ++n)
+        {
+            const float x = pl.getX() + pl.getWidth() * (float) n / (float) (pts - 1);
+            const float y = pl.getCentreY() - ys[(size_t) n] / peak * pl.getHeight() * 0.38f;
+            if (n == 0) wave.startNewSubPath (x, y); else wave.lineTo (x, y);
+        }
+        g.setColour (Palette::textDim.withAlpha (on ? 0.38f : 0.18f));
+        g.strokePath (wave, PathStrokeType (1.2f));
+    }
+    if (dropCol >= 0)
+    {
+        g.setColour (Colours::white.withAlpha (0.10f));
+        g.fillRoundedRectangle (Rectangle<float> (pl.getX() + colW * (float) dropCol, pl.getY(), colW, pl.getHeight()), 3.0f);
+    }
     for (int i = 0; i < 3; ++i)
     {
         const float v = param (i)->getValue();
@@ -1308,6 +1388,29 @@ void SubBars::paint (Graphics& g)
         g.setColour (Palette::textDim.withAlpha (0.7f));
         g.setFont (uiFont (8.5f, false, 0.1f));
         g.drawText (String (i + 1), Rectangle<float> (x + 4.0f, pl.getBottom() - 11.0f, 12.0f, 10.0f), Justification::centredLeft, false);
+
+        // LFO on this stick: range line, live level, chips
+        int slot = 0;
+        for (int l = 0; l < kNumLfos; ++l)
+        {
+            if (! proc.hasModulation (mtSubH1 + i, l)) continue;
+            const auto col = Palette::lfo (l).withMultipliedAlpha (proc.isLfoOn (l) ? 1.0f : 0.35f);
+            const float base = param (i)->getValue(), depth = proc.getModulationDepth (mtSubH1 + i, l);
+            auto yOf = [&pl] (float vv) { return pl.getBottom() - jlimit (0.0f, 1.0f, vv) * (pl.getHeight() - 6.0f); };
+            g.setColour (col.withAlpha (0.55f));
+            g.drawLine (x + 5.0f + (float) slot * 2.5f, yOf (base), x + 5.0f + (float) slot * 2.5f, yOf (base + depth), 2.0f);
+            const auto cr = chipRect (i, slot);
+            g.setColour (col); g.fillEllipse (cr);
+            g.setColour (Palette::deep); g.setFont (uiFont (7.5f, true));
+            g.drawText (String (l + 1), cr, Justification::centred, false);
+            if (slot == 0)
+            {
+                const float live = proc.modNorm[(size_t) (mtSubH1 + i)].load (std::memory_order_relaxed);
+                g.setColour (Colours::white.withAlpha (0.9f));
+                g.fillRoundedRectangle (Rectangle<float> (10.0f, 2.5f).withCentre ({ x, yOf (live) }), 1.2f);
+            }
+            ++slot;
+        }
     }
 }
 
@@ -1321,16 +1424,35 @@ void SubBars::setFrom (Point<float> pos)
 
 void SubBars::mouseDown (const MouseEvent& e)
 {
+    if (const auto c = chipAt (e.position); c.first >= 0)
+    {
+        if (e.mods.isPopupMenu()) { proc.removeModulation (mtSubH1 + c.first, c.second); repaint(); return; }
+        chipDrag = c;
+        chipStartDepth = proc.getModulationDepth (mtSubH1 + c.first, c.second);
+        chipStartY = e.position.y;
+        return;
+    }
     const auto pl = plot();
     dragging = jlimit (0, 2, (int) ((e.position.x - pl.getX()) / (pl.getWidth() / 3.0f)));
     param (dragging)->beginChangeGesture();
     setFrom (e.position);
 }
 
-void SubBars::mouseDrag (const MouseEvent& e) { setFrom (e.position); }
+void SubBars::mouseDrag (const MouseEvent& e)
+{
+    if (chipDrag.first >= 0)
+    {
+        const float d = jlimit (-1.0f, 1.0f, chipStartDepth + (chipStartY - e.position.y) / jmax (20.0f, plot().getHeight()));
+        proc.setModulation (mtSubH1 + chipDrag.first, chipDrag.second, d);
+        repaint();
+        return;
+    }
+    setFrom (e.position);
+}
 
 void SubBars::mouseUp (const MouseEvent&)
 {
+    chipDrag = { -1, -1 };
     if (dragging >= 0) param (dragging)->endChangeGesture();
     dragging = -1;
     repaint();
@@ -1590,8 +1712,52 @@ void HarmonicEditor::applyPill (int bar)
     repaint();
 }
 
+// ---- LFO on a stick ----
+bool HarmonicEditor::isInterestedInDragSource (const SourceDetails& s) { return s.description.toString().startsWith ("lfo:"); }
+void HarmonicEditor::itemDragMove (const SourceDetails& s) { lfoDropBar = barAt ((float) s.localPosition.x); repaint(); }
+void HarmonicEditor::itemDragExit (const SourceDetails&) { lfoDropBar = -1; repaint(); }
+void HarmonicEditor::itemDropped (const SourceDetails& s)
+{
+    const int k = barAt ((float) s.localPosition.x);
+    const int l = s.description.toString().fromFirstOccurrenceOf ("lfo:", false, false).getIntValue();
+    lfoDropBar = -1;
+    if (! proc.hasModulation (kHarmTarget0 + k, l))
+        proc.setModulation (kHarmTarget0 + k, l, h[(size_t) k] > 0.5f ? -0.5f : 0.5f);   // always audible: down from a tall stick, up from a short one
+    repaint();
+}
+
+Rectangle<float> HarmonicEditor::chipRect (int harm, int slot) const
+{
+    const auto a = barArea();
+    const float cw = a.getWidth() / (float) granulum::kNumHarmonics;
+    const float d = jmin (11.0f, cw - 2.0f);
+    return Rectangle<float> (d, d).withCentre ({ a.getX() + cw * ((float) harm + 0.5f), a.getY() + d * 0.5f + 1.0f + (float) slot * (d + 2.0f) });
+}
+
+HarmonicEditor::ChipHit HarmonicEditor::chipAt (Point<float> pos) const
+{
+    for (int k = 0; k < granulum::kNumHarmonics; ++k)
+    {
+        int slot = 0;
+        for (int l = 0; l < kNumLfos; ++l)
+            if (proc.hasModulation (kHarmTarget0 + k, l))
+            {
+                if (chipRect (k, slot).expanded (2.0f).contains (pos)) return { k, l };
+                ++slot;
+            }
+    }
+    return {};
+}
+
 void HarmonicEditor::mouseMove (const MouseEvent& e)
 {
+    if (const auto c = chipAt (e.position); c.harm >= 0)
+    {
+        hoverBar = -1;
+        setTooltip ("LFO " + String (c.lfo + 1) + " on harmonic " + String (c.harm + 1) + ":  drag up / down = depth,  right-click = remove");
+        setMouseCursor (MouseCursor::UpDownResizeCursor);
+        return;
+    }
     if (e.position.y >= pillRow().getY() - 3.0f && e.position.x >= barArea().getX())
     {
         const int b = barAt (e.position.x);
@@ -1617,6 +1783,14 @@ void HarmonicEditor::mouseMove (const MouseEvent& e)
 
 void HarmonicEditor::mouseDown (const MouseEvent& e)
 {
+    if (const auto c = chipAt (e.position); c.harm >= 0)
+    {
+        if (e.mods.isPopupMenu()) { proc.removeModulation (kHarmTarget0 + c.harm, c.lfo); repaint(); return; }
+        chipDrag = c;
+        chipStartDepth = proc.getModulationDepth (kHarmTarget0 + c.harm, c.lfo);
+        chipStartY = e.position.y;
+        return;
+    }
     if (e.position.y >= pillRow().getY() - 3.0f && e.position.x >= barArea().getX())
     {
         pillMode = true;
@@ -1637,6 +1811,13 @@ void HarmonicEditor::mouseDown (const MouseEvent& e)
 
 void HarmonicEditor::mouseDrag (const MouseEvent& e)
 {
+    if (chipDrag.harm >= 0)
+    {
+        const float d = jlimit (-1.0f, 1.0f, chipStartDepth + (chipStartY - e.position.y) / jmax (20.0f, barArea().getHeight()));
+        proc.setModulation (kHarmTarget0 + chipDrag.harm, chipDrag.lfo, d);
+        repaint();
+        return;
+    }
     if (! editing) return;
     if (pillMode) applyPill (barAt (e.position.x));
     else          applyMouse (e, false);
@@ -1644,7 +1825,7 @@ void HarmonicEditor::mouseDrag (const MouseEvent& e)
 
 void HarmonicEditor::mouseExit (const MouseEvent&) { hoverBar = -1; }
 
-void HarmonicEditor::mouseUp (const MouseEvent&) { editing = false; lastBar = -1; lastPill = -1; pillMode = false; }
+void HarmonicEditor::mouseUp (const MouseEvent&) { chipDrag = {}; editing = false; lastBar = -1; lastPill = -1; pillMode = false; }
 
 void HarmonicEditor::paint (Graphics& g)
 {
@@ -1886,6 +2067,48 @@ void HarmonicEditor::paint (Graphics& g)
             }
             g.setColour (Colours::white.withAlpha (0.75f));
             g.fillRect (bar.withHeight (jmin (2.0f, bar.getHeight())));
+        }
+    }
+
+    // ---- LFO on sticks: range line, live level, chips ----
+    {
+        const float cw = a.getWidth() / (float) granulum::kNumHarmonics;
+        auto yOf = [&a] (float v) { return a.getBottom() - jlimit (0.0f, 1.0f, v) * a.getHeight(); };
+        if (lfoDropBar >= 0)
+        {
+            g.setColour (Colours::white.withAlpha (0.10f));
+            g.fillRoundedRectangle (Rectangle<float> (a.getX() + cw * (float) lfoDropBar, a.getY(), cw, a.getHeight()), 3.0f);
+        }
+        for (int k = 0; k < granulum::kNumHarmonics; ++k)
+        {
+            int slot = 0;
+            const float cx = a.getX() + cw * ((float) k + 0.5f);
+            for (int l = 0; l < kNumLfos; ++l)
+            {
+                if (! proc.hasModulation (kHarmTarget0 + k, l)) continue;
+                const auto col = Palette::lfo (l).withMultipliedAlpha (proc.isLfoOn (l) ? 1.0f : 0.35f);
+                const float depth = proc.getModulationDepth (kHarmTarget0 + k, l);
+                // range: from the stick level to level + depth, a thin line just right of the stick
+                const float lx = cx + jmin (5.0f, cw * 0.3f) + (float) slot * 2.5f;
+                g.setColour (col.withAlpha (0.55f));
+                g.drawLine (lx, yOf (h[(size_t) k]), lx, yOf (h[(size_t) k] + depth), 2.0f);
+                // chip with the LFO number
+                const auto cr = chipRect (k, slot);
+                g.setColour (col);
+                g.fillEllipse (cr);
+                g.setColour (Palette::deep);
+                g.setFont (uiFont (cr.getHeight() * 0.72f, true));
+                g.drawText (String (l + 1), cr, Justification::centred, false);
+                ++slot;
+            }
+            if (slot > 0)
+            {
+                // live level of this stick (stick + LFO)
+                const float live = proc.harmLive[(size_t) k].load (std::memory_order_relaxed);
+                const float y = yOf (live);
+                g.setColour (Colours::white.withAlpha (0.9f));
+                g.fillRoundedRectangle (Rectangle<float> (jmin (12.0f, cw * 0.8f), 2.5f).withCentre ({ cx, y }), 1.2f);
+            }
         }
     }
 
@@ -2563,8 +2786,7 @@ void LfoEditor::mouseDown (const MouseEvent& e)
     if (false)
     {
         // REMOVE: takes this LFO off every knob (unlike the light, which only pauses it)
-        for (int t = 0; t < kNumModTargets; ++t)
-            if (proc.hasModulation (t, lfo)) proc.removeModulation (t, lfo);
+        proc.removeLfoEverywhere (lfo);
         hoverRemove = false;
         dragIndex = -1;
         repaint();
@@ -2638,14 +2860,14 @@ FilterScope::FilterScope (GranulumProcessor& p) : proc (p)
     setTooltip ("Filter view. Drag left/right = CUTOFF, up/down = RESO. Faint = what comes in, bright = what passes.");
     // (no own timer: GranulumEditor::timerCallback calls frame() at 30 fps)
     for (auto* id : { ParamID::cutoff, ParamID::cutoff2, ParamID::reso, ParamID::reso2, ParamID::ftype, ParamID::ftype2,
-                      ParamID::peakGain, ParamID::peakGain2, ParamID::filterOn, ParamID::filter2On })
+                      ParamID::peakGain, ParamID::peakGain2, ParamID::peakQ, ParamID::peakQ2, ParamID::filterOn, ParamID::filter2On })
         proc.apvts.addParameterListener (id, this);
 }
 
 FilterScope::~FilterScope()
 {
     for (auto* id : { ParamID::cutoff, ParamID::cutoff2, ParamID::reso, ParamID::reso2, ParamID::ftype, ParamID::ftype2,
-                      ParamID::peakGain, ParamID::peakGain2, ParamID::filterOn, ParamID::filter2On })
+                      ParamID::peakGain, ParamID::peakGain2, ParamID::peakQ, ParamID::peakQ2, ParamID::filterOn, ParamID::filter2On })
         proc.apvts.removeParameterListener (id, this);
     cancelPendingUpdate();
 }
@@ -2698,12 +2920,13 @@ void FilterScope::paint (Graphics& g)
     auto modulated = [this] (const char* id) { const int t = GranulumProcessor::modIndexOf (id);
                                                for (int l = 0; l < kNumLfos; ++l) if (t >= 0 && proc.hasModulation (t, l)) return true; return false; };
     const char* cutId  = which == 0 ? ParamID::cutoff : ParamID::cutoff2;
-    const char* resId  = which == 0 ? ParamID::reso : ParamID::reso2;
+    const bool isPeak = type == FilterUnit::Peak;
+    const char* resId  = isPeak ? (which == 0 ? ParamID::peakQ : ParamID::peakQ2) : (which == 0 ? ParamID::reso : ParamID::reso2);
     const char* gainId = which == 0 ? ParamID::peakGain : ParamID::peakGain2;
     const float keyMul = type == FilterUnit::Peak ? 1.0f : std::exp2 ((proc.engineAdd.lastNote.load (std::memory_order_relaxed) - 60.0f) / 12.0f);
     const float fc  = modulated (cutId)  ? (which == 0 ? proc.keyCutoff : proc.keyCutoff2).load (std::memory_order_relaxed)
                                          : s.getRawParameterValue (cutId)->load() * keyMul;
-    const float q   = modulated (resId)  ? (which == 0 ? proc.viewReso1 : proc.viewReso2).load (std::memory_order_relaxed)
+    const float q   = modulated (resId)  ? (isPeak ? (which == 0 ? proc.viewPeakQ1 : proc.viewPeakQ2) : (which == 0 ? proc.viewReso1 : proc.viewReso2)).load (std::memory_order_relaxed)
                                          : s.getRawParameterValue (resId)->load();
     const float pk  = modulated (gainId) ? (which == 0 ? proc.viewPeak1 : proc.viewPeak2).load (std::memory_order_relaxed)
                                          : s.getRawParameterValue (gainId)->load();
@@ -2714,7 +2937,7 @@ void FilterScope::paint (Graphics& g)
     for (float hz : { 100.0f, 1000.0f, 10000.0f })
         g.drawVerticalLine ((int) (a.getX() + a.getWidth() * std::log (hz / 30.0f) / std::log (600.0f)), a.getY(), a.getBottom());
 
-    const float top = 15.0f, bottom = -40.0f;                      // response dB range
+    const float top = 40.0f, bottom = -40.0f;                      // response dB range: 0 dB in the middle, room for a +36 dB PEAK
     auto yOfResp = [&] (float db) { return a.getY() + a.getHeight() * (top - jlimit (bottom, top, db)) / (top - bottom); };
     auto yOfSpec = [&] (float db) { return a.getBottom() - a.getHeight() * jlimit (0.0f, 1.0f, (db + 78.0f) / 66.0f); };
     g.setColour (Colours::white.withAlpha (0.06f));
@@ -3623,7 +3846,10 @@ GranulumEditor::GranulumEditor (GranulumProcessor& p)
     add (filter2Knobs, ParamID::reso2,   "Reso");
     add (peakKnobs, ParamID::peakGain,  "Gain");
     add (peakKnobs, ParamID::peakGain2, "Gain");
-    for (auto& k : peakKnobs) { k->setVisible (false); k->slider.setTooltip ("PEAK: lift or cut the CUTOFF frequency (-18..+18 dB)"); }
+    for (auto& k : peakKnobs) { k->setVisible (false); k->slider.setTooltip ("PEAK: lift or cut the CUTOFF frequency (-36..+36 dB)"); }
+    add (peakQKnobs, ParamID::peakQ,  "Q");
+    add (peakQKnobs, ParamID::peakQ2, "Q");
+    for (auto& k : peakQKnobs) { k->setVisible (false); k->slider.setTooltip ("Q: width of the PEAK. Low = wide and soft, high = narrow and sharp"); }
 
     add (distKnobs,  ParamID::distDrive, "Drive",    Knob::Size::Small);
     add (distKnobs,  ParamID::distTone,  "Tone",     Knob::Size::Small);
@@ -3791,8 +4017,7 @@ GranulumEditor::GranulumEditor (GranulumProcessor& p)
         c->remove.setTooltip ("Removes this LFO from every knob it modulates");
         c->remove.onClick = [this, l]
         {
-            for (int t = 0; t < kNumModTargets; ++t)
-                if (proc.hasModulation (t, l)) proc.removeModulation (t, l);
+            proc.removeLfoEverywhere (l);
         };
         c->mode.setTooltip ("FREE: runs on its own.  RETRIG: restarts with each note.  ENV: runs once per note and holds.");
         c->rate = std::make_unique<Knob> (proc, ParamID::lfo (l, "Rate"), "Rate", Knob::Size::Small);
@@ -4085,6 +4310,7 @@ void GranulumEditor::timerCallback()
     // one tick drives every animated part, so each window repaints once per frame
     field.frame();
     harmonics.frame();
+    subBars.frame();
     meterView.frame();
     if (lfoEditor.isVisible()) lfoEditor.frame();
     if (ampEditor.isVisible()) ampEditor.frame();
@@ -4136,8 +4362,13 @@ void GranulumEditor::timerCallback()
         vis (*peakKnobs[0],    selectedFilter == 0 && p1);
         vis (*filter2Knobs[1], selectedFilter == 1 && ! p2);
         vis (*peakKnobs[1],    selectedFilter == 1 && p2);
+        vis (*peakQKnobs[0],   selectedFilter == 0 && p1);
+        vis (*peakQKnobs[1],   selectedFilter == 1 && p2);
         peakKnobs[0]->setAlpha (fOn ? 1.0f : 0.38f);
         peakKnobs[1]->setAlpha (f2On ? 1.0f : 0.38f);
+        peakQKnobs[0]->setAlpha (fOn ? 1.0f : 0.38f);
+        peakQKnobs[1]->setAlpha (f2On ? 1.0f : 0.38f);
+        if (p1 != peakLayout[0] || p2 != peakLayout[1]) { peakLayout[0] = p1; peakLayout[1] = p2; layoutFilterKnobs(); }
         filterKnobs[0]->slider.setTooltip (p1 ? "PEAK frequency (does not follow the note)" : "Cutoff follows the note you play (set at C3). The readout shows the note where it cuts.");
     }
     dimK (filter2Knobs, f2On); dim ({ &filterType2, routes[4].get() }, f2On);
@@ -4292,7 +4523,9 @@ void GranulumEditor::paint (Graphics& g)
         // version, always visible: a small plate right after the name
         GlyphArrangement ga; ga.addLineOfText (titleFont, "GRAIN FORM", 0.0f, 0.0f);
         const float tw = ga.getBoundingBox (0, -1, true).getWidth();
-        auto vr = Rectangle<float> ((float) titleArea.getX() + tw + 5.0f * sc, (float) titleArea.getY() + 22.0f * sc, 32.0f * sc, 14.0f * sc);
+        const auto vf = uiFont (9.0f * sc, true, 0.02f);
+        const float vw = (float) GlyphArrangement::getStringWidthInt (vf, "v" + versionString()) + 10.0f * sc;
+        auto vr = Rectangle<float> ((float) titleArea.getX() + tw + 5.0f * sc, (float) titleArea.getY() + 22.0f * sc, vw, 14.0f * sc);
         g.setColour (Palette::hardware ? Colours::black.withAlpha (0.35f) : Palette::screen.withAlpha (0.5f));
         g.fillRoundedRectangle (vr, 3.0f * sc);
         g.setColour (Palette::textDim.withAlpha (0.7f));
@@ -4333,18 +4566,7 @@ void GranulumEditor::paint (Graphics& g)
         g.fillRoundedRectangle (a.toFloat(), 10.0f);
     }
 
-    // OSC 4: "DRY" tag where the other rows have GRAIN (the sub never goes through grains / filters / effects)
-    {
-        const bool subOn = proc.apvts.getRawParameterValue (ParamID::subOn)->load() > 0.5f;
-        g.setColour (Palette::edge.withMultipliedAlpha (2.0f));
-        g.drawRoundedRectangle (subTag.toFloat().reduced (0.5f), 6.0f, 1.0f);
-        g.setColour (subOn ? Palette::label : Palette::textDim.withAlpha (0.6f));
-        g.setFont (uiFont (10.0f, true, 0.14f));
-        g.drawText ("NO", subTag.withTrimmedBottom (subTag.getHeight() / 2 - 1), Justification::centredBottom, false);
-        g.setColour (Palette::textDim.withAlpha (subOn ? 0.9f : 0.5f));
-        g.setFont (uiFont (7.5f, false, 0.08f));
-        g.drawText ("GRAINS", subTag.withTrimmedTop (subTag.getHeight() / 2 + 1), Justification::centredTop, false);
-    }
+
 
     // OSC 2 drop zone: always shows that a file can be dropped here
     {
@@ -4576,6 +4798,24 @@ void GranulumEditor::paintOverChildren (Graphics& g)
     g.drawRoundedRectangle (a, 11.0f, 2.0f);
 }
 
+// FILTER knobs: CUTOFF RESO, or for PEAK three in a row: CUTOFF GAIN Q
+void GranulumEditor::layoutFilterKnobs()
+{
+    if (filterKnobs.size() < 2 || peakQKnobs.size() < 2) return;
+    auto place = [this] (std::vector<std::unique_ptr<Knob>>& ks, Knob& gain, Knob& q, bool peak)
+    {
+        auto row = filterRow1;
+        if (! peak) { const int cw = row.getWidth() / 2; ks[0]->setBounds (row.withWidth (cw)); ks[1]->setBounds (row.withTrimmedLeft (cw)); gain.setBounds (ks[1]->getBounds()); q.setBounds (ks[1]->getBounds()); return; }
+        const int w = row.getWidth() / 3;
+        ks[0]->setBounds (row.removeFromLeft (w));
+        gain.setBounds (row.removeFromLeft (w));
+        q.setBounds (row);
+        ks[1]->setBounds (gain.getBounds());
+    };
+    place (filterKnobs,  *peakKnobs[0], *peakQKnobs[0], peakLayout[0]);
+    place (filter2Knobs, *peakKnobs[1], *peakQKnobs[1], peakLayout[1]);
+}
+
 void GranulumEditor::resized()
 {
     const float sc = (float) getWidth() / 1080.0f;
@@ -4681,12 +4921,13 @@ void GranulumEditor::resized()
         // OSC 4 SUB: [lamp] [3 sticks] [vol oct] [DRY]
         auto a4 = osc4Area.reduced (S (8), S (4));
         osc4Lamp.setBounds (a4.removeFromLeft (S (108)));
-        subTag = a4.removeFromRight (S (62)).withSizeKeepingCentre (S (62), S (30));
+        subTag = {};
+        a4.removeFromRight (S (62));                       // (column of the GRAIN buttons above/below stays empty: the sub is never granulated)
         a4.removeFromRight (S (4));
         for (int i = (int) subKnobs.size() - 1; i >= 0; --i)
-            subKnobs[(size_t) i]->setBounds (a4.removeFromRight (S (46)));
+            subKnobs[(size_t) i]->setBounds (a4.removeFromRight (S (38)));
         a4.removeFromRight (S (6));
-        subBars.setBounds (a4.withSizeKeepingCentre (jmin (a4.getWidth(), S (150)), S (40)).withX (a4.getX() + S (22)));
+        subBars.setBounds (a4.withSizeKeepingCentre (a4.getWidth() - S (44), S (40)).withX (a4.getX() + S (22)));
     }
 
     // ---- blocks ----
@@ -4724,10 +4965,8 @@ void GranulumEditor::resized()
     {
         auto f = filterArea.withTrimmedTop (S (32));
         auto row1 = f.removeFromTop ((int) (f.getHeight() * 0.58f));
-        layoutRow (filterKnobs, row1);
-        layoutRow (filter2Knobs, row1);
-        peakKnobs[0]->setBounds (filterKnobs[1]->getBounds());
-        peakKnobs[1]->setBounds (filter2Knobs[1]->getBounds());
+        filterRow1 = row1;
+        layoutFilterKnobs();
         f.removeFromTop (S (4));
         filterScope.setBounds (f.removeFromTop (S (38)).reduced (S (4), 0));
         auto row2 = f.withSizeKeepingCentre (f.getWidth(), S (28));

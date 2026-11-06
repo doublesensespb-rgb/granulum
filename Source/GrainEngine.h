@@ -21,6 +21,10 @@ struct SampleData
 {
     std::vector<std::vector<float>> channels; // 1 or 2 channels
     double sampleRate = 44100.0;              // plays at "original pitch" on MIDI note 60
+    // LFO on a harmonic: that harmonic lives in its own mono buffer (unit level, same length), mixed in at
+    // play time with a gain that moves (Params::harmGain). layerHarm = which harmonic each layer is.
+    std::vector<std::vector<float>> layers;
+    std::vector<int> layerHarm;
 
     int numFrames() const   { return channels.empty() ? 0 : (int) channels[0].size(); }
     int numChannels() const { return (int) channels.size(); }
@@ -33,7 +37,7 @@ static constexpr int kNumHarmonics = 16;
 
 // Renders the harmonics split in two parts: those whose bit is set in grainMask (-> granulator)
 // and the rest (-> clean). Both parts share the same loudness scaling, so grain + clean == full sound.
-inline std::pair<SampleData, SampleData> renderAdditiveSplit (const std::array<float, kNumHarmonics>& amps, uint32_t grainMask)
+inline std::pair<SampleData, SampleData> renderAdditiveSplit (const std::array<float, kNumHarmonics>& amps, uint32_t grainMask, uint32_t layerMask = 0)
 {
     constexpr int period = 184;           // samples per cycle
     constexpr int cycles = 1044;          // ~4 s
@@ -59,20 +63,41 @@ inline std::pair<SampleData, SampleData> renderAdditiveSplit (const std::array<f
         const double driftPhase  = rnd() * 2.0 * kPi;
         const float  driftDepth  = (k == 1 ? 0.0f : 0.1f + 0.25f * rnd() * std::min (1.0f, (float) k / 4.0f));
         const int    phaseOff    = k == 1 ? 0 : (int) (rnd() * period);
-        if (a <= 0.0005f || k * c4 > 20000.0) continue;
-        auto& out = ((grainMask >> (k - 1)) & 1u) ? g.channels[0] : c.channels[0];
+        const bool layered = (layerMask >> (k - 1)) & 1u;
+        if ((! layered && a <= 0.0005f) || k * c4 > 20000.0) continue;
+        auto& part = ((grainMask >> (k - 1)) & 1u) ? g : c;
+        std::vector<float>* out = &part.channels[0];
+        float lev = a;
+        if (layered)
+        {
+            part.layers.emplace_back ((size_t) N, 0.0f);
+            part.layerHarm.push_back (k - 1);
+            out = &part.layers.back();
+            lev = 1.0f;     // unit level: the moving gain (the harmonic's own level + LFO) is applied at play time
+        }
         for (int i = 0; i < N; ++i)
         {
             const float drift = 1.0f - driftDepth * 0.5f * (1.0f + (float) std::sin (2.0 * kPi * driftCycles * (double) i / N + driftPhase));
-            out[(size_t) i] += a * drift * sine[(size_t) ((k * i + phaseOff) % period)];
+            (*out)[(size_t) i] += lev * drift * sine[(size_t) ((k * i + phaseOff) % period)];
         }
     }
 
+    // level: from the mix at the harmonics' resting levels, so an LFO-free patch sounds exactly as before
     float peak = 0.0f;
-    for (int i = 0; i < N; ++i) peak = std::max (peak, std::abs (g.channels[0][(size_t) i] + c.channels[0][(size_t) i]) * 0.7f);
+    for (int i = 0; i < N; ++i)
+    {
+        float x = g.channels[0][(size_t) i] + c.channels[0][(size_t) i];
+        for (auto* part : { &g, &c })
+            for (size_t j = 0; j < part->layers.size(); ++j)
+                x += amps[(size_t) part->layerHarm[j]] * part->layers[j][(size_t) i];
+        peak = std::max (peak, std::abs (x) * 0.7f);
+    }
     const float gain = 0.7f * (peak > 0.95f ? 0.95f / peak : 1.0f);
-    for (auto* ch : { &g.channels[0], &c.channels[0] })
-        for (auto& v : *ch) v *= gain;
+    for (auto* part : { &g, &c })
+    {
+        for (auto& v : part->channels[0]) v *= gain;
+        for (auto& L : part->layers) for (auto& v : L) v *= gain;
+    }
     return { std::move (g), std::move (c) };
 }
 
@@ -99,6 +124,8 @@ struct Params
     float evolve   = 0.0f;   // seconds, 0 = off
     float chime    = 0.0f;   // CHIME: grains ring a bank of resonators tuned to the note
     float spread   = 1.0f;   // SPREAD: stereo width of the grain cloud (0 = all grains centred)
+    // per-harmonic level for layered harmonics (LFO on a stick): now and at the previous chunk (ramped in between)
+    std::array<float, kNumHarmonics> harmGain {}, harmGainPrev {};
     bool  grainOn  = false;
 
     // LOOP: grains (and the plain playback) stay inside [loopA, loopB] of the source
@@ -317,6 +344,38 @@ public:
         const float* srcL     = hasSample ? sample->channels[0].data() : nullptr;
         const float* srcR     = hasSample ? (sample->numChannels() > 1 ? sample->channels[1].data() : srcL) : nullptr;
 
+        // layered harmonics (LFO on a stick): their buffers + gain ramp over this block
+        const int M = hasSample ? std::min ((int) sample->layers.size(), kNumHarmonics) : 0;
+        std::array<const float*, kNumHarmonics> lay {};
+        std::array<float, kNumHarmonics> lg0 {}, lgStep {};
+        for (int j = 0; j < M; ++j)
+        {
+            const int hk = std::clamp (sample->layerHarm[(size_t) j], 0, kNumHarmonics - 1);
+            lay[(size_t) j] = sample->layers[(size_t) j].data();
+            lg0[(size_t) j] = p.harmGainPrev[(size_t) hk];
+            lgStep[(size_t) j] = (p.harmGain[(size_t) hk] - p.harmGainPrev[(size_t) hk]) / (float) std::max (1, numSamples);
+        }
+        // reads the source + the layers at pos (mono layers are added to both sides)
+        auto readAll = [&] (double pos, int i, float& l, float& r)
+        {
+            readHermite (srcL, srcR, N, pos, l, r);
+            if (M == 0) return;
+            // layers are pure sines (one harmonic each, 184+ samples per cycle at most 16x): linear reading is clean enough
+            // and much cheaper than the Hermite read used for the main buffer
+            double q = pos;
+            if (q < 0.0 || q >= (double) N) q = wrap (q, (double) N);
+            const int i0 = std::min (N - 1, (int) q);
+            const int i1 = i0 + 1 >= N ? 0 : i0 + 1;
+            const float fr = (float) (q - (double) i0);
+            float x = 0.0f;
+            for (int j = 0; j < M; ++j)
+            {
+                const float* Lj = lay[(size_t) j];
+                x += (Lj[i0] + (Lj[i1] - Lj[i0]) * fr) * (lg0[(size_t) j] + lgStep[(size_t) j] * (float) (i + 1));
+            }
+            l += x; r += x;
+        };
+
         const float attackInc  = 1.0f / (std::max (0.0005f, p.attackMs * 0.001f) * (float) sr);
         const float sus        = std::clamp (p.sustain, 0.0f, 1.0f);
         const float decayDec   = (1.0f - sus) / (std::max (0.001f, p.decayMs * 0.001f) * (float) sr);
@@ -414,7 +473,7 @@ public:
 
                 // dry: plain looping playback
                 float dl, dr;
-                readHermite (srcL, srcR, N, v.playPos, dl, dr);
+                readAll (v.playPos, i, dl, dr);
                 if (p.loopMode == 0)
                 {
                     v.playPos += ratio;
@@ -473,7 +532,7 @@ public:
                     if (! g.active) continue;
                     const float w = g.perc ? percWindow (g.age, g.length) * 1.6f : window (g.age, g.length, g.fade);
                     float l, r;
-                    readHermite (srcL, srcR, N, g.pos, l, r);
+                    readAll (g.pos, i, l, r);
                     float gv = 1.0f;
                     if (p.volInGrains)
                     {
