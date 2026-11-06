@@ -25,6 +25,10 @@ struct SampleData
     // play time with a gain that moves (Params::harmGain). layerHarm = which harmonic each layer is.
     std::vector<std::vector<float>> layers;
     std::vector<int> layerHarm;
+    // 0.99.2: how loud this source really is (peak), so CHIME's hammer only strikes when there is sound in the grains.
+    // 1 = unknown (samples, noises): the hammer works as before.
+    float level = 1.0f;
+    std::vector<float> layerLevel;
 
     int numFrames() const   { return channels.empty() ? 0 : (int) channels[0].size(); }
     int numChannels() const { return (int) channels.size(); }
@@ -97,6 +101,10 @@ inline std::pair<SampleData, SampleData> renderAdditiveSplit (const std::array<f
     {
         for (auto& v : part->channels[0]) v *= gain;
         for (auto& L : part->layers) for (auto& v : L) v *= gain;
+        auto peakOf = [] (const std::vector<float>& b) { float m = 0.0f; for (float v : b) m = std::max (m, std::abs (v)); return m; };
+        part->level = peakOf (part->channels[0]);
+        part->layerLevel.clear();
+        for (auto& L : part->layers) part->layerLevel.push_back (peakOf (L));
     }
     return { std::move (g), std::move (c) };
 }
@@ -824,8 +832,13 @@ private:
             g->length = length = std::max (64, (int) ((0.06 + 0.35 * rng.uni()) * sr));
             g->pos = reverse ? start + ratio * (double) length : start;
         }
-        // CHIME hammer: every grain strikes the bells (pings and sharp grains hit harder)
-        v.strike = std::max (v.strike, perc ? 1.0f : 0.25f + 0.75f * (1.0f - soft));
+        // CHIME hammer: every grain strikes the bells (pings and sharp grains hit harder).
+        // 0.99.2: only as hard as there is sound in the grains: all grain sticks down = no hammer, no phantom bells
+        float srcLevel = s.level;
+        for (size_t j = 0; j < s.layers.size() && j < s.layerLevel.size(); ++j)
+            srcLevel += std::max (0.0f, p.harmGain[(size_t) s.layerHarm[j]]) * s.layerLevel[j];
+        const float hit = std::min (1.0f, srcLevel * 3.0f);
+        v.strike = std::max (v.strike, hit * (perc ? 1.0f : 0.25f + 0.75f * (1.0f - soft)));
 
         const double overlap = std::min ((double) kGrainsPerVoice, (double) length / std::max (1.0, spacing));
         v.norm = (float) (1.0 / std::sqrt (std::max (1.0, overlap * (0.5 + 0.5 * (1.0 - soft * 0.5)))));
