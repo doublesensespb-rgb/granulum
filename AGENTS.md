@@ -165,7 +165,7 @@ engine); PEAK Q (peakQ/peakQ2) + gain ±36 dB, filter view 0 dB centred; no hand
 v0.99.2: fix: state save wrote `kModTargetIds[t]` for t >= 1000 (LFO on sticks) -> out-of-bounds read, now `modTargetId(t)`;
 TUNE on OSC 1/2 (`osc1Tune`/`osc2Tune`, -48..+48 st, continuous, mod targets mtOsc1Tune/mtOsc2Tune), master PITCH (`pitch`,
 -12..+12 st, mtPitch, added to every osc + SUB transpose) next to OUTPUT in the header; whole CLIP box is the button (lit when
-on); LFO depth readout in % (`DepthReadout`: knobs show it over the value box while the mouse is on an LFO chip, sticks show a
+on); LFO depth readout in % (`DepthReadout`: knobs show a small
 tag next to the LFO chip (the knob value must stay visible - owner), sticks show a pill above the range; wheel 5 % / Shift 1 %,
 drag snaps to 1 %); harmonic numbers row under the OSC 1 sticks (`HarmonicEditor::numStyle = 1`, owner's choice A); preset
 folders: `PresetSaveWindow` (in-plugin SAVE: folders, + FOLDER, rename/delete-empty, preset list, REPLACE), menu submenus per
