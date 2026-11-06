@@ -37,7 +37,7 @@ GitHub-аккаунт обязательно защити двухфакторн
 3. Через ~15 минут готовые `GRAIN-FORM-Windows.zip` и `GRAIN-FORM-macOS.zip` появятся тут:
    https://github.com/doublesensespb-rgb/granulum/tree/builds
 4. Переименуй под версию, например `GRAIN-FORM-0.97-Windows.zip`.
-5. Если Mac-сборка «отменилась» (cancelled) — это занятые серверы GitHub, не ошибка. Запусти ещё раз с `mac` (в поле Mac runner оставь `macos-14`).
+5. Если Mac-сборка «отменилась» (cancelled) — это занятые серверы GitHub, не ошибка. Запусти ещё раз с `mac` (в поле Mac runner оставь `macos-15`).
 
 Репозиторий приватный: GitHub даёт бесплатные минуты сборки каждый месяц (Windows и Mac считаются дороже Linux). Одна сборка GRAIN FORM — примерно час «облачных» минут, этого хватает на ~30 сборок в месяц на бесплатном аккаунте.
 Тарифы: https://docs.github.com/en/billing/managing-billing-for-your-products/managing-billing-for-github-actions/about-billing-for-github-actions

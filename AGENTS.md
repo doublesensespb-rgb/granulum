@@ -111,7 +111,7 @@ Key facts:
 
 `.github/workflows/build.yml` runs ONLY when started manually (`gh workflow run build.yml --ref main`, or GitHub -> Actions ->
 Build -> Run workflow). Never start it before the owner has approved all pending changes and said to build.
-Inputs: `target` = all | windows | mac, `mac_runner` (default `macos-14`; if a mac job is cancelled as 'not acquired', run again with `-f target=mac`).
+Inputs: `target` = all | windows | mac, `mac_runner` (default `macos-15`; macos-14 stopped working in Nov 2026; if a mac job is cancelled as 'not acquired', run again with `-f target=mac`).
 Example: `gh workflow run build.yml --ref main -f target=all`.
 1. `windows` job (windows-latest, MSVC): VST3 + Standalone + Snapshot, renders `ui-*.png`, zips `GRAIN-FORM-Windows.zip`.
 2. `mac` job (Xcode): universal arm64+x86_64 VST3 + AU + Standalone, ad-hoc codesign, `GRAIN-FORM-macOS.zip`.
