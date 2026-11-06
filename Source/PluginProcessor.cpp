@@ -761,6 +761,7 @@ void GranulumProcessor::resetToInit()
     setGrainMask (0xffffu);
     presetName = "INIT";
     presetSub = {};
+    soundReset.store (true);
 }
 
 // ===========================================================================
@@ -1059,6 +1060,22 @@ void GranulumProcessor::processBlock (AudioBuffer<float>& buffer, MidiBuffer& mi
     subSlot.swapOnAudioThread();
     keyboardState.processNextMidiBuffer (midi, 0, numSamples, true);
 
+    // 0.99.2: after a preset change the old notes, grains, delay and reverb tails must not ring on with the new settings
+    const bool cut = soundReset.exchange (false);
+    if (cut)
+    {
+        heldNotes = 0;
+        for (auto* e : { &engineAdd, &engineAddClean, &engineSmp, &engineNoise, &engineSub }) e->reset();
+        for (auto* cp : { &chains[0], &chains[1], &chains[2], &subChain })
+        {
+            cp->filter.reset(); cp->filter2.reset(); cp->distortion.reset(); cp->delay.reset();
+            cp->reverb.reset(); cp->revCut.reset();
+            cp->quietSeconds = 1.0e9;
+        }
+        colorLp[0] = colorLp[1] = colorHp[0] = colorHp[1] = 0.0f;
+        sinceTrigger = 1.0e9;
+    }
+
     if (work.getNumSamples() < numSamples)
         for (auto* b : { &addBuf, &smpBuf, &noiseBuf, &work, &wetBuf, &subBuf }) b->setSize (2, numSamples, false, false, true);
     for (auto* b : { &addBuf, &smpBuf, &noiseBuf, &work, &subBuf }) b->clear();
@@ -1090,6 +1107,23 @@ void GranulumProcessor::processBlock (AudioBuffer<float>& buffer, MidiBuffer& mi
     }
     renderRange (pos, numSamples);
     midi.clear();
+
+    if (cut)
+    {
+        // the old sound stops: glide from its last sample to zero in ~3 ms instead of a hard step (no click)
+        const int n = jmin (numSamples, 128);
+        for (int ch = 0; ch < 2; ++ch)
+        {
+            auto* d = work.getWritePointer (ch);
+            for (int i = 0; i < n; ++i)
+            {
+                const float t = (float) i / (float) n;
+                d[i] += lastOut[ch] * (1.0f - t) * (1.0f - t);
+            }
+        }
+    }
+    if (numSamples > 0)
+        for (int ch = 0; ch < 2; ++ch) lastOut[ch] = work.getSample (ch, numSamples - 1);
 
     outputLevel.store (jmax (blockPeak, outputLevel.load() * 0.9f));
     for (int ch = 0; ch < buffer.getNumChannels(); ++ch)
@@ -1713,6 +1747,7 @@ bool GranulumProcessor::loadPreset (const File& f)
     setStateInformation (mb.getData(), (int) mb.getSize());
     presetName = f.getFileNameWithoutExtension();
     presetSub = f.getParentDirectory() == presetFolder() ? String() : f.getParentDirectory().getFileName();
+    soundReset.store (true);
     return true;
 }
 

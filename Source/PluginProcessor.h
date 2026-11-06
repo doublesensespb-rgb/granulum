@@ -355,7 +355,9 @@ public:
     std::array<std::atomic<float>, kNumLfos> lfoValueOut {}, lfoPhaseOut {}, lfoRiseOut {};
     std::atomic<float> outputLevel { 0.0f };
     std::atomic<float> peakL { 0.0f }, peakR { 0.0f };   // max since the UI last read them (UI swaps in 0)
-    std::atomic<bool>  clipped { false };                 // set when the output hit 0 dBFS; the UI clears it
+    std::atomic<bool>  clipped { false };
+    std::atomic<bool>  soundReset { false };   // 0.99.2: a new preset / INIT / project state: stop the old sound and its tails (audio thread)
+    float lastOut[2] {};                       // last output sample, for a click-free cut                 // set when the output hit 0 dBFS; the UI clears it
     std::atomic<float> keyCutoff { 20000.0f };
     // filter view (UI): key-tracked + modulated cutoff/reso of both filters, and a ring of the filter input
     std::atomic<float> keyCutoff2 { 20000.0f }, viewReso1 { 0.707f }, viewReso2 { 0.707f }, viewPeak1 { 0.0f }, viewPeak2 { 0.0f }, viewPeakQ1 { 1.0f }, viewPeakQ2 { 1.0f };
