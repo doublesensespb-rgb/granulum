@@ -90,7 +90,7 @@ int main (int argc, char** argv)
         {
             Palette::applyTheme (t);
             std::unique_ptr<AudioProcessorEditor> e (p.createEditor());
-            e->setSize (1080, 800);
+            e->setSize (1080, 860);
             run (p, dynamic_cast<GranulumEditor*> (e.get()), 80);
             save (*e, outDir, ("theme-" + String (t) + ".png").toRawUTF8());
         }
@@ -99,7 +99,7 @@ int main (int argc, char** argv)
 
     std::unique_ptr<AudioProcessorEditor> base (p.createEditor());
     auto* ed = dynamic_cast<GranulumEditor*> (base.get());
-    base->setSize (1080, 800);
+    base->setSize (1080, 860);
 
     // 0) INIT: how the plugin opens
     p.rebuildNow();
@@ -188,14 +188,14 @@ int main (int argc, char** argv)
         for (int st = 1; st <= 4; ++st)
         {
             GranulumEditor::soundsStyle = st;
-            std::unique_ptr<AudioProcessorEditor> e2 (p.createEditor()); e2->setSize (1080, 800);
+            std::unique_ptr<AudioProcessorEditor> e2 (p.createEditor()); e2->setSize (1080, 860);
             run (p, dynamic_cast<GranulumEditor*> (e2.get()), 3);
             save (*e2, outDir, ("sounds-style-" + String (st) + ".png").toRawUTF8());
         }
         GranulumEditor::soundsStyle = 4;
         {
             // glint animation frames of the OSC 2 strip
-            std::unique_ptr<AudioProcessorEditor> e3 (p.createEditor()); e3->setSize (1080, 800);
+            std::unique_ptr<AudioProcessorEditor> e3 (p.createEditor()); e3->setSize (1080, 860);
             outDir.getChildFile ("glint").createDirectory();
             for (int f = 0; f < 60; ++f)
             {
@@ -222,6 +222,25 @@ int main (int argc, char** argv)
         ed->repaint();
         run (p, ed, 20);
         save (*base, outDir, "lfo8.png");
+    }
+
+    // design preview: "Snapshot <dir> v098" -> SUB on, LFO on small knobs, waveform picker, CLIP off
+    if (argc > 2 && String (argv[2]) == "hw") Palette::hardware = true;
+    if (argc > 2 && (String (argv[2]) == "v098" || String (argv[2]) == "hw"))
+    {
+        setP (ParamID::subOn, 1.0f); setP (ParamID::subH2, 0.45f); setP (ParamID::subH3, 0.2f);
+        setP (ParamID::osc1On, 1.0f);
+        p.setHarmonics (WavePicker::shape (1));
+        p.setModulation (GranulumProcessor::modIndexOf (ParamID::osc3Vol), 1, 0.5f);
+        p.setModulation (GranulumProcessor::modIndexOf (ParamID::osc2Vol), 0, -0.4f);
+        p.setModulation (GranulumProcessor::modIndexOf (ParamID::subVol), 2, 0.3f);
+        p.setModulation (GranulumProcessor::modIndexOf (ParamID::bloom), 0, 0.4f);
+        setP (ParamID::clipOn, 0.0f);
+        run (p, ed, 60);
+        save (*base, outDir, "v098.png");
+        setP (ParamID::clipOn, 1.0f);
+        run (p, ed, 10);
+        save (*base, outDir, "v098-clip-on.png");
     }
 
     // design preview: "Snapshot <dir> loop" -> LOOP region on the grain field

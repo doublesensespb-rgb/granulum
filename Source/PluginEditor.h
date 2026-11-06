@@ -35,6 +35,7 @@ namespace Palette
     inline juce::Colour lfoCol[3] { juce::Colour (0xffbff3ff), juce::Colour (0xff9ee6c4), juce::Colour (0xffd6be9c) };
     inline juce::String fontName;
     inline bool flatLed = false;
+    inline bool hardware = false;   // preview: "real hardware" look (brushed metal, wood cheeks, screws, knurled knobs, glass)
     inline int theme = 0;
 
     inline void applyTheme (int t)
@@ -120,6 +121,7 @@ public:
     void drawRotarySlider (juce::Graphics&, int x, int y, int w, int h, float pos,
                            float start, float end, juce::Slider&) override;
     void drawButtonBackground (juce::Graphics&, juce::Button&, const juce::Colour&, bool over, bool down) override;
+    void drawButtonBase (juce::Graphics&, juce::Button&, bool over, bool down);
     void drawButtonText (juce::Graphics&, juce::TextButton&, bool over, bool down) override;
     void drawComboBox (juce::Graphics&, int w, int h, bool down, int bx, int by, int bw, int bh, juce::ComboBox&) override;
     juce::Font getComboBoxFont (juce::ComboBox&) override;
@@ -154,10 +156,10 @@ private:
 class FineSlider final : public juce::Slider
 {
 public:
-    int baseSensitivity = 500;   // pixels for the full range (JUCE default is 250)
+    int baseSensitivity = 300;   // pixels for the full range, Serum-like feel (JUCE default is 250)
     void mouseDown (const juce::MouseEvent& e) override
     {
-        setMouseDragSensitivity (e.mods.isShiftDown() || e.mods.isCtrlDown() ? baseSensitivity * 8 : baseSensitivity);
+        setMouseDragSensitivity (e.mods.isShiftDown() || e.mods.isCtrlDown() ? baseSensitivity * 10 : baseSensitivity);
         juce::Slider::mouseDown (e);
     }
 };
@@ -270,6 +272,27 @@ public:
     static inline bool fastPaint = true;   // the snapshot tool flips this to compare old/new drawing
 };
 
+// OSC 4 SUB: three harmonic sticks (fundamental, octave, octave + fifth), same look as the OSC 1 strings
+class SubBars final : public juce::Component, public juce::SettableTooltipClient, private juce::AudioProcessorValueTreeState::Listener,
+                      private juce::AsyncUpdater
+{
+public:
+    explicit SubBars (GranulumProcessor&);
+    ~SubBars() override;
+    void paint (juce::Graphics&) override;
+    void mouseDown (const juce::MouseEvent&) override;
+    void mouseDrag (const juce::MouseEvent&) override;
+    void mouseUp (const juce::MouseEvent&) override;
+private:
+    void parameterChanged (const juce::String&, float) override { triggerAsyncUpdate(); }
+    void handleAsyncUpdate() override { repaint(); }
+    juce::RangedAudioParameter* param (int i) const;
+    juce::Rectangle<float> plot() const { return getLocalBounds().toFloat().reduced (8.0f, 5.0f); }
+    void setFrom (juce::Point<float>);
+    GranulumProcessor& proc;
+    int dragging = -1;
+};
+
 // Additive bars: draw the 16 harmonic amplitudes; the gold GRAIN row below picks which harmonics are granulated
 class HarmonicEditor final : public juce::Component, public juce::SettableTooltipClient, private juce::Timer
 {
@@ -363,9 +386,11 @@ private:
 
 // Tiny filter view: response curve of the selected filter over a faint live spectrum of what comes in.
 // Drag left/right = CUTOFF, up/down = RESO.
-class FilterScope final : public juce::Component, public juce::SettableTooltipClient, private juce::Timer
+class FilterScope final : public juce::Component, public juce::SettableTooltipClient, private juce::Timer,
+                          private juce::AudioProcessorValueTreeState::Listener, private juce::AsyncUpdater
 {
 public:
+    ~FilterScope() override;
     void frame() { timerCallback(); }   // driven by the editor's single 30 fps tick (one repaint pass per frame)
     explicit FilterScope (GranulumProcessor&);
     void paint (juce::Graphics&) override;
@@ -382,6 +407,9 @@ private:
     std::array<float, 1024> specDb {};
     float dragCut = 0, dragRes = 0;
     juce::Point<float> dragStart;
+    // the curve follows CUTOFF / RESO / GAIN / TYPE at once (not only on the next 30 fps tick)
+    void parameterChanged (const juce::String&, float) override { triggerAsyncUpdate(); }
+    void handleAsyncUpdate() override { repaint(); }
 };
 
 // 4-point drawable LFO envelope: drag points, drag the round handles on each segment to bend it
@@ -512,6 +540,24 @@ private:
     int hover = -1;
 };
 
+// OSC 1 classic waveforms: one click fills the harmonic bars with SINE, SAW, SQUARE or TRIANGLE
+class WavePicker final : public juce::Component, public juce::SettableTooltipClient
+{
+public:
+    explicit WavePicker (GranulumProcessor& p) : proc (p)
+    {
+        setTooltip ("Classic waveforms for OSC 1: SINE, SAW, SQUARE, TRIANGLE (fills the harmonic bars; edit them after)");
+        setRepaintsOnMouseActivity (true);
+    }
+    void paint (juce::Graphics&) override;
+    void mouseDown (const juce::MouseEvent&) override;
+    static std::array<float, granulum::kNumHarmonics> shape (int i);
+private:
+    int segmentAt (float x) const { return juce::jlimit (0, 3, (int) (x / juce::jmax (1.0f, (float) getWidth() / 4.0f))); }
+    int matching() const;
+    GranulumProcessor& proc;
+};
+
 // LOOP mode selector in the GRAIN FIELD title row: OFF | LOOP | PING-PONG | ONE-SHOT
 class LoopModeBar final : public juce::Component, public juce::SettableTooltipClient, private juce::Timer
 {
@@ -640,13 +686,16 @@ private:
     FilterScope filterScope { proc };
     SampleMenu sampleMenu { proc };
     LoopModeBar loopBar { proc };
+    WavePicker wavePicker { proc };
     void toggleSampleMenu (bool show);
 public:
     void openSampleMenuForPreview (bool show = true) { toggleSampleMenu (show); }
     static inline int soundsStyle = 4;   // 4 = same as a lit GRAIN button (owner's choice); 1-3 earlier variants
 private:
     juce::TextButton samplePrev { juce::String::fromUTF8 ("\xe2\x97\x80") }, sampleNext { juce::String::fromUTF8 ("\xe2\x96\xb6") };
-    Lamp osc1Lamp { "OSC 1", "ADDITIVE" }, osc2Lamp { "OSC 2", "SAMPLE" }, osc3Lamp { "OSC 3", "NOISE" };
+    Lamp osc1Lamp { "OSC 1", "ADDITIVE" }, osc2Lamp { "OSC 2", "SAMPLE" }, osc3Lamp { "OSC 3", "NOISE" }, osc4Lamp { "OSC 4", "SUB" };
+    SubBars subBars { proc };
+    std::unique_ptr<ButtonAtt> osc4LampA;
     std::unique_ptr<ButtonAtt> osc1LampA, osc2LampA, osc3LampA;
 
     juce::TextButton undoButton { "UNDO" }, initButton { "INIT" }, randomButton { "RANDOM ALL" }, loadButton { juce::String::fromUTF8 ("SOUNDS \xe2\x96\xbe") }, chordButton { "CHORD: OFF" };
@@ -662,6 +711,7 @@ private:
     juce::TooltipWindow tooltips { this, 600 };
 
     std::vector<std::unique_ptr<Knob>> peakKnobs;   // GAIN for the PEAK filter type, shown instead of RESO
+    std::vector<std::unique_ptr<Knob>> subKnobs;   // OSC 4 SUB: VOL, OCT
     std::vector<std::unique_ptr<Knob>> heroKnobs, smallKnobs, osc1Knobs, osc2Knobs, osc3Knobs, filterKnobs, filter2Knobs,
                                        distKnobs, delayKnobs, revKnobs, globalKnobs;
     std::vector<Knob*> allKnobs;
@@ -690,14 +740,16 @@ private:
     std::vector<std::unique_ptr<Knob>> ampKnobs;
     int selectedLfo = 0;     // 0..2 = LFO, 3 = AMP
 
-    juce::Rectangle<int> titleArea, gemsArea, screenFrame, osc1Area, osc2Area, osc3Area, dropZone,
+    juce::Rectangle<int> titleArea, gemsArea, screenFrame, osc1Area, osc2Area, osc3Area, osc4Area, subTag, dropZone,
                          grainArea, filterArea, fxArea, ledArea, lfoFrame, voiceArea, fxContent,
                          lfoPresetLabel, lfoModeLabel, lfoDivLabel, distTypeLabel, fxLabel, grainLabel, adsrReadout;
     float meter = 0.0f;
     float activity = 0.0f;
+    juce::Image hwPlate;     // cached brushed-metal faceplate (hardware look)
     uint32_t shownModVersion = 0;
     juce::String statusText;
-    bool fileHover = false, dropHover = false;
+    bool fileHover = false, dropHover = false, clearHover = false;
+    juce::Rectangle<int> clearRect() const;
     int shownTabState = -1;
     bool rendererChosen = false;
     juce::String shownDropSig;

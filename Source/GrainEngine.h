@@ -98,6 +98,7 @@ struct Params
     float mix      = 1.0f;
     float evolve   = 0.0f;   // seconds, 0 = off
     float chime    = 0.0f;   // CHIME: grains ring a bank of resonators tuned to the note
+    float spread   = 1.0f;   // SPREAD: stereo width of the grain cloud (0 = all grains centred)
     bool  grainOn  = false;
 
     // LOOP: grains (and the plain playback) stay inside [loopA, loopB] of the source
@@ -156,6 +157,7 @@ struct Grain
     uint8_t kind = 0;   // 0 normal, 1 shimmer, 2 reverse
     bool   perc = false; // SHIMMER "ping": sharp attack, ringing decay (glass / bells)
     double lph[3] {};    // INTO GRAINS: this grain's own position in each LFO's rhythm
+    float  gvs = -1.0f;  // INTO GRAINS: smoothed volume (no clicks on hard LFO edges)
 };
 
 // A grain that was just born — the UI turns these into flying shards.
@@ -323,6 +325,7 @@ public:
 
         const bool chimeOn = p.grainOn && p.chime > 0.001f;
         const float strikeDecay = (float) std::exp (-1.0 / (0.0015 * sr));
+        const float gvSlew = 1.0f - (float) std::exp (-1.0 / (0.0015 * sr));
         const float chimeT   = std::clamp ((p.chime - 0.55f) / 0.45f, 0.0f, 1.0f); // harmonic -> bell
         const float chimeT60 = 0.08f + 2.2f * p.chime * p.chime;                    // ring time (s)
         const float chimeAmt = 3.6f * std::pow (p.chime, 1.3f);
@@ -485,7 +488,10 @@ public:
                             vn += L.depth * L.rise * (L.table[i0] + (L.table[i0 + 1] - L.table[i0]) * f);
                             g.lph[k] += L.inc;
                         }
-                        gv = std::clamp (vn, 0.0f, 1.0f) * p.volScale;
+                        // ~1.5 ms smoothing: square / hard-edged LFOs at high rates no longer click inside the grains
+                        const float target = std::clamp (vn, 0.0f, 1.0f) * p.volScale;
+                        g.gvs = g.gvs < 0.0f ? target : g.gvs + (target - g.gvs) * gvSlew;
+                        gv = g.gvs;
                     }
                     sumL += l * w * g.gainL * gv;
                     sumR += r * w * g.gainR * gv;
@@ -572,6 +578,7 @@ private:
         int64_t  age = 0;
         uint64_t startStamp = 0;
         float    walk[4] {}, walkTarget[4] {};
+        bool     panSide = false;   // grains alternate left / right, so the cloud never sits in one ear
         int      walkCount[4] {};
         struct ChimeCoef { float a1L = 0, a1R = 0, a2 = 0, gain = 0, gl = 1, gr = 1; };
         std::array<ChimeCoef, kChimeModes> chimeCoef {};
@@ -722,9 +729,13 @@ private:
         double start = loopHead ((double) p.position + v.travel, p) + ((double) (jitter * rng.bipolar()) + (double) (drift * 0.12f * v.walk[0])) * region;
         start = inLoop (start, p) * (double) N;
 
-        // stereo: SCATTER + BLOOM + SMEAR, plus DRIFT pan wander
+        // stereo: SCATTER + BLOOM + SMEAR (+ DRIFT sway) set how far a grain goes from the centre, SPREAD scales it.
+        // Grains take turns left / right, so the cloud stays centred on average (DRIFT used to push the whole cloud
+        // into one ear for seconds at a time).
         const float width = std::clamp (scatter + bloom * 0.35f + smear * 0.2f, 0.0f, 1.0f);
-        const float pan = std::clamp (width * rng.bipolar() + drift * 0.4f * v.walk[3], -1.0f, 1.0f);
+        const float away = std::abs (width * rng.bipolar()) + drift * 0.4f * std::abs (v.walk[3]);
+        v.panSide = ! v.panSide;
+        const float pan = std::clamp ((v.panSide ? away : -away) * std::clamp (p.spread, 0.0f, 1.0f), -1.0f, 1.0f);
         const float a = (pan + 1.0f) * 0.25f * (float) kPi;
 
         g->active = true;
@@ -738,6 +749,7 @@ private:
         g->pan = pan;
         g->kind = kind;
         g->perc = perc;
+        g->gvs = -1.0f;
         if (p.volInGrains)
         {
             // this grain's slice of the LFO rhythm comes from a moment up to ~1 s back (SCATTER), or right now

@@ -84,6 +84,18 @@ namespace ParamID
     inline constexpr const char* ampOn     = "ampOn";
     inline constexpr const char* porta     = "porta";
     inline constexpr const char* output    = "output";
+    inline constexpr const char* clipOn    = "clipOn";
+    inline constexpr const char* osc1Pan   = "osc1Pan";
+    inline constexpr const char* osc2Pan   = "osc2Pan";
+    inline constexpr const char* osc3Pan   = "osc3Pan";
+    inline constexpr const char* spread    = "spread";
+    // OSC 4 SUB: 3 harmonics straight to the output (no grains, no filters, no effects)
+    inline constexpr const char* subOn     = "subOn";
+    inline constexpr const char* subVol    = "subVol";
+    inline constexpr const char* subOct    = "subOct";
+    inline constexpr const char* subH1     = "subH1";
+    inline constexpr const char* subH2     = "subH2";
+    inline constexpr const char* subH3     = "subH3";
     // LFOs: "lfo1Rate", "lfo1Sync", "lfo1Div", "lfo1Mode", "lfo1Rise" ...
     inline juce::String lfo (int index, const char* what) { return "lfo" + juce::String (index + 1) + what; }
     // which oscillators go through a block: "filterR1", "distR2", "delayR3", "revR1" ...
@@ -108,6 +120,8 @@ enum ModTarget
     mtPorta, mtOutput,
     mtLfo1Rate, mtLfo2Rate, mtLfo3Rate,
     mtPeakGain, mtPeakGain2,
+    mtSubVol,
+    mtOsc1Pan, mtOsc2Pan, mtOsc3Pan, mtSpread,
     kNumModTargets
 };
 
@@ -262,6 +276,7 @@ public:
     void loadAdjacentFactorySample (int direction);
     std::shared_ptr<const WaveformPeaks> getSamplePeaks() const { const juce::ScopedLock sl (infoLock); return smpPeaks; }
     bool hasSample() const { return sampleLoaded.load(); }
+    void clearSample();   // the x on the sample box: OSC 2 becomes empty (and the preset no longer points to the file)
     bool showingSample() const;
     std::shared_ptr<const WaveformPeaks> getPeaks() const;
     double getSampleLengthSeconds() const;
@@ -330,7 +345,7 @@ public:
 
     juce::UndoManager undoManager { 30000, 60 };   // UNDO in the header: knob and switch changes
     juce::AudioProcessorValueTreeState apvts;
-    granulum::GrainEngine engineAdd, engineAddClean, engineSmp, engineNoise;
+    granulum::GrainEngine engineAdd, engineAddClean, engineSmp, engineNoise, engineSub;
     juce::MidiKeyboardState keyboardState;
 
 private:
@@ -340,6 +355,7 @@ private:
     void processChunk (int from, int len);
     void computeModulated (float* values);
     granulum::Params voiceParams (const float* v, int osc) const;
+    granulum::Params subParams (const float* v) const;
     void loadNoises();
     void advanceLfos (int endSample, int len, const float* values);
     void noteOn (int note, float velocity);
@@ -349,7 +365,9 @@ private:
 
     juce::AudioFormatManager formatManager;
 
-    SourceSlot addSlot, addCleanSlot, smpSlot, noiseSlot;
+    SourceSlot addSlot, addCleanSlot, smpSlot, noiseSlot, subSlot;
+    std::array<float, 3> subShown { -1.0f, -1.0f, -1.0f };
+    float lastGSub = 0.0f;
     std::atomic<uint32_t> grainMask { 0xffffu };
     std::vector<std::shared_ptr<granulum::SampleData>> noises;
     std::vector<std::shared_ptr<const WaveformPeaks>> noisePeaks;
@@ -389,8 +407,9 @@ private:
 
     std::array<FxChain, kNumOscs> chains;
     juce::SmoothedValue<float> outGain;
-    juce::AudioBuffer<float> addBuf, smpBuf, noiseBuf, work, wetBuf;
+    juce::AudioBuffer<float> addBuf, smpBuf, noiseBuf, work, wetBuf, subBuf;
     float lastG1 = 0.0f, lastG2 = 0.0f, lastG3 = 0.0f, blockPeak = 0.0f;
+    float lastPan[kNumOscs] { 0.0f, 0.0f, 0.0f };
     float colorLp[2] {}, colorHp[2] {};
 
     std::atomic<float>* pOsc1On {};   std::atomic<float>* pOsc2On {};
@@ -408,6 +427,8 @@ private:
     std::atomic<float>* pAmpA {}; std::atomic<float>* pAmpD {}; std::atomic<float>* pAmpS {}; std::atomic<float>* pAmpR {}; std::atomic<float>* pAmpOn {};
     std::array<std::atomic<float>*, kNumLfos> pLfoSync {}, pLfoDiv {}, pLfoMode {}, pLfoRise {}, pLfoOn {}, pLfoGrains {};
     std::array<double, kNumLfos> lfoRateNow {};
+    std::atomic<float>* pClipOn {};
+    std::atomic<float>* pSubOn {}; std::atomic<float>* pSubOct {}; std::array<std::atomic<float>*, 3> pSubH {};
     std::atomic<float>* pLoopMode {}; std::atomic<float>* pLoopStart {}; std::atomic<float>* pLoopEnd {};
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (GranulumProcessor)
