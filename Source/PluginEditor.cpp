@@ -467,6 +467,42 @@ void GranulumLook::drawLabel (Graphics& g, Label& l)
 }
 
 // ============================================================================
+// LFO depth readout (0.99.2): like Serum, the depth shows as a number while you set it
+
+namespace
+{
+    String depthText (float d)
+    {
+        const int pct = roundToInt (d * 100.0f);
+        return (pct > 0 ? String ("+") : pct < 0 ? String (CharPointer_UTF8 ("\xe2\x88\x92")) : String()) + String (std::abs (pct)) + "%";
+    }
+    // mouse wheel: 5 % steps on a clean grid (Shift = 1 %), so two depths are easy to make equal
+    float wheelDepth (float d, const MouseWheelDetails& w, bool fine)
+    {
+        const float step = fine ? 0.01f : 0.05f;
+        const float dir = (w.deltaY > 0 ? 1.0f : -1.0f) * (w.isReversed ? -1.0f : 1.0f);
+        return jlimit (-1.0f, 1.0f, (std::round (d / step) + dir) * step);
+    }
+    float snapDepth (float d) { return jlimit (-1.0f, 1.0f, std::round (d * 100.0f) / 100.0f); }
+    void drawDepthTag (Graphics& g, float depth, Colour col, Point<float> centre, Rectangle<float> bounds)
+    {
+        const auto text = depthText (depth);
+        const auto f = uiFont (9.5f, true, 0.02f);
+        const float w = (float) GlyphArrangement::getStringWidthInt (f, text) + 10.0f, h = 14.0f;
+        auto r = Rectangle<float> (w, h).withCentre (centre);
+        r = r.withX (jlimit (bounds.getX(), jmax (bounds.getX(), bounds.getRight() - w), r.getX()))
+             .withY (jlimit (bounds.getY(), jmax (bounds.getY(), bounds.getBottom() - h), r.getY()));
+        g.setColour (Palette::screen.withAlpha (0.94f));
+        g.fillRoundedRectangle (r, h * 0.5f);
+        g.setColour (col.withAlpha (0.75f));
+        g.drawRoundedRectangle (r.reduced (0.5f), h * 0.5f, 1.0f);
+        g.setColour (col.brighter (0.25f));
+        g.setFont (f);
+        g.drawText (text, r, Justification::centred, false);
+    }
+}
+
+// ============================================================================
 // Modulation chip
 
 ModChip::ModChip (GranulumProcessor& p, Knob& k, int l) : lfo (l), proc (p), owner (k)
@@ -478,8 +514,8 @@ ModChip::ModChip (GranulumProcessor& p, Knob& k, int l) : lfo (l), proc (p), own
 void ModChip::updateTooltip()
 {
     const float d = proc.getModulationDepth (owner.target, lfo);
-    setTooltip ("LFO " + String (lfo + 1) + ": " + String (roundToInt (d * 100.0f)) + " %\n"
-                + "Drag up/down: depth. Double-click: remove.");
+    setTooltip ("LFO " + String (lfo + 1) + ": " + depthText (d) + "\n"
+                + "Drag up/down or mouse wheel: depth (wheel = 5 % steps, Shift = 1 %). Double-click: remove.");
 }
 
 void ModChip::paint (Graphics& g)
@@ -528,8 +564,21 @@ void ModChip::mouseDrag (const MouseEvent& e)
 {
     if (e.mods.isPopupMenu()) return;
     const float sens = e.mods.isShiftDown() || e.mods.isCtrlDown() ? 2400.0f : 450.0f;   // heavy, so depth is easy to set
-    const float d = jlimit (-1.0f, 1.0f, startDepth - (float) e.getDistanceFromDragStartY() / sens);
+    const float d = snapDepth (startDepth - (float) e.getDistanceFromDragStartY() / sens);
     proc.setModulation (owner.target, lfo, d);
+    owner.readout.show (owner.target, lfo, true);
+    updateTooltip();
+    owner.repaint();
+}
+
+void ModChip::mouseEnter (const MouseEvent&) { owner.readout.show (owner.target, lfo, true); owner.repaint(); }
+void ModChip::mouseExit  (const MouseEvent& e) { if (! e.mouseWasDraggedSinceMouseDown() || ! e.mods.isAnyMouseButtonDown()) owner.readout.release(); }
+void ModChip::mouseUp    (const MouseEvent&) { if (! isMouseOver()) owner.readout.release(); }
+
+void ModChip::mouseWheelMove (const MouseEvent& e, const MouseWheelDetails& w)
+{
+    proc.setModulation (owner.target, lfo, wheelDepth (proc.getModulationDepth (owner.target, lfo), w, e.mods.isShiftDown()));
+    owner.readout.show (owner.target, lfo, isMouseOver(), 1200);
     updateTooltip();
     owner.repaint();
 }
@@ -650,6 +699,26 @@ void Knob::paintOverChildren (Graphics& g)
     g.fillEllipse (Rectangle<float> (9.0f, 9.0f).withCentre (p));
     g.setColour (Colours::white);
     g.fillEllipse (Rectangle<float> (4.5f, 4.5f).withCentre (p));
+
+    // LFO depth in % (like Serum) over the value box while the mouse is on an LFO chip
+    if (readout.active() && readout.l >= 0 && proc.hasModulation (target, readout.l))
+    {
+        const auto b = getLocalBounds().toFloat();
+        const float boxH = size == Size::Hero ? 20.0f : size == Size::Small ? 15.0f : 18.0f;
+        // covers the whole value box (compact knobs: the bottom of the knob), so nothing peeks through
+        auto r = compact ? b.withTop (b.getBottom() - 15.0f).reduced (1.0f, 0.0f)
+                         : Rectangle<float> (b.getX() + 2.0f, (float) slider.getBottom() - boxH, b.getWidth() - 4.0f, boxH);
+        const float depth = proc.getModulationDepth (target, readout.l);
+        const auto col = Palette::lfo (readout.l);
+        const String text = (r.getWidth() >= 62.0f ? "LFO " + String (readout.l + 1) + "  " : String()) + depthText (depth);
+        g.setColour (Palette::screen);
+        g.fillRoundedRectangle (r, 4.0f);
+        g.setColour (col.withAlpha (0.7f));
+        g.drawRoundedRectangle (r.reduced (0.5f), 4.0f, 1.0f);
+        g.setColour (col.brighter (0.25f));
+        g.setFont (uiFont (size == Size::Small ? 10.0f : 11.0f, true, 0.02f));
+        g.drawText (text, r, Justification::centred, false);
+    }
 }
 
 void Knob::refreshMods()
@@ -682,7 +751,8 @@ void Knob::refreshMods()
 
 void Knob::tick()
 {
-    if (anyMod) repaint();
+    const bool gone = readout.expire();
+    if (anyMod || gone) repaint();
 }
 
 bool Knob::isInterestedInDragSource (const SourceDetails& s)
@@ -1344,8 +1414,8 @@ void SubBars::mouseWheelMove (const MouseEvent& e, const MouseWheelDetails& w)
     for (int l = 0; l < kNumLfos; ++l)
         if (proc.hasModulation (mtSubH1 + i, l))
         {
-            const float d = jlimit (-1.0f, 1.0f, proc.getModulationDepth (mtSubH1 + i, l) + (w.deltaY > 0 ? 0.03f : -0.03f) * (w.isReversed ? -1.0f : 1.0f));
-            proc.setModulation (mtSubH1 + i, l, d);
+            proc.setModulation (mtSubH1 + i, l, wheelDepth (proc.getModulationDepth (mtSubH1 + i, l), w, e.mods.isShiftDown()));
+            readout.show (i, l, false, 1200);
             repaint();
             return;
         }
@@ -1357,11 +1427,13 @@ void SubBars::mouseMove (const MouseEvent& e)
     const auto c = chipAt (e.position);
     if (c.first >= 0)
     {
-        setTooltip ("LFO " + String (c.second + 1) + " on SUB stick " + String (c.first + 1) + ":  mouse wheel or drag = depth,  right-click = remove");
+        setTooltip ("LFO " + String (c.second + 1) + " on SUB stick " + String (c.first + 1) + ":  mouse wheel (5 % steps, Shift = 1 %) or drag = depth,  right-click = remove");
         setMouseCursor (MouseCursor::UpDownResizeCursor);
+        if (! readout.hold || readout.a != c.first) { readout.show (c.first, c.second, true); repaint(); }
     }
     else
     {
+        if (readout.hold) readout.release();
         setTooltip ("SUB sticks, left to right: root, octave, octave + fifth, 2 octaves, 2 octaves + third.\nDrag them up and down. Drop an LFO on a stick to move it.");
         setMouseCursor (MouseCursor::NormalCursor);
     }
@@ -1474,16 +1546,29 @@ void SubBars::mouseDrag (const MouseEvent& e)
 {
     if (chipDrag.first >= 0)
     {
-        const float d = jlimit (-1.0f, 1.0f, chipStartDepth + (chipStartY - e.position.y) / jmax (20.0f, plot().getHeight()));
+        const float d = snapDepth (chipStartDepth + (chipStartY - e.position.y) / jmax (20.0f, plot().getHeight()) * (e.mods.isShiftDown() ? 0.25f : 1.0f));
         proc.setModulation (mtSubH1 + chipDrag.first, chipDrag.second, d);
+        readout.show (chipDrag.first, chipDrag.second, true);
         repaint();
         return;
     }
     setFrom (e.position);
 }
 
+void SubBars::paintOverChildren (Graphics& g)
+{
+    if (! readout.active() || ! proc.hasModulation (mtSubH1 + readout.a, readout.l)) return;
+    const auto pl = plot();
+    const float colW = pl.getWidth() / (float) kN, x = pl.getX() + colW * ((float) readout.a + 0.5f);
+    auto yOf = [&pl] (float vv) { return pl.getBottom() - jlimit (0.0f, 1.0f, vv) * (pl.getHeight() - 6.0f); };
+    const float depth = proc.getModulationDepth (mtSubH1 + readout.a, readout.l);
+    const float y0 = yOf (param (readout.a)->getValue()), y1 = yOf (param (readout.a)->getValue() + depth);
+    drawDepthTag (g, depth, Palette::lfo (readout.l), { x, jmin (y0, y1) - 10.0f }, getLocalBounds().toFloat().reduced (2.0f));
+}
+
 void SubBars::mouseUp (const MouseEvent&)
 {
+    if (chipDrag.first >= 0) readout.release();
     chipDrag = { -1, -1 };
     if (dragging >= 0) param (dragging)->endChangeGesture();
     dragging = -1;
@@ -1804,8 +1889,8 @@ void HarmonicEditor::mouseWheelMove (const MouseEvent& e, const MouseWheelDetail
     for (int l = 0; l < kNumLfos; ++l)
     {
         if (! proc.hasModulation (kHarmTarget0 + k, l)) continue;
-        const float d = jlimit (-1.0f, 1.0f, proc.getModulationDepth (kHarmTarget0 + k, l) + (w.deltaY > 0 ? 0.03f : -0.03f) * (w.isReversed ? -1.0f : 1.0f));
-        proc.setModulation (kHarmTarget0 + k, l, d);
+        proc.setModulation (kHarmTarget0 + k, l, wheelDepth (proc.getModulationDepth (kHarmTarget0 + k, l), w, e.mods.isShiftDown()));
+        readout.show (k, l, false, 1200);
         repaint();
         return;
     }
@@ -1817,10 +1902,12 @@ void HarmonicEditor::mouseMove (const MouseEvent& e)
     if (const auto c = chipAt (e.position); c.harm >= 0)
     {
         hoverBar = -1;
-        setTooltip ("LFO " + String (c.lfo + 1) + " on harmonic " + String (c.harm + 1) + ":  mouse wheel or drag = depth,  right-click = remove");
+        setTooltip ("LFO " + String (c.lfo + 1) + " on harmonic " + String (c.harm + 1) + ":  mouse wheel (5 % steps, Shift = 1 %) or drag = depth,  right-click = remove");
         setMouseCursor (MouseCursor::UpDownResizeCursor);
+        if (! readout.hold || readout.a != c.harm) { readout.show (c.harm, c.lfo, true); repaint(); }
         return;
     }
+    if (readout.hold) readout.release();
     if (e.position.y >= pillRow().getY() - 3.0f && e.position.x >= barArea().getX())
     {
         const int b = barAt (e.position.x);
@@ -1876,8 +1963,9 @@ void HarmonicEditor::mouseDrag (const MouseEvent& e)
 {
     if (chipDrag.harm >= 0)
     {
-        const float d = jlimit (-1.0f, 1.0f, chipStartDepth + (chipStartY - e.position.y) / jmax (20.0f, barArea().getHeight()));
+        const float d = snapDepth (chipStartDepth + (chipStartY - e.position.y) / jmax (20.0f, barArea().getHeight()) * (e.mods.isShiftDown() ? 0.25f : 1.0f));
         proc.setModulation (kHarmTarget0 + chipDrag.harm, chipDrag.lfo, d);
+        readout.show (chipDrag.harm, chipDrag.lfo, true);
         repaint();
         return;
     }
@@ -1886,9 +1974,22 @@ void HarmonicEditor::mouseDrag (const MouseEvent& e)
     else          applyMouse (e, false);
 }
 
-void HarmonicEditor::mouseExit (const MouseEvent&) { hoverBar = -1; }
+void HarmonicEditor::mouseExit (const MouseEvent&) { hoverBar = -1; if (readout.hold && chipDrag.harm < 0) readout.release(); }
 
-void HarmonicEditor::mouseUp (const MouseEvent&) { chipDrag = {}; editing = false; lastBar = -1; lastPill = -1; pillMode = false; }
+void HarmonicEditor::mouseUp (const MouseEvent&) { if (chipDrag.harm >= 0) readout.release(); chipDrag = {}; editing = false; lastBar = -1; lastPill = -1; pillMode = false; }
+
+void HarmonicEditor::paintOverChildren (Graphics& g)
+{
+    if (! readout.active() || ! proc.hasModulation (kHarmTarget0 + readout.a, readout.l)) return;
+    const auto a = barArea();
+    auto yOf = [&a] (float v) { return a.getBottom() - jlimit (0.0f, 1.0f, v) * a.getHeight(); };
+    const int k = readout.a;
+    const float depth = proc.getModulationDepth (kHarmTarget0 + k, readout.l);
+    const float y0 = yOf (h[(size_t) k]), y1 = yOf (h[(size_t) k] + depth);
+    const float cx = a.getX() + a.getWidth() / (float) granulum::kNumHarmonics * ((float) k + 0.5f);
+    const float hx = lfoStickStyle == 1 || lfoStickStyle == 2 ? cx : lfoLineX (k, 0);
+    drawDepthTag (g, depth, Palette::lfo (readout.l), { hx, jmin (y0, y1) - 10.0f }, getLocalBounds().toFloat().reduced (2.0f));
+}
 
 void HarmonicEditor::paint (Graphics& g)
 {
@@ -2512,7 +2613,7 @@ void HarmonicEditor::paint (Graphics& g)
 PeakMeter::PeakMeter (GranulumProcessor& p) : proc (p)
 {
     setTooltip ("Output level (click the bars to reset the peak).\n"
-                "CLIP = soft clipper on the output: lamp on = the sound never goes over 0 dB. Click CLIP to switch it.");
+                "CLIP = soft clipper on the output: CLIP lit = the sound never goes over 0 dB. Click CLIP to switch it.");
     // (no own timer: GranulumEditor::timerCallback calls frame() at 30 fps)
 }
 
@@ -2531,10 +2632,15 @@ void PeakMeter::timerCallback()
     if (std::abs (sig - lastSig) > 1.0e-4f || isMouseOver()) { lastSig = sig; repaint(); }
 }
 
+void PeakMeter::mouseMove (const MouseEvent& e)
+{
+    setMouseCursor (e.position.x > (float) getWidth() - 38.0f ? MouseCursor::PointingHandCursor : MouseCursor::NormalCursor);
+}
+
 void PeakMeter::mouseDown (const MouseEvent& e)
 {
     // CLIP box: switch the output clipper on/off; anywhere else: reset the peak hold and the clip light
-    if (e.position.x > (float) getWidth() - 36.0f)
+    if (e.position.x > (float) getWidth() - 38.0f)   // the whole CLIP box (and a little around it) is the button
     {
         if (auto* p = proc.apvts.getParameter (ParamID::clipOn))
         {
@@ -2553,7 +2659,7 @@ void PeakMeter::mouseDown (const MouseEvent& e)
 void PeakMeter::paint (Graphics& g)
 {
     auto r = getLocalBounds().toFloat();
-    auto clipBox = r.removeFromRight (34.0f).withSizeKeepingCentre (32.0f, 15.0f);
+    auto clipBox = r.removeFromRight (34.0f).withSizeKeepingCentre (32.0f, 17.0f);
     r.removeFromRight (6.0f);
     auto scale = r.removeFromBottom (11.0f);
     const float barH = 5.0f;
@@ -2604,18 +2710,16 @@ void PeakMeter::paint (Graphics& g)
         g.drawText (db == 0.0f ? String ("0") : String ((int) db), Rectangle<float> (x - 12.0f, scale.getY(), 24.0f, scale.getHeight()), Justification::centred, false);
     }
 
-    // CLIP: a button for the output clipper. Lamp on = clipper on. Flashes red when the signal hits 0 dB.
+    // CLIP: the whole box is the button (0.99.2). On = the whole box glows copper. Flashes red when the signal hits 0 dB.
     const bool clipOn = proc.apvts.getRawParameterValue (ParamID::clipOn)->load() > 0.5f;
-    g.setColour (clipShown ? Palette::clip : Palette::button);
+    const bool hover  = isMouseOver() && getMouseXYRelative().x > getWidth() - 38;
+    g.setColour (clipShown ? Palette::clip : clipOn ? Palette::clip.withAlpha (hover ? 0.42f : 0.32f) : Palette::button.brighter (hover ? 0.25f : 0.0f));
     g.fillRoundedRectangle (clipBox, 4.0f);
-    g.setColour (clipShown ? Palette::clip : clipOn ? Palette::clip.withAlpha (0.55f) : Palette::edge.withMultipliedAlpha (2.0f));
+    g.setColour (clipShown ? Palette::clip : clipOn ? Palette::clip.withAlpha (0.9f) : Palette::edge.withMultipliedAlpha (hover ? 3.0f : 2.0f));
     g.drawRoundedRectangle (clipBox.reduced (0.5f), 4.0f, 1.0f);
-    auto led = Rectangle<float> (5.0f, 5.0f).withCentre ({ clipBox.getX() + 6.5f, clipBox.getCentreY() });
-    if (clipOn) { g.setColour (clipShown ? Colours::white : Palette::clip); g.fillEllipse (led); }
-    else        { g.setColour (Palette::textDim.withAlpha (0.7f)); g.drawEllipse (led, 1.0f); }
-    g.setColour (clipShown ? Colours::white : clipOn ? Palette::text : Palette::textDim.withAlpha (0.6f));
+    g.setColour (clipShown || clipOn ? Colours::white.withAlpha (clipShown ? 1.0f : 0.92f) : Palette::textDim.withAlpha (hover ? 0.9f : 0.6f));
     g.setFont (uiFont (8.5f, true, 0.08f));
-    g.drawText ("CLIP", clipBox.withTrimmedLeft (9.0f), Justification::centred, false);
+    g.drawText ("CLIP", clipBox, Justification::centred, false);
 }
 
 // ============================================================================
@@ -3960,10 +4064,12 @@ GranulumEditor::GranulumEditor (GranulumProcessor& p)
     add (osc1Knobs, ParamID::osc1Vol,  "Vol",  Knob::Size::Small);
     add (osc1Knobs, ParamID::osc1Oct,  "Oct",  Knob::Size::Small);
     add (osc1Knobs, ParamID::osc1Semi, "Semi", Knob::Size::Small);
+    add (osc1Knobs, ParamID::osc1Tune, "Tune", Knob::Size::Small);
     add (osc1Knobs, ParamID::osc1Pan,  "Pan",  Knob::Size::Small);
     add (osc2Knobs, ParamID::osc2Vol,  "Vol",  Knob::Size::Small);
     add (osc2Knobs, ParamID::osc2Oct,  "Oct",  Knob::Size::Small);
     add (osc2Knobs, ParamID::osc2Semi, "Semi", Knob::Size::Small);
+    add (osc2Knobs, ParamID::osc2Tune, "Tune", Knob::Size::Small);
     add (osc2Knobs, ParamID::osc2Pan,  "Pan",  Knob::Size::Small);
     add (subKnobs, ParamID::subVol, "Vol", Knob::Size::Small);
     add (subKnobs, ParamID::subOct, "Oct", Knob::Size::Small);
@@ -3996,6 +4102,10 @@ GranulumEditor::GranulumEditor (GranulumProcessor& p)
 
     add (globalKnobs, ParamID::porta,  "Porta",  Knob::Size::Small);
     add (globalKnobs, ParamID::output, "Output", Knob::Size::Small);
+    add (globalKnobs, ParamID::pitch,  "Pitch",  Knob::Size::Small);
+    globalKnobs[2]->slider.setTooltip ("PITCH: moves the whole synth up or down in semitones (all oscillators, SUB and grains). Double-click = 0");
+    for (auto* k : { osc1Knobs[3].get(), osc2Knobs[3].get() })
+        k->slider.setTooltip ("TUNE: smooth pitch of this oscillator, -48..+48 semitones, no steps. Put an LFO on it for rises, drops and pitch sweeps. Double-click = 0");
 
     heroKnobs[0]->slider.setTooltip ("BLOOM: more, longer, wider grains. The sound opens up into a cloud.");
     heroKnobs[1]->slider.setTooltip ("SMEAR: grains melt into long soft strokes with a gentle detune.");
@@ -4960,15 +5070,16 @@ void GranulumEditor::resized()
     gemsArea = header.removeFromRight (S (150)).withSizeKeepingCentre (S (150), S (44));
     meterView.setBounds (gemsArea.withTrimmedTop (S (14)));
     header.removeFromRight (S (6));
-    globalKnobs[1]->setBounds (header.removeFromRight (S (68)));   // output
-    header.removeFromRight (S (14));
-    randomButton.setBounds (header.removeFromRight (S (118)).withSizeKeepingCentre (S (118), S (30)));
+    globalKnobs[1]->setBounds (header.removeFromRight (S (62)));   // output
+    globalKnobs[2]->setBounds (header.removeFromRight (S (58)));   // master pitch, next to output
     header.removeFromRight (S (8));
-    initButton.setBounds (header.removeFromRight (S (60)).withSizeKeepingCentre (S (60), S (30)));
-    header.removeFromRight (S (8));
-    undoButton.setBounds (header.removeFromRight (S (62)).withSizeKeepingCentre (S (62), S (30)));
-    header.removeFromRight (S (16));
-    presetBar.setBounds (header.removeFromRight (S (240)).withSizeKeepingCentre (S (240), S (30)));
+    randomButton.setBounds (header.removeFromRight (S (104)).withSizeKeepingCentre (S (104), S (30)));
+    header.removeFromRight (S (6));
+    initButton.setBounds (header.removeFromRight (S (54)).withSizeKeepingCentre (S (54), S (30)));
+    header.removeFromRight (S (6));
+    undoButton.setBounds (header.removeFromRight (S (58)).withSizeKeepingCentre (S (58), S (30)));
+    header.removeFromRight (S (10));
+    presetBar.setBounds (header.removeFromRight (S (212)).withSizeKeepingCentre (S (212), S (30)));
     titleArea = header.withTrimmedLeft (S (4));
     r.removeFromTop (S (6));
 
@@ -5017,7 +5128,7 @@ void GranulumEditor::resized()
         wavePicker.setBounds (h1.removeFromRight (S (92)).reduced (0, S (1)));
         osc1Lamp.setBounds (h1);
         a1.removeFromTop (S (4));
-        auto k1 = a1.removeFromRight (S (196));
+        auto k1 = a1.removeFromRight (S (236));
         a1.removeFromRight (S (6));
         harmonics.setBounds (a1);
         const int kw1 = k1.getWidth() / (int) osc1Knobs.size();

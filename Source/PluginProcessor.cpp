@@ -38,7 +38,8 @@ namespace
         ParamID::osc1Pan, ParamID::osc2Pan, ParamID::osc3Pan, ParamID::spread,
         ParamID::subH1, ParamID::subH2, ParamID::subH3, ParamID::subH4, ParamID::subH5,
         ParamID::peakQ, ParamID::peakQ2,
-        ParamID::subSemi
+        ParamID::subSemi,
+        ParamID::osc1Tune, ParamID::osc2Tune, ParamID::pitch
     };
 
     String hzWithNote (float hz)
@@ -466,6 +467,8 @@ AudioProcessorValueTreeState::ParameterLayout GranulumProcessor::createLayout()
         ps.push_back (std::make_unique<P> (ParameterID { o == 1 ? ParamID::osc1Oct : ParamID::osc2Oct, 1 }, n + "Octave", NormalisableRange<float> (-3.0f, 3.0f, 1.0f), 0.0f, octFmt));
         ps.push_back (std::make_unique<P> (ParameterID { o == 1 ? ParamID::osc1Semi : ParamID::osc2Semi, 1 }, n + "Semi", NormalisableRange<float> (-12.0f, 12.0f, 1.0f), 0.0f, semiFmt));
         ps.push_back (std::make_unique<B> (ParameterID { o == 1 ? ParamID::osc1Grain : ParamID::osc2Grain, 1 }, n + "Granular", false));
+        ps.push_back (std::make_unique<P> (ParameterID { o == 1 ? ParamID::osc1Tune : ParamID::osc2Tune, 1 }, n + "Tune", NormalisableRange<float> (-48.0f, 48.0f, 0.0f), 0.0f,
+                                           A().withStringFromValueFunction ([] (float v, int) { return (v > 0.005f ? "+" : "") + String (v, 2) + " st"; })));
     }
     ps.push_back (std::make_unique<AudioParameterChoice> (ParameterID { ParamID::chord, 1 }, "Chord", chordNames(), 0));
 
@@ -595,6 +598,7 @@ AudioProcessorValueTreeState::ParameterLayout GranulumProcessor::createLayout()
     ps.push_back (std::make_unique<P> (ParameterID { ParamID::subH3, 1 }, "Sub Harmonic 3", NormalisableRange<float> (0.0f, 1.0f), 0.0f, pct));
     ps.push_back (std::make_unique<P> (ParameterID { ParamID::subH4, 1 }, "Sub Harmonic 4", NormalisableRange<float> (0.0f, 1.0f), 0.0f, pct));
     ps.push_back (std::make_unique<P> (ParameterID { ParamID::subH5, 1 }, "Sub Harmonic 5", NormalisableRange<float> (0.0f, 1.0f), 0.0f, pct));
+    ps.push_back (std::make_unique<P> (ParameterID { ParamID::pitch, 1 }, "Pitch", NormalisableRange<float> (-12.0f, 12.0f, 1.0f), 0.0f, semiFmt));
     ps.push_back (std::make_unique<P> (ParameterID { ParamID::output, 1 }, "Output", NormalisableRange<float> (-36.0f, 12.0f, 0.1f), 0.0f,
                                        A().withStringFromValueFunction ([] (float v, int) { return fmt (v, 1, " dB"); })));
 
@@ -969,7 +973,7 @@ granulum::Params GranulumProcessor::voiceParams (const float* v, int osc) const
     const bool grainBlock = true;   // GRANULAR block has no on/off any more: each OSC's GRAIN button decides
     if (osc == 0)
     {
-        p.transpose = v[mtOsc1Oct] * 12.0f + v[mtOsc1Semi];
+        p.transpose = v[mtOsc1Oct] * 12.0f + v[mtOsc1Semi] + v[mtOsc1Tune] + v[mtPitch];
         p.grainOn = grainBlock && pOsc1Grain->load() > 0.5f;
         const auto iv = chordIntervals ((int) pChord->load());
         p.chordSize = (int) iv.size();
@@ -984,7 +988,7 @@ granulum::Params GranulumProcessor::voiceParams (const float* v, int osc) const
     }
     if (osc == 1)
     {
-        p.transpose = v[mtOsc2Oct] * 12.0f + v[mtOsc2Semi];
+        p.transpose = v[mtOsc2Oct] * 12.0f + v[mtOsc2Semi] + v[mtOsc2Tune] + v[mtPitch];
         p.grainOn = grainBlock && pOsc2Grain->load() > 0.5f;
     }
     else if (osc == 2)
@@ -992,7 +996,7 @@ granulum::Params GranulumProcessor::voiceParams (const float* v, int osc) const
         p.keyTrack = false;        // noise sounds the same on every note
         p.randomStart = true;      // stacked voices don't phase against each other
         p.portaMs = 0.0f;
-        p.transpose = v[mtOsc3Color] * 12.0f;   // OSC 3 PITCH
+        p.transpose = v[mtOsc3Color] * 12.0f + v[mtPitch];   // OSC 3 PITCH + master PITCH
         p.grainOn = grainBlock && pOsc3Grain->load() > 0.5f;
     }
     return p;
@@ -1006,7 +1010,7 @@ granulum::Params GranulumProcessor::subParams (const float* v) const
     p.chordSize = 1;
     p.chord = { 0, 0, 0, 0, 0 };
     p.chime = 0.0f;
-    p.transpose = std::round (pSubOct->load()) * 12.0f + v[mtSubSemi];   // OCT + SEMI (SEMI glides under an LFO)
+    p.transpose = std::round (pSubOct->load()) * 12.0f + v[mtSubSemi] + v[mtPitch];   // OCT + SEMI (SEMI glides under an LFO)
     // the 3 sticks are layers: their level (incl. LFO) moves at play time
     for (int k = 0; k < kSubHarms; ++k) { p.harmGain[(size_t) k] = jlimit (0.0f, 1.0f, v[mtSubH1 + k]); p.harmGainPrev[(size_t) k] = subGainPrev[(size_t) k]; }
     return p;
@@ -1800,7 +1804,7 @@ void GranulumProcessor::getStateInformation (MemoryBlock& destData)
     StringArray ms;
     for (auto& m : mods)
         if (const int t = m.target.load(); t >= 0)
-            ms.add (String (kModTargetIds[t]) + ":" + String (m.lfo.load()) + ":" + String (m.depth.load(), 4));
+            ms.add (String (modTargetId (t)) + ":" + String (m.lfo.load()) + ":" + String (m.depth.load(), 4));   // modTargetId: also "harm1..16" (never index the table with them)
     state.setProperty ("mods", ms.joinIntoString (";"), nullptr);
 
     for (int l = 0; l < kNumLfos; ++l)

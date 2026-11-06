@@ -135,6 +135,22 @@ public:
 class Knob;
 
 // Small coloured circle next to a knob: drag up/down = modulation depth, double-click = remove
+// 0.99.2: the LFO depth as a number, shown only while the mouse is on an LFO link (or just after the wheel / a drag)
+struct DepthReadout
+{
+    int a = -1, l = -1;          // which target (knob / stick) and which LFO
+    bool hold = false;           // mouse is on it right now
+    juce::uint32 until = 0;
+    void show (int target, int lfo, bool keep, int ms = 900)
+    {
+        a = target; l = lfo; hold = keep;
+        until = juce::Time::getMillisecondCounter() + (juce::uint32) ms;
+    }
+    void release (int ms = 700) { hold = false; until = juce::Time::getMillisecondCounter() + (juce::uint32) ms; }
+    bool active() const { return a >= 0 && (hold || juce::Time::getMillisecondCounter() < until); }
+    bool expire() { if (a >= 0 && ! active()) { a = -1; return true; } return false; }   // true = needs one repaint
+};
+
 class ModChip final : public juce::Component, public juce::SettableTooltipClient
 {
 public:
@@ -143,6 +159,10 @@ public:
     void mouseDown (const juce::MouseEvent&) override;
     void mouseDrag (const juce::MouseEvent&) override;
     void mouseDoubleClick (const juce::MouseEvent&) override;
+    void mouseEnter (const juce::MouseEvent&) override;
+    void mouseExit (const juce::MouseEvent&) override;
+    void mouseUp (const juce::MouseEvent&) override;
+    void mouseWheelMove (const juce::MouseEvent&, const juce::MouseWheelDetails&) override;
     void updateTooltip();
 
     const int lfo;
@@ -186,6 +206,7 @@ public:
 
     FineSlider slider;
     const int target;       // modulation target index, -1 if not modulatable
+    DepthReadout readout;   // LFO depth number over the value box (while the mouse is on an LFO chip)
 private:
     struct Dial { juce::Point<float> c; float r = 0, track = 0, start = 0, end = 0; };
     Dial dial() const;
@@ -285,7 +306,10 @@ public:
     void mouseUp (const juce::MouseEvent&) override;
     void mouseMove (const juce::MouseEvent&) override;
     void mouseWheelMove (const juce::MouseEvent&, const juce::MouseWheelDetails&) override;
-    void frame() { if (anyMod()) repaint(); }   // editor's 30 fps tick: sticks with an LFO move live
+    void frame() { if (anyMod() || readout.expire()) repaint(); }   // editor's 30 fps tick: sticks with an LFO move live
+    void mouseExit (const juce::MouseEvent&) override { if (readout.hold && chipDrag.first < 0) readout.release(); }
+    void paintOverChildren (juce::Graphics&) override;
+    DepthReadout readout;
     // LFO on a sub stick (same as on OSC 1 sticks)
     bool isInterestedInDragSource (const SourceDetails& s) override { return s.description.toString().startsWith ("lfo:"); }
     void itemDragMove (const SourceDetails& s) override { dropCol = colAt ((float) s.localPosition.x); repaint(); }
@@ -317,7 +341,9 @@ public:
     void itemDragMove (const SourceDetails&) override;
     void itemDragExit (const SourceDetails&) override;
     void itemDropped (const SourceDetails&) override;
-    void frame() { timerCallback(); }   // driven by the editor's single 30 fps tick (one repaint pass per frame)
+    void frame() { timerCallback(); if (readout.expire()) repaint(); }   // driven by the editor's single 30 fps tick (one repaint pass per frame)
+    DepthReadout readout;
+    void paintOverChildren (juce::Graphics&) override;
     explicit HarmonicEditor (GranulumProcessor&);
     void paint (juce::Graphics&) override;
     void mouseMove (const juce::MouseEvent&) override;
@@ -371,6 +397,7 @@ public:
     explicit PeakMeter (GranulumProcessor&);
     void paint (juce::Graphics&) override;
     void mouseDown (const juce::MouseEvent&) override;
+    void mouseMove (const juce::MouseEvent&) override;
 private:
     void timerCallback() override;
     GranulumProcessor& proc;

@@ -344,6 +344,18 @@ int main (int argc, char** argv)
     }
 
     // design preview: "Snapshot <dir> v0991" -> LFO on OSC 1 / SUB sticks, PEAK with Q, version plate
+    if (argc > 2 && String (argv[2]) == "hit")
+    {
+        for (int x = 900; x < 1080; x += 4)
+            for (int y = 10; y < 90; y += 4)
+            {
+                auto* c = ed->getComponentAt (x, y);
+                if (c != nullptr && dynamic_cast<PeakMeter*> (c) != nullptr) { std::printf ("meter at %d,%d local %s\n", x, y, c->getLocalPoint (ed, Point<int> (x, y)).toString().toRawUTF8()); }
+            }
+        for (int x : { 920, 980, 1020, 1035, 1045 }) { auto* c = ed->getComponentAt (x, 56); std::printf ("at %d: %s\n", x, c ? typeid (*c).name() : "null"); }
+        for (auto* c : ed->getChildren()) if (c->getBounds().intersects (Rectangle<int> (900, 0, 180, 90))) std::printf ("%s %s vis=%d\n", typeid (*c).name(), c->getBounds().toString().toRawUTF8(), (int) c->isVisible());
+        return 0;
+    }
     if (argc > 2 && String (argv[2]) == "v0991")
     {
         setP (ParamID::osc1On, 1.0f); setP (ParamID::osc1Grain, 1.0f);
@@ -409,6 +421,28 @@ int main (int argc, char** argv)
                 FileOutputStream os (outDir.getChildFile ("lfostyle" + String (st) + ".png"));
                 png.writeImageToStream (img, os);
             }
+            return 0;
+        }
+        if (argc > 3 && String (argv[3]) == "v0992")
+        {
+            setP (ParamID::osc1Tune, 7.35f); setP (ParamID::osc2On, 1.0f); setP (ParamID::osc2Tune, -12.0f);
+            setP (ParamID::pitch, 2.0f); setP (ParamID::clipOn, 1.0f);
+            setP (ParamID::lfo (1, "On").toRawUTF8(), 1.0f); setP (ParamID::lfo (2, "On").toRawUTF8(), 1.0f);
+            p.setModulation (GranulumProcessor::modIndexOf (ParamID::cutoff), 0, -0.45f);
+            p.setModulation (GranulumProcessor::modIndexOf (ParamID::bloom), 1, 0.30f);
+            run (p, ed, 30);
+            std::function<void (Component&)> walk = [&] (Component& c)
+            {
+                if (auto* k = dynamic_cast<Knob*> (&c))
+                {
+                    if (k->target == GranulumProcessor::modIndexOf (ParamID::cutoff)) k->readout.show (k->target, 0, true);
+                    if (k->target == GranulumProcessor::modIndexOf (ParamID::bloom))  k->readout.show (k->target, 1, true);
+                }
+                for (auto* ch : c.getChildren()) walk (*ch);
+            };
+            walk (*ed);
+            ed->harmonicEditor().readout.show (2, 0, true);
+            save (*base, outDir, "v0992.png");
             return 0;
         }
         run (p, ed, 60);
