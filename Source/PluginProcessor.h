@@ -85,6 +85,10 @@ namespace ParamID
     inline constexpr const char* porta     = "porta";
     inline constexpr const char* output    = "output";
     inline constexpr const char* clipOn    = "clipOn";
+    inline constexpr const char* osc1Pan   = "osc1Pan";
+    inline constexpr const char* osc2Pan   = "osc2Pan";
+    inline constexpr const char* osc3Pan   = "osc3Pan";
+    inline constexpr const char* spread    = "spread";
     // OSC 4 SUB: 3 harmonics straight to the output (no grains, no filters, no effects)
     inline constexpr const char* subOn     = "subOn";
     inline constexpr const char* subVol    = "subVol";
@@ -117,6 +121,7 @@ enum ModTarget
     mtLfo1Rate, mtLfo2Rate, mtLfo3Rate,
     mtPeakGain, mtPeakGain2,
     mtSubVol,
+    mtOsc1Pan, mtOsc2Pan, mtOsc3Pan, mtSpread,
     kNumModTargets
 };
 
@@ -404,6 +409,7 @@ private:
     juce::SmoothedValue<float> outGain;
     juce::AudioBuffer<float> addBuf, smpBuf, noiseBuf, work, wetBuf, subBuf;
     float lastG1 = 0.0f, lastG2 = 0.0f, lastG3 = 0.0f, blockPeak = 0.0f;
+    float lastPan[kNumOscs] { 0.0f, 0.0f, 0.0f };
     float colorLp[2] {}, colorHp[2] {};
 
     std::atomic<float>* pOsc1On {};   std::atomic<float>* pOsc2On {};

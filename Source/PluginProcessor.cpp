@@ -34,7 +34,8 @@ namespace
         ParamID::porta, ParamID::output,
         "lfo1Rate", "lfo2Rate", "lfo3Rate",
         ParamID::peakGain, ParamID::peakGain2,
-        ParamID::subVol
+        ParamID::subVol,
+        ParamID::osc1Pan, ParamID::osc2Pan, ParamID::osc3Pan, ParamID::spread
     };
 
     String hzWithNote (float hz)
@@ -550,6 +551,16 @@ AudioProcessorValueTreeState::ParameterLayout GranulumProcessor::createLayout()
     ps.push_back (std::make_unique<P> (ParameterID { ParamID::porta, 1 }, "Portamento", skewed (0.0f, 3000.0f, 200.0f), 0.0f,
                                        A().withStringFromValueFunction ([] (float v, int) { return v < 0.5f ? String ("OFF") : v < 1000.0f ? fmt (v, 0, " ms") : fmt (v / 1000.0f, 2, " s"); })));
     ps.push_back (std::make_unique<B> (ParameterID { ParamID::clipOn, 1 }, "Output Clipper", true));
+    // PAN per oscillator (the sub stays centred) and SPREAD = stereo width of the grain cloud
+    {
+        auto panFmt = A().withStringFromValueFunction ([] (float v, int) { const int n = roundToInt (v * 100.0f); return n == 0 ? String ("C") : (n < 0 ? "L " : "R ") + String (std::abs (n)); })
+                         .withValueFromStringFunction ([] (const String& t) { const auto u = t.trim().toUpperCase(); if (u.startsWith ("C")) return 0.0f;
+                                                                               const float n = u.retainCharacters ("0123456789.").getFloatValue() / 100.0f; return u.startsWith ("L") ? -n : n; });
+        ps.push_back (std::make_unique<P> (ParameterID { ParamID::osc1Pan, 1 }, "OSC 1 Pan", NormalisableRange<float> (-1.0f, 1.0f, 0.01f), 0.0f, panFmt));
+        ps.push_back (std::make_unique<P> (ParameterID { ParamID::osc2Pan, 1 }, "OSC 2 Pan", NormalisableRange<float> (-1.0f, 1.0f, 0.01f), 0.0f, panFmt));
+        ps.push_back (std::make_unique<P> (ParameterID { ParamID::osc3Pan, 1 }, "OSC 3 Pan", NormalisableRange<float> (-1.0f, 1.0f, 0.01f), 0.0f, panFmt));
+        ps.push_back (std::make_unique<P> (ParameterID { ParamID::spread, 1 }, "Grain Spread", NormalisableRange<float> (0.0f, 1.0f), 1.0f, pct));
+    }
     // OSC 4 SUB
     ps.push_back (std::make_unique<B> (ParameterID { ParamID::subOn, 1 },  "Sub On", false));
     ps.push_back (std::make_unique<P> (ParameterID { ParamID::subVol, 1 }, "Sub Volume", NormalisableRange<float> (0.0f, 1.0f), 0.7f, pct));
@@ -888,6 +899,7 @@ granulum::Params GranulumProcessor::voiceParams (const float* v, int osc) const
     p.scatter  = v[mtScatter];
     p.shimmer  = v[mtShimmer];
     p.drift    = v[mtDrift];
+    p.spread   = v[mtSpread];
     p.chime    = v[mtChime];
     p.size     = v[mtSize];
     p.speed    = v[mtSpeed];
@@ -1123,6 +1135,29 @@ void GranulumProcessor::processChunk (int from, int len)
         engines[o]->render (L, R, len, vp, audible ? slots[o]->active.get() : nullptr);
         if (! vp.volInGrains) ramp (L, R);
         *lastG[o] = g[o];
+
+        // PAN (balance, equal power, smoothed over the chunk; centre = untouched)
+        {
+            const float pan = jlimit (-1.0f, 1.0f, v[mtOsc1Pan + o]);
+            const float p0 = lastPan[o];
+            if (std::abs (pan) > 1.0e-4f || std::abs (p0) > 1.0e-4f)
+            {
+                auto gains = [] (float pp, float& gl, float& gr)
+                {
+                    const float a = (pp + 1.0f) * 0.25f * MathConstants<float>::pi;
+                    gl = jmin (1.0f, std::cos (a) * MathConstants<float>::sqrt2);
+                    gr = jmin (1.0f, std::sin (a) * MathConstants<float>::sqrt2);
+                };
+                float l0, r0, l1, r1; gains (p0, l0, r0); gains (pan, l1, r1);
+                for (int i = 0; i < len; ++i)
+                {
+                    const float t = (float) (i + 1) / (float) len;
+                    L[i] *= l0 + (l1 - l0) * t;
+                    R[i] *= r0 + (r1 - r0) * t;
+                }
+            }
+            lastPan[o] = pan;
+        }
     }
 
     // ---- shared block settings ----

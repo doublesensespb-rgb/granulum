@@ -3427,18 +3427,22 @@ GranulumEditor::GranulumEditor (GranulumProcessor& p)
     add (smallKnobs, ParamID::speed,    "Speed",    Knob::Size::Small);
     add (smallKnobs, ParamID::position, "Position", Knob::Size::Small);
     add (smallKnobs, ParamID::density,  "Density",  Knob::Size::Small);
+    add (smallKnobs, ParamID::spread,   "Spread",   Knob::Size::Small);
     add (smallKnobs, ParamID::gmix,     "Mix",      Knob::Size::Small);
 
     add (osc1Knobs, ParamID::osc1Vol,  "Vol",  Knob::Size::Small);
     add (osc1Knobs, ParamID::osc1Oct,  "Oct",  Knob::Size::Small);
     add (osc1Knobs, ParamID::osc1Semi, "Semi", Knob::Size::Small);
+    add (osc1Knobs, ParamID::osc1Pan,  "Pan",  Knob::Size::Small);
     add (osc2Knobs, ParamID::osc2Vol,  "Vol",  Knob::Size::Small);
     add (osc2Knobs, ParamID::osc2Oct,  "Oct",  Knob::Size::Small);
     add (osc2Knobs, ParamID::osc2Semi, "Semi", Knob::Size::Small);
+    add (osc2Knobs, ParamID::osc2Pan,  "Pan",  Knob::Size::Small);
     add (subKnobs, ParamID::subVol, "Vol", Knob::Size::Small);
     add (subKnobs, ParamID::subOct, "Oct", Knob::Size::Small);
     add (osc3Knobs, ParamID::osc3Vol,   "Vol",   Knob::Size::Small);
     add (osc3Knobs, ParamID::osc3Color, "Pitch", Knob::Size::Small);
+    add (osc3Knobs, ParamID::osc3Pan,   "Pan",   Knob::Size::Small);
 
     add (filterKnobs, ParamID::cutoff, "Cutoff");
     add (filterKnobs, ParamID::reso,   "Reso");
@@ -3470,6 +3474,9 @@ GranulumEditor::GranulumEditor (GranulumProcessor& p)
     heroKnobs[5]->slider.setTooltip ("CHIME: every grain rings tuned resonances. Low = soft glassy overtones, high = long metallic bells.");
     osc3Knobs[1]->slider.setTooltip ("COLOR: left = darker, right = brighter");
     for (auto& k : osc3Knobs) k->setCompact (true);
+    for (auto* k : { osc1Knobs.back().get(), osc2Knobs.back().get(), osc3Knobs.back().get() })
+        k->slider.setTooltip ("PAN: where this oscillator sits left / right. Double-click = centre");
+    smallKnobs[4]->slider.setTooltip ("SPREAD: stereo width of the grains. 0 = all in the centre, 100 = wide (grains always take turns left / right)");
     for (auto& k : osc2Knobs) k->setCompact (true);
     for (auto& k : subKnobs)  k->setCompact (true);
 
@@ -4464,42 +4471,42 @@ void GranulumEditor::resized()
         wavePicker.setBounds (h1.removeFromRight (S (92)).reduced (0, S (1)));
         osc1Lamp.setBounds (h1);
         a1.removeFromTop (S (4));
-        auto k1 = a1.removeFromRight (S (150));
+        auto k1 = a1.removeFromRight (S (196));
         a1.removeFromRight (S (6));
         harmonics.setBounds (a1);
-        const int kw1 = k1.getWidth() / 3;
+        const int kw1 = k1.getWidth() / (int) osc1Knobs.size();
         for (auto& k : osc1Knobs) k->setBounds (k1.removeFromLeft (kw1).withSizeKeepingCentre (kw1, jmin (k1.getHeight(), S (78))));
 
         // OSC 2: one row  [lamp] [drop zone] [vol oct semi] [GRAIN/LOAD]
         auto a2 = osc2Area.reduced (S (8), S (4));
-        osc2Lamp.setBounds (a2.removeFromLeft (S (118)));
+        osc2Lamp.setBounds (a2.removeFromLeft (S (108)));
         auto btn2 = a2.removeFromRight (S (62));
         loadButton.setBounds (btn2.removeFromBottom (btn2.getHeight() / 2).reduced (0, S (1)));   // SOUNDS menu
         osc2Grain.setBounds (btn2.reduced (0, S (1)));
         a2.removeFromRight (S (4));
         for (int i = (int) osc2Knobs.size() - 1; i >= 0; --i)
-            osc2Knobs[(size_t) i]->setBounds (a2.removeFromRight (S (46)));
+            osc2Knobs[(size_t) i]->setBounds (a2.removeFromRight (S (35)));
         a2.removeFromRight (S (6));
         {
             auto z = a2.withSizeKeepingCentre (a2.getWidth(), S (40));
-            samplePrev.setBounds (z.removeFromLeft (S (22)).withSizeKeepingCentre (S (22), S (26)));
-            sampleNext.setBounds (z.removeFromRight (S (22)).withSizeKeepingCentre (S (22), S (26)));
+            samplePrev.setBounds (z.removeFromLeft (S (20)).withSizeKeepingCentre (S (20), S (26)));
+            sampleNext.setBounds (z.removeFromRight (S (20)).withSizeKeepingCentre (S (20), S (26)));
             dropZone = z.reduced (S (3), 0);
         }
 
         // OSC 3: one row  [lamp] [noise picker] [vol color] [GRAIN]
         auto a3 = osc3Area.reduced (S (8), S (4));
-        osc3Lamp.setBounds (a3.removeFromLeft (S (118)));
+        osc3Lamp.setBounds (a3.removeFromLeft (S (108)));
         osc3Grain.setBounds (a3.removeFromRight (S (62)).withSizeKeepingCentre (S (62), S (26)));
         a3.removeFromRight (S (4));
         for (int i = (int) osc3Knobs.size() - 1; i >= 0; --i)
-            osc3Knobs[(size_t) i]->setBounds (a3.removeFromRight (S (46)));
+            osc3Knobs[(size_t) i]->setBounds (a3.removeFromRight (S (38)));
         a3.removeFromRight (S (6));
         noisePicker.setBounds (a3.withSizeKeepingCentre (a3.getWidth(), S (38)));
 
         // OSC 4 SUB: [lamp] [3 sticks] [vol oct] [DRY]
         auto a4 = osc4Area.reduced (S (8), S (4));
-        osc4Lamp.setBounds (a4.removeFromLeft (S (118)));
+        osc4Lamp.setBounds (a4.removeFromLeft (S (108)));
         subTag = a4.removeFromRight (S (62)).withSizeKeepingCentre (S (62), S (30));
         a4.removeFromRight (S (4));
         for (int i = (int) subKnobs.size() - 1; i >= 0; --i)
