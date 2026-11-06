@@ -700,23 +700,27 @@ void Knob::paintOverChildren (Graphics& g)
     g.setColour (Colours::white);
     g.fillEllipse (Rectangle<float> (4.5f, 4.5f).withCentre (p));
 
-    // LFO depth in % (like Serum) over the value box while the mouse is on an LFO chip
+    // LFO depth in % (like Serum): a small tag right next to the LFO chip; the knob's own value stays visible
     if (readout.active() && readout.l >= 0 && proc.hasModulation (target, readout.l))
     {
-        const auto b = getLocalBounds().toFloat();
-        const float boxH = size == Size::Hero ? 20.0f : size == Size::Small ? 15.0f : 18.0f;
-        // covers the whole value box (compact knobs: the bottom of the knob), so nothing peeks through
-        auto r = compact ? b.withTop (b.getBottom() - 15.0f).reduced (1.0f, 0.0f)
-                         : Rectangle<float> (b.getX() + 2.0f, (float) slider.getBottom() - boxH, b.getWidth() - 4.0f, boxH);
+        auto& chip = *chips[(size_t) readout.l];
+        const auto cb = chip.getBounds().toFloat();
+        const bool right = cb.getCentreX() < d.c.x;   // grow away from the chip, toward the free side of the knob
         const float depth = proc.getModulationDepth (target, readout.l);
+        const auto f = uiFont (9.0f, true, 0.02f);
+        const auto text = depthText (depth);
+        const float w = (float) GlyphArrangement::getStringWidthInt (f, text) + 8.0f, h = 12.0f;
+        auto r = Rectangle<float> (w, h).withCentre ({ right ? cb.getRight() + w * 0.5f + 1.0f : cb.getX() - w * 0.5f - 1.0f, cb.getCentreY() });
+        const auto b = getLocalBounds().toFloat();
+        r = r.withX (jlimit (b.getX(), jmax (b.getX(), b.getRight() - w), r.getX()))
+             .withY (jlimit (b.getY(), jmax (b.getY(), b.getBottom() - h), r.getY()));
         const auto col = Palette::lfo (readout.l);
-        const String text = (r.getWidth() >= 62.0f ? "LFO " + String (readout.l + 1) + "  " : String()) + depthText (depth);
-        g.setColour (Palette::screen);
-        g.fillRoundedRectangle (r, 4.0f);
-        g.setColour (col.withAlpha (0.7f));
-        g.drawRoundedRectangle (r.reduced (0.5f), 4.0f, 1.0f);
+        g.setColour (Palette::screen.withAlpha (0.95f));
+        g.fillRoundedRectangle (r, h * 0.5f);
+        g.setColour (col.withAlpha (0.75f));
+        g.drawRoundedRectangle (r.reduced (0.5f), h * 0.5f, 1.0f);
         g.setColour (col.brighter (0.25f));
-        g.setFont (uiFont (size == Size::Small ? 10.0f : 11.0f, true, 0.02f));
+        g.setFont (f);
         g.drawText (text, r, Justification::centred, false);
     }
 }
