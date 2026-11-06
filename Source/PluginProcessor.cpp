@@ -537,6 +537,9 @@ AudioProcessorValueTreeState::ParameterLayout GranulumProcessor::createLayout()
         for (int o = 0; o < kNumOscs; ++o)
             ps.push_back (std::make_unique<B> (ParameterID { ParamID::route (block, o), 1 },
                                                String (block) + " gets Osc " + String (o + 1), true));
+    // SUB routing (shown as digit "2"): off by default, the sub stays dry until the owner lights it
+    for (auto* block : kRouteBlocks)
+        ps.push_back (std::make_unique<B> (ParameterID { ParamID::route (block, 3), 1 }, String (block) + " gets Sub", false));
 
     // AMP envelope
     auto msFmt = A().withStringFromValueFunction ([] (float v, int) { return v < 0.05f ? String ("0 ms") : v < 1000.0f ? fmt (v, v < 10.0f ? 1 : 0, " ms") : fmt (v / 1000.0f, 2, " s"); });
@@ -626,6 +629,8 @@ GranulumProcessor::GranulumProcessor()
     for (int b = 0; b < kNumRouteBlocks; ++b)
         for (int o = 0; o < kNumOscs; ++o)
             pRoute[(size_t) b][(size_t) o] = apvts.getRawParameterValue (ParamID::route (kRouteBlocks[b], o));
+    for (int b = 0; b < kNumRouteBlocks; ++b)
+        pRouteSub[(size_t) b] = apvts.getRawParameterValue (ParamID::route (kRouteBlocks[b], 3));
     pMono      = apvts.getRawParameterValue (ParamID::mono);
     pAmpA      = apvts.getRawParameterValue (ParamID::ampA);
     pAmpD      = apvts.getRawParameterValue (ParamID::ampD);
@@ -680,8 +685,9 @@ void GranulumProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
     engineSub.prepare (sampleRate);
 
     dsp::ProcessSpec spec { sampleRate, (uint32) jmax (kChunk, samplesPerBlock), 2 };
-    for (auto& c : chains)
+    for (auto* cp : { &chains[0], &chains[1], &chains[2], &subChain })
     {
+        auto& c = *cp;
         c.filter.prepare (sampleRate);
         c.filter2.prepare (sampleRate);
         c.reverb.prepare (spec); c.reverb.reset();
@@ -1204,21 +1210,39 @@ void GranulumProcessor::processChunk (int from, int len)
         scopeWrite.store (w, std::memory_order_release);
     }
 
-    // ---- every oscillator through the blocks it is routed to ----
-    for (int o = 0; o < kNumOscs; ++o)
+    // ---- every oscillator (and the SUB) through the blocks it is routed to ----
+    const float gsSub = pSubOn->load() > 0.5f ? v[mtSubVol] : 0.0f;
+    const bool subLive = gsSub > 0.0001f || lastGSub > 0.0001f;
+    if (subLive)
     {
-        auto& c = chains[(size_t) o];
-        float* L = bufs[o]->getWritePointer (0) + from;
-        float* R = bufs[o]->getWritePointer (1) + from;
+        // OSC 2 SUB (internally "sub"): no grains; filters/effects only where its digit is lit
+        float* SL = subBuf.getWritePointer (0) + from;
+        float* SR = subBuf.getWritePointer (1) + from;
+        engineSub.render (SL, SR, len, subParams (v), subSlot.active.get());
+        for (int i = 0; i < len; ++i)
+        {
+            const float gg = lastGSub + (gsSub - lastGSub) * (float) (i + 1) / (float) len;
+            SL[i] *= gg; SR[i] *= gg;
+        }
+    }
+    else
+        subBuf.clear (from, len);
+    lastGSub = gsSub;
+
+    for (int o = 0; o <= kNumOscs; ++o)
+    {
+        const bool isSub = o == kNumOscs;
+        auto& c = isSub ? subChain : chains[(size_t) o];
+        auto& buf = isSub ? subBuf : *bufs[o];
+        float* L = buf.getWritePointer (0) + from;
+        float* R = buf.getWritePointer (1) + from;
 
         float peak = 0.0f;
         for (int i = 0; i < len; ++i) peak = jmax (peak, std::abs (L[i]), std::abs (R[i]));
         c.quietSeconds = peak > 1.0e-6f ? 0.0 : c.quietSeconds + (double) len / sr;
         if (c.quietSeconds > 12.0) continue;          // silent for a long time: nothing left to ring out
 
-        auto routed = [this, o] (int block) { return pRoute[(size_t) block][(size_t) o]->load() > 0.5f; };
-        auto blk = dsp::AudioBlock<float> (*bufs[o]).getSubBlock ((size_t) from, (size_t) len);
-        dsp::ProcessContextReplacing<float> ctx (blk);
+        auto routed = [this, o, isSub] (int block) { return (isSub ? pRouteSub[(size_t) block] : pRoute[(size_t) block][(size_t) o])->load() > 0.5f; };
 
         if (filterOn && routed (0))
             c.filter.process (L, R, len, ft, ft == FilterUnit::Peak ? jlimit (20.0f, (float) (sr * 0.45), v[mtCutoff]) : cut, v[mtReso], v[mtPeakGain]);
@@ -1253,23 +1277,6 @@ void GranulumProcessor::processChunk (int from, int len)
         for (int i = 0; i < len; ++i) { outL[i] += L[i]; outR[i] += R[i]; }
     }
 
-    // ---- OSC 4 SUB: straight to the output (no grains, no filters, no effects) ----
-    {
-        const float gs = pSubOn->load() > 0.5f ? v[mtSubVol] : 0.0f;
-        if (gs > 0.0001f || lastGSub > 0.0001f)
-        {
-            float* SL = subBuf.getWritePointer (0) + from;
-            float* SR = subBuf.getWritePointer (1) + from;
-            engineSub.render (SL, SR, len, subParams (v), subSlot.active.get());
-            for (int i = 0; i < len; ++i)
-            {
-                const float gg = lastGSub + (gs - lastGSub) * (float) (i + 1) / (float) len;
-                outL[i] += SL[i] * gg;
-                outR[i] += SR[i] * gg;
-            }
-        }
-        lastGSub = gs;
-    }
 
     // ---- output ----
     outGain.setTargetValue (Decibels::decibelsToGain (v[mtOutput]));

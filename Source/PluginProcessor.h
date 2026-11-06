@@ -406,6 +406,7 @@ private:
     bool hostPlaying = false;
 
     std::array<FxChain, kNumOscs> chains;
+    FxChain subChain;   // the SUB's own effect chain (it only goes through blocks whose "2" digit is lit)
     juce::SmoothedValue<float> outGain;
     juce::AudioBuffer<float> addBuf, smpBuf, noiseBuf, work, wetBuf, subBuf;
     float lastG1 = 0.0f, lastG2 = 0.0f, lastG3 = 0.0f, blockPeak = 0.0f;
@@ -423,6 +424,7 @@ private:
     std::atomic<float>* pOsc3On {}; std::atomic<float>* pOsc3Type {}; std::atomic<float>* pOsc3Grain {};
     std::atomic<float>* pDelayOn {}; std::atomic<float>* pDelaySync {}; std::atomic<float>* pDelayDiv {}; std::atomic<float>* pDelayPing {};
     std::array<std::array<std::atomic<float>*, kNumOscs>, kNumRouteBlocks> pRoute {};
+    std::array<std::atomic<float>*, kNumRouteBlocks> pRouteSub {};   // param "<block>R4" (index 3 = SUB)
     std::atomic<float>* pMono {};
     std::atomic<float>* pAmpA {}; std::atomic<float>* pAmpD {}; std::atomic<float>* pAmpS {}; std::atomic<float>* pAmpR {}; std::atomic<float>* pAmpOn {};
     std::array<std::atomic<float>*, kNumLfos> pLfoSync {}, pLfoDiv {}, pLfoMode {}, pLfoRise {}, pLfoOn {}, pLfoGrains {};

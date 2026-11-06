@@ -330,7 +330,8 @@ private:
     std::vector<Crystal> crystals;
     juce::Random rng;
 public:
-    int rowStyle = 2;
+    int rowStyle = 11;   // 0.99: little switches (owner's choice B); drag across to set several
+    int hintStyle = 0;   // first-run call-out: 0 dark with copper frame, 1 solid copper
     static inline int barStyle = 5;   // 5 strings, 0 sand wave, 1 frosted glass, 2 capsule + filament, 3 line + cap, 4 fade   // 0 = pearl beads, 1 = glowing line (design preview)
 };
 
@@ -693,7 +694,7 @@ public:
     static inline int soundsStyle = 4;   // 4 = same as a lit GRAIN button (owner's choice); 1-3 earlier variants
 private:
     juce::TextButton samplePrev { juce::String::fromUTF8 ("\xe2\x97\x80") }, sampleNext { juce::String::fromUTF8 ("\xe2\x96\xb6") };
-    Lamp osc1Lamp { "OSC 1", "ADDITIVE" }, osc2Lamp { "OSC 2", "SAMPLE" }, osc3Lamp { "OSC 3", "NOISE" }, osc4Lamp { "OSC 4", "SUB" };
+    Lamp osc1Lamp { "OSC 1", "ADDITIVE" }, osc2Lamp { "OSC 3", "SAMPLE" }, osc3Lamp { "OSC 4", "NOISE" }, osc4Lamp { "OSC 2", "SUB" };   // shown order (0.99): ADDITIVE, SUB, SAMPLE, NOISE
     SubBars subBars { proc };
     std::unique_ptr<ButtonAtt> osc4LampA;
     std::unique_ptr<ButtonAtt> osc1LampA, osc2LampA, osc3LampA;

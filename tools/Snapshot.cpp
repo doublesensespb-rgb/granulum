@@ -343,6 +343,42 @@ int main (int argc, char** argv)
         return 0;
     }
 
+    // design preview: "Snapshot <dir> rows" -> GRAIN row variants A..F, each: first open (hint) and in use (hover)
+    if (argc > 2 && String (argv[2]) == "rows")
+    {
+        setP (ParamID::osc1On, 1.0f); setP (ParamID::osc1Grain, 1.0f);
+        auto& he = ed->harmonicEditor();
+        const auto area = ed->getLocalArea (&he, he.getLocalBounds()).expanded (8, 8);
+        auto grab = [&] (const String& name)
+        {
+            for (int f = 0; f < 8; ++f) MessageManager::getInstance()->runDispatchLoopUntil (30);
+            he.repaint();
+            MessageManager::getInstance()->runDispatchLoopUntil (40);
+            auto img = base->createComponentSnapshot (area, true, 2.0f);
+            PNGImageFormat png;
+            outDir.getChildFile (name).deleteFile();
+            FileOutputStream os (outDir.getChildFile (name));
+            png.writeImageToStream (img, os);
+        };
+        for (int st = 10; st <= 15; ++st)
+        {
+            he.rowStyle = st;
+            for (int hs = 0; hs < 2; ++hs)
+            {
+                he.hintStyle = hs;
+                p.setHarmonics (WavePicker::shape (0));
+                p.setGrainMask (0x0000u);
+                he.showHint = true; he.hoverBar = -1; he.introT = 5.0f;
+                grab ("row" + String (st) + "-init-hint" + String (hs) + ".png");
+            }
+            p.setHarmonics (WavePicker::shape (1));
+            p.setGrainMask (0xffc4u);
+            he.showHint = false; he.hoverBar = 4;
+            grab ("row" + String (st) + "-use.png");
+        }
+        return 0;
+    }
+
     // design preview: "Snapshot <dir> select" -> intro wave over the dots, first-run hint, hover look
     if (argc > 2 && String (argv[2]) == "select")
     {

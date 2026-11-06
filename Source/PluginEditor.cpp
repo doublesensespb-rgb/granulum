@@ -704,7 +704,7 @@ namespace
 
 GrainField::GrainField (GranulumProcessor& p) : proc (p)
 {
-    setMouseCursor (MouseCursor::PointingHandCursor);
+    setMouseCursor (MouseCursor::NormalCursor);
     setOpaque (true);
     shards.reserve (520);
     lastPaintMs = 0.0f;
@@ -1235,7 +1235,7 @@ int GrainField::flagAt (float x) const
 
 void GrainField::mouseMove (const MouseEvent& e)
 {
-    setMouseCursor (flagAt (e.position.x) != 0 ? MouseCursor::LeftRightResizeCursor : MouseCursor::PointingHandCursor);
+    setMouseCursor (flagAt (e.position.x) != 0 ? MouseCursor::LeftRightResizeCursor : MouseCursor::NormalCursor);
 }
 
 void GrainField::mouseDown (const MouseEvent& e)
@@ -1539,14 +1539,14 @@ Rectangle<float> HarmonicEditor::barArea() const
 {
     auto r = getLocalBounds().toFloat().reduced (7.0f, 6.0f);
     r.removeFromLeft (kGrainLabelW - 7.0f);
-    r.removeFromBottom (20.0f);
+    r.removeFromBottom (rowStyle >= 10 ? 26.0f : 20.0f);
     return r;
 }
 
 Rectangle<float> HarmonicEditor::pillRow() const
 {
     auto a = barArea();
-    return { a.getX(), a.getBottom() + 5.0f, a.getWidth(), 13.0f };
+    return { a.getX(), a.getBottom() + 5.0f, a.getWidth(), rowStyle >= 10 ? 19.0f : 13.0f };
 }
 
 int HarmonicEditor::barAt (float x) const
@@ -1599,7 +1599,7 @@ void HarmonicEditor::mouseMove (const MouseEvent& e)
         hoverBar = b;
         setTooltip ("Harmonic " + String (b + 1) + (on ? ":  GRAIN ON.  Click to keep it clean & mono."
                                                        : ":  CLEAN & MONO.  Click to send it into the grains."));
-        setMouseCursor (MouseCursor::PointingHandCursor);
+        setMouseCursor (MouseCursor::NormalCursor);
     }
     else if (e.position.x < barArea().getX())
     {
@@ -1897,6 +1897,30 @@ void HarmonicEditor::paint (Graphics& g)
         // quiet label: SELECT (echoes SELECTIVE GRANULATION), not a button
         g.setColour (pearl.withAlpha (0.85f * alpha));
         g.setFont (uiFont (9.5f, true, 0.18f));
+        if (rowStyle >= 10)
+        {
+            // the row says what it does: GRAIN + a small arrow pointing at the buttons
+            const auto lab = Rectangle<float> (r.getX() + 4.0f, row.getY() - 3.0f, kGrainLabelW - 4.0f, row.getHeight() + 6.0f);
+            g.setColour (Palette::accent.interpolatedWith (Colours::white, 0.15f).withAlpha (alpha));
+            g.setFont (uiFont (9.5f, true, 0.12f));
+            const String word = rowStyle == 15 ? "CLEAN/" : "GRAIN";
+            if (rowStyle == 15)
+            {
+                g.setFont (uiFont (8.0f, true, 0.04f));
+                g.setColour (pearl.withAlpha (0.8f * alpha));
+                g.drawText ("C=CLEAN", lab.withTrimmedBottom (lab.getHeight() * 0.5f), Justification::centredLeft, false);
+                g.setColour (Palette::accent.withAlpha (alpha));
+                g.drawText ("G=GRAIN", lab.withTrimmedTop (lab.getHeight() * 0.5f), Justification::centredLeft, false);
+            }
+            else
+            {
+                g.drawText (word, lab.withTrimmedRight (8.0f), Justification::centredLeft, false);
+                Path tri; const float tx = lab.getRight() - 6.0f, ty = lab.getCentreY();
+                tri.addTriangle (tx - 3.0f, ty - 3.5f, tx - 3.0f, ty + 3.5f, tx + 2.5f, ty);
+                g.fillPath (tri);
+            }
+        }
+        else
         g.drawText ("SELECT", Rectangle<float> (r.getX() + 5.0f, row.getY() - 3.0f, kGrainLabelW, row.getHeight() + 6.0f), Justification::centredLeft, false);
         const float introX = introT < 1.8f ? (introT / 1.4f) : -1.0f;      // one light wave across the dots on open
 
@@ -1904,7 +1928,111 @@ void HarmonicEditor::paint (Graphics& g)
         {
             const auto cell = Rectangle<float> (row.getX() + bw * (float) k, row.getY(), bw, row.getHeight());
             const bool on = (mask >> k) & 1u;
-            if (rowStyle == 2)
+            const bool hotK = hoverBar == k;
+            const Colour cu = Palette::accent;
+            auto grainIcon = [&g] (Point<float> c, float sz, Colour col)
+            {
+                // a tiny cluster of grains (same idea as the GRAIN button)
+                const float d = sz * 0.26f;
+                const Point<float> pts[] = { { -0.55f, 0.35f }, { 0.05f, -0.5f }, { 0.55f, 0.3f }, { -0.1f, 0.55f }, { 0.6f, -0.45f } };
+                const float sizes[] = { 1.0f, 0.9f, 0.8f, 0.6f, 0.5f };
+                g.setColour (col);
+                for (int i = 0; i < 5; ++i)
+                    g.fillEllipse (Rectangle<float> (d * sizes[i] * 2.0f, d * sizes[i] * 2.0f).withCentre (c + pts[i] * sz * 0.5f));
+            };
+            if (rowStyle == 10)
+            {
+                // A: chips — copper chip with grains when ON, empty frame with "+" when OFF
+                auto chip = cell.reduced (jmax (1.5f, bw * 0.1f), 0.5f);
+                if (on)
+                {
+                    g.setColour (cu.withAlpha ((hotK ? 1.0f : 0.92f) * alpha));
+                    g.fillRoundedRectangle (chip, 3.0f);
+                    grainIcon (chip.getCentre(), jmin (chip.getWidth(), chip.getHeight()) * 0.9f, Palette::deep.withAlpha (0.85f * alpha));
+                }
+                else
+                {
+                    g.setColour (pearlShade.withAlpha ((hotK ? 0.95f : 0.45f) * alpha));
+                    g.drawRoundedRectangle (chip.reduced (0.5f), 3.0f, hotK ? 1.4f : 1.0f);
+                    const auto c = chip.getCentre(); const float a2 = jmin (chip.getWidth(), chip.getHeight()) * 0.2f;
+                    g.drawLine (c.x - a2, c.y, c.x + a2, c.y, 1.1f); g.drawLine (c.x, c.y - a2, c.x, c.y + a2, 1.1f);
+                }
+            }
+            else if (rowStyle == 11)
+            {
+                // B: little switches (copper = into grains)
+                auto tr = cell.withSizeKeepingCentre (jmin (cell.getWidth() - 3.0f, 13.0f), 8.0f);
+                g.setColour (on ? cu.withAlpha (alpha) : Palette::button.withAlpha (alpha));
+                g.fillRoundedRectangle (tr, 4.0f);
+                if (hotK) { g.setColour (Colours::white.withAlpha (0.5f * alpha)); g.drawRoundedRectangle (tr.expanded (1.0f), 5.0f, 1.0f); }
+                const float kr = 3.2f;
+                const auto kc = Point<float> (on ? tr.getRight() - 4.0f : tr.getX() + 4.0f, tr.getCentreY());
+                g.setColour ((on ? Colours::white : Palette::textDim).withAlpha (alpha));
+                g.fillEllipse (Rectangle<float> (kr * 2.0f, kr * 2.0f).withCentre (kc));
+            }
+            else if (rowStyle == 12)
+            {
+                // C: grain icon per harmonic — glowing copper grains when ON, faint grey grains when OFF
+                const auto c = cell.getCentre();
+                const float sz = jmin (cell.getWidth(), cell.getHeight()) * 0.72f;
+                if (on)
+                {
+                    g.setColour (cu.withAlpha (0.22f * alpha));
+                    g.fillEllipse (Rectangle<float> (sz * 1.5f, sz * 1.5f).withCentre (c));
+                    grainIcon (c, sz, cu.interpolatedWith (Colours::white, hotK ? 0.4f : 0.15f).withAlpha (alpha));
+                }
+                else
+                    grainIcon (c, sz, pearlShade.withAlpha ((hotK ? 0.8f : 0.3f) * alpha));
+            }
+            else if (rowStyle == 13)
+            {
+                // D: one lane; ON cells light up copper and join into a band (reads like "this part goes to grains")
+                auto lane = cell.withSizeKeepingCentre (cell.getWidth(), 12.0f);
+                g.setColour (Palette::deep.withAlpha (0.8f * alpha));
+                g.fillRect (lane);
+                if (on)
+                {
+                    const bool prevOn = k > 0 && ((mask >> (k - 1)) & 1u);
+                    const bool nextOn = k < granulum::kNumHarmonics - 1 && ((mask >> (k + 1)) & 1u);
+                    auto seg = lane.reduced (0.0f, 1.5f).withTrimmedLeft (prevOn ? 0.0f : 1.5f).withTrimmedRight (nextOn ? 0.0f : 1.5f);
+                    g.setColour (cu.interpolatedWith (Colours::white, hotK ? 0.25f : 0.0f).withAlpha (alpha));
+                    g.fillRoundedRectangle (seg, 2.0f);
+                    grainIcon (seg.getCentre(), 9.0f, Palette::deep.withAlpha (0.7f * alpha));
+                }
+                else
+                {
+                    g.setColour (pearlShade.withAlpha ((hotK ? 0.8f : 0.35f) * alpha));
+                    g.fillEllipse (Rectangle<float> (3.0f, 3.0f).withCentre (lane.getCentre()));
+                }
+            }
+            else if (rowStyle == 14)
+            {
+                // E: check boxes
+                auto box = cell.withSizeKeepingCentre (11.0f, 11.0f);
+                if (on)
+                {
+                    g.setColour (cu.withAlpha (alpha)); g.fillRoundedRectangle (box, 2.5f);
+                    Path tick; tick.startNewSubPath (box.getX() + 2.5f, box.getCentreY() + 0.2f); tick.lineTo (box.getX() + 4.6f, box.getBottom() - 2.6f); tick.lineTo (box.getRight() - 2.3f, box.getY() + 2.6f);
+                    g.setColour (Palette::deep.withAlpha (alpha)); g.strokePath (tick, PathStrokeType (1.6f, PathStrokeType::curved, PathStrokeType::rounded));
+                }
+                else
+                {
+                    g.setColour (pearlShade.withAlpha ((hotK ? 0.95f : 0.5f) * alpha));
+                    g.drawRoundedRectangle (box.reduced (0.5f), 2.5f, hotK ? 1.4f : 1.0f);
+                }
+            }
+            else if (rowStyle == 15)
+            {
+                // F: letters — G (copper) = grains, C (dim) = clean
+                auto chip = cell.reduced (jmax (1.5f, bw * 0.1f), 0.5f);
+                g.setColour ((on ? cu : Palette::track).withAlpha ((on ? 0.95f : 0.7f) * alpha));
+                g.fillRoundedRectangle (chip, 3.0f);
+                if (hotK) { g.setColour (Colours::white.withAlpha (0.6f * alpha)); g.drawRoundedRectangle (chip.expanded (0.5f), 3.5f, 1.0f); }
+                g.setColour ((on ? Palette::deep : pearl.withAlpha (0.75f)).withAlpha (alpha));
+                g.setFont (uiFont (9.5f, true, 0.0f));
+                g.drawText (on ? "G" : "C", chip, Justification::centred, false);
+            }
+            else if (rowStyle == 2)
             {
                 const auto c = cell.getCentre();
                 const bool hot = hoverBar == k;
@@ -1960,7 +2088,49 @@ void HarmonicEditor::paint (Graphics& g)
         }
     }
 
-    if (showHint && active)
+    if (rowStyle >= 10 && active && hoverBar >= 0 && hoverBar < granulum::kNumHarmonics)
+    {
+        // hover: the harmonic's bar lights up and a tag says where it goes
+        const auto a = barArea(), row = pillRow();
+        const float cw = a.getWidth() / (float) granulum::kNumHarmonics;
+        const bool on = (mask >> hoverBar) & 1u;
+        auto col = Rectangle<float> (a.getX() + cw * (float) hoverBar, a.getY(), cw, row.getBottom() - a.getY());
+        g.setColour ((on ? Palette::accent : Colour (0xfff1e4cb)).withAlpha (0.10f));
+        g.fillRoundedRectangle (col.expanded (1.0f, 2.0f), 3.0f);
+        const String t = "H" + String (hoverBar + 1) + (on ? "  >  GRAINS" : "  >  CLEAN");
+        const auto f = uiFont (9.5f, true, 0.06f);
+        const float w = (float) GlyphArrangement::getStringWidthInt (f, t) + 14.0f;
+        auto tag = Rectangle<float> (w, 17.0f).withCentre ({ col.getCentreX(), a.getY() + 12.0f });
+        tag = tag.withX (jlimit (a.getX(), a.getRight() - w, tag.getX()));
+        g.setColour (Palette::deep.withAlpha (0.92f)); g.fillRoundedRectangle (tag, 5.0f);
+        g.setColour ((on ? Palette::accent : Colour (0xfff1e4cb)).withAlpha (0.9f)); g.drawRoundedRectangle (tag.reduced (0.5f), 5.0f, 1.0f);
+        g.setFont (f); g.drawText (t, tag, Justification::centred, false);
+    }
+
+    if (showHint && active && rowStyle >= 10)
+    {
+        // first-run hint, deliberately quiet: one line of tiny dim text just above the switches + a faint pulse on one
+        // switch. No box, nothing over the bars. Gone forever after the first click on the row.
+        const auto a = barArea(), row = pillRow();
+        const float cw = a.getWidth() / (float) granulum::kNumHarmonics;
+        int target = 0;   // the first harmonic that sounds (at INIT: H1), so one click is heard at once
+        for (int k = 0; k < granulum::kNumHarmonics; ++k) if (h[(size_t) k] > 0.05f) { target = k; break; }
+        const auto cell = Rectangle<float> (a.getX() + cw * (float) target, row.getY(), cw, row.getHeight());
+        const float pulse = 0.5f + 0.5f * std::sin (time * 2.5f);
+        g.setColour (Palette::accent.withAlpha (0.12f + 0.25f * pulse));
+        g.drawRoundedRectangle (cell.withSizeKeepingCentre (jmin (cell.getWidth() - 1.0f, 15.0f), 11.0f), 5.5f, 1.0f);
+        const String txt ("click or drag the switches: harmonics into grains");
+        bool roomForText = true;   // the line only shows over empty space, never on top of bars
+        for (int k = target + 1; k < granulum::kNumHarmonics; ++k) if (h[(size_t) k] > 0.12f) roomForText = false;
+        if (roomForText)
+        g.setFont (uiFont (7.5f, false, 0.04f));
+        if (roomForText)
+        {
+            g.setColour (Colour (0xfff1e4cb).withAlpha (0.42f));
+            g.drawText (txt, Rectangle<float> (cell.getRight() + 3.0f, row.getY() - 11.0f, a.getRight() - cell.getRight() - 3.0f, 10.0f), Justification::centredLeft, false);
+        }
+    }
+    else if (showHint && active)
     {
         // first-run hint: disappears after the first click on a dot, never comes back
         const auto row = pillRow();
@@ -2209,7 +2379,7 @@ void ChordPicker::paint (Graphics& g)
 
 LfoTab::LfoTab (GranulumProcessor& p, int i) : index (i), proc (p)
 {
-    setMouseCursor (MouseCursor::DraggingHandCursor);
+    setMouseCursor (MouseCursor::NormalCursor);
     setTooltip ("Click the light: switch this LFO on/off everywhere (routings are kept).\nDrag onto any knob to modulate it.");
 }
 
@@ -2255,7 +2425,7 @@ void LfoTab::paint (Graphics& g)
 void LfoTab::mouseMove (const MouseEvent& e)
 {
     // over the light: plain arrow (it's a switch); elsewhere: the grab hand (drag onto a knob)
-    setMouseCursor (e.position.x < 26.0f ? MouseCursor::NormalCursor : MouseCursor::DraggingHandCursor);
+    setMouseCursor (e.position.x < 26.0f ? MouseCursor::NormalCursor : MouseCursor::NormalCursor);
 }
 
 void LfoTab::mouseDown (const MouseEvent& e)
@@ -2366,13 +2536,13 @@ void LfoEditor::mouseMove (const MouseEvent& e)
 {
     const bool overRemove = false;
     if (overRemove != hoverRemove) { hoverRemove = overRemove; repaint(); }
-    if (overRemove) { setMouseCursor (MouseCursor::PointingHandCursor); return; }
+    if (overRemove) { setMouseCursor (MouseCursor::NormalCursor); return; }
     bool h = false;
     const int i = hitTest (e.position, h);
     if (i != hoverIndex || h != hoverHandle)
     {
         hoverIndex = i; hoverHandle = h;
-        setMouseCursor (i < 0 ? MouseCursor::NormalCursor : h ? MouseCursor::UpDownResizeCursor : MouseCursor::DraggingHandCursor);
+        setMouseCursor (i < 0 ? MouseCursor::NormalCursor : h ? MouseCursor::UpDownResizeCursor : MouseCursor::NormalCursor);
     }
 }
 
@@ -2747,7 +2917,7 @@ void AmpTab::paint (Graphics& g)
 
 void AmpTab::mouseMove (const MouseEvent& e)
 {
-    setMouseCursor (e.position.x < 26.0f ? MouseCursor::NormalCursor : MouseCursor::PointingHandCursor);
+    setMouseCursor (e.position.x < 26.0f ? MouseCursor::NormalCursor : MouseCursor::NormalCursor);
 }
 
 void AmpTab::mouseDown (const MouseEvent& e)
@@ -2876,7 +3046,7 @@ void AmpEditor::mouseMove (const MouseEvent& e)
     const Point<float> hs[3] = { geo.p1, geo.p2, geo.p4 };
     int h = -1;
     for (int i = 0; i < 3; ++i) if (hs[i].getDistanceFrom (e.position) < 12.0f) h = i;
-    if (h != hover) { hover = h; setMouseCursor (h >= 0 ? MouseCursor::DraggingHandCursor : MouseCursor::NormalCursor); }
+    if (h != hover) { hover = h; setMouseCursor (h >= 0 ? MouseCursor::NormalCursor : MouseCursor::NormalCursor); }
 }
 
 void AmpEditor::mouseDown (const MouseEvent& e)
@@ -2940,10 +3110,10 @@ void Lamp::paintButton (Graphics& g, bool over, bool)
 
 struct RouteButtons::Digit final : public Button
 {
-    Digit (int i, RouteButtons& o) : Button (String (i + 1)), index (i), owner (o)
+    Digit (int i, int shown, RouteButtons& o) : Button (String (shown + 1)), index (i), owner (o)
     {
         setClickingTogglesState (true);
-        setMouseCursor (MouseCursor::PointingHandCursor);
+        setMouseCursor (MouseCursor::NormalCursor);
     }
     void paintButton (Graphics& g, bool over, bool) override
     {
@@ -3048,10 +3218,13 @@ struct RouteButtons::Digit final : public Button
 
 RouteButtons::RouteButtons (GranulumProcessor& p, const char* block, const String& blockName)
 {
-    for (int o = 0; o < kNumOscs; ++o)
+    // shown order 1 2 3 4 = ADDITIVE, SUB, SAMPLE, NOISE; internal index 0, 3 (sub), 1, 2
+    const int internal[] = { 0, 3, 1, 2 };
+    for (int shown = 0; shown < 4; ++shown)
     {
-        auto* d = digits.add (new Digit (o, *this));
-        d->setTooltip (blockName + " on OSC " + String (o + 1) + ".\nLit = this oscillator goes through " + blockName + ".");
+        const int o = internal[shown];
+        auto* d = digits.add (new Digit (o, shown, *this));
+        d->setTooltip (blockName + " on OSC " + String (shown + 1) + ".\nLit = this oscillator goes through " + blockName + ".");
         addAndMakeVisible (d);
         atts.add (new AudioProcessorValueTreeState::ButtonAttachment (p.apvts, ParamID::route (block, o), *d));
     }
@@ -3062,7 +3235,7 @@ RouteButtons::~RouteButtons() { atts.clear(); }
 void RouteButtons::resized()
 {
     auto r = getLocalBounds();
-    const int w = r.getWidth() / kNumOscs;
+    const int w = r.getWidth() / jmax (1, digits.size());
     for (auto* d : digits) d->setBounds (r.removeFromLeft (w));
 }
 
@@ -3072,7 +3245,7 @@ void RouteButtons::resized()
 FxTab::FxTab (GranulumProcessor& p, const char* onParam, const String& n)
     : param (p.apvts.getParameter (onParam)), name (n)
 {
-    setMouseCursor (MouseCursor::PointingHandCursor);
+    setMouseCursor (MouseCursor::NormalCursor);
     setTooltip ("Click the light to switch " + n + " on/off, click the name to edit it");
 }
 
@@ -3197,7 +3370,7 @@ void FxTab::paint (Graphics& g)
 
 void FxTab::mouseMove (const MouseEvent& e)
 {
-    setMouseCursor (overLed (e.position) ? MouseCursor::NormalCursor : MouseCursor::PointingHandCursor);
+    setMouseCursor (overLed (e.position) ? MouseCursor::NormalCursor : MouseCursor::NormalCursor);
 }
 
 void FxTab::mouseDown (const MouseEvent& e)
@@ -3224,7 +3397,7 @@ PresetBar::PresetBar (GranulumProcessor& p) : proc (p)
     prev.setTooltip ("Previous preset");
     next.setTooltip ("Next preset");
     save.setTooltip ("Save the current sound as a preset");
-    setMouseCursor (MouseCursor::PointingHandCursor);
+    setMouseCursor (MouseCursor::NormalCursor);
     startTimerHz (4);
 }
 
@@ -3330,7 +3503,7 @@ NoisePicker::NoisePicker (GranulumProcessor& p) : proc (p)
     for (auto* b : { &prev, &next }) addAndMakeVisible (*b);
     prev.onClick = [this] { setIndex (index() - 1); };
     next.onClick = [this] { setIndex (index() + 1); };
-    setMouseCursor (MouseCursor::PointingHandCursor);
+    setMouseCursor (MouseCursor::NormalCursor);
     startTimerHz (10);
 }
 
@@ -3490,7 +3663,7 @@ GranulumEditor::GranulumEditor (GranulumProcessor& p)
     osc4LampA   = std::make_unique<ButtonAtt> (s, ParamID::subOn,    osc4Lamp);
     addAndMakeVisible (osc4Lamp);
     addAndMakeVisible (subBars);
-    osc4Lamp.setTooltip ("OSC 4 SUB: a clean low layer. It goes straight to the output: no grains, no filters, no effects.");
+    osc4Lamp.setTooltip ("OSC 2 SUB: a clean low layer, never granulated. Filters and effects only where their digit 2 is lit.");
 
     for (auto* b : { &osc1Grain, &osc2Grain, &osc3Grain, &delaySync, &delayPing })
     {
@@ -3503,8 +3676,8 @@ GranulumEditor::GranulumEditor (GranulumProcessor& p)
     delaySyncA = std::make_unique<ButtonAtt> (s, ParamID::delaySync, delaySync);
     delayPingA = std::make_unique<ButtonAtt> (s, ParamID::delayPing, delayPing);
     osc1Grain.setTooltip ("Send OSC 1 through the granular block");
-    osc2Grain.setTooltip ("Send OSC 2 through the granular block. Off: the sample loops from POSITION");
-    osc3Grain.setTooltip ("Send OSC 3 through the granular block. Off: the noise plays clean");
+    osc2Grain.setTooltip ("Send OSC 3 through the granular block. Off: the sample loops from POSITION");
+    osc3Grain.setTooltip ("Send OSC 4 through the granular block. Off: the noise plays clean");
     delaySync.setTooltip ("Lock the delay time to the project tempo");
     delayPing.setTooltip ("Echoes bounce between left and right");
 
@@ -4167,10 +4340,10 @@ void GranulumEditor::paint (Graphics& g)
         g.drawRoundedRectangle (subTag.toFloat().reduced (0.5f), 6.0f, 1.0f);
         g.setColour (subOn ? Palette::label : Palette::textDim.withAlpha (0.6f));
         g.setFont (uiFont (10.0f, true, 0.14f));
-        g.drawText ("DRY", subTag.withTrimmedBottom (subTag.getHeight() / 2 - 1), Justification::centredBottom, false);
+        g.drawText ("NO", subTag.withTrimmedBottom (subTag.getHeight() / 2 - 1), Justification::centredBottom, false);
         g.setColour (Palette::textDim.withAlpha (subOn ? 0.9f : 0.5f));
         g.setFont (uiFont (7.5f, false, 0.08f));
-        g.drawText ("NO FX", subTag.withTrimmedTop (subTag.getHeight() / 2 + 1), Justification::centredTop, false);
+        g.drawText ("GRAINS", subTag.withTrimmedTop (subTag.getHeight() / 2 + 1), Justification::centredTop, false);
     }
 
     // OSC 2 drop zone: always shows that a file can be dropped here
@@ -4395,8 +4568,8 @@ void GranulumEditor::paintOverChildren (Graphics& g)
         }
     }
     // hovering a routing digit outlines that oscillator
-    if (hoverOsc < 0 || hoverOsc > 2) return;
-    const auto a = (hoverOsc == 0 ? osc1Area : hoverOsc == 1 ? osc2Area : osc3Area).toFloat().expanded (2.0f);
+    if (hoverOsc < 0 || hoverOsc > 3) return;
+    const auto a = (hoverOsc == 0 ? osc1Area : hoverOsc == 1 ? osc2Area : hoverOsc == 2 ? osc3Area : osc4Area).toFloat().expanded (2.0f);
     g.setColour (Palette::accent.withAlpha (0.10f));
     g.fillRoundedRectangle (a, 11.0f);
     g.setColour (Palette::accent.withAlpha (0.9f));
@@ -4452,11 +4625,12 @@ void GranulumEditor::resized()
 
     {
         const int rowH = S (52);
-        osc4Area = oscCol.removeFromBottom (rowH);
-        oscCol.removeFromBottom (S (6));
+        // top to bottom: OSC 1 ADDITIVE, OSC 2 SUB, OSC 3 SAMPLE, OSC 4 NOISE (internal names stay osc2 = sample, osc3 = noise, osc4Area = sub)
         osc3Area = oscCol.removeFromBottom (rowH);
         oscCol.removeFromBottom (S (6));
         osc2Area = oscCol.removeFromBottom (rowH);
+        oscCol.removeFromBottom (S (6));
+        osc4Area = oscCol.removeFromBottom (rowH);
         oscCol.removeFromBottom (S (6));
         osc1Area = oscCol;
 
@@ -4699,7 +4873,7 @@ void GranulumEditor::mouseMove (const MouseEvent& e)
         if (xh != clearHover) { clearHover = xh; repaint (dropZone.expanded (2)); }
     }
     const bool over = dropZone.contains (e.getPosition());
-    if (over != dropHover) { dropHover = over; setMouseCursor (over ? MouseCursor::PointingHandCursor : MouseCursor::NormalCursor); repaint (dropZone.expanded (2)); }
+    if (over != dropHover) { dropHover = over; setMouseCursor (over ? MouseCursor::NormalCursor : MouseCursor::NormalCursor); repaint (dropZone.expanded (2)); }
 }
 
 void GranulumEditor::mouseExit (const MouseEvent& e)
