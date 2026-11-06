@@ -99,57 +99,70 @@ void GranulumLook::drawRotarySlider (Graphics& g, int x, int y, int w, int h, fl
 {
     if (flatKnobs && Palette::hardware)
     {
-        // chrome knob (like the reference): deep shadow, knurled chrome rim, polished cap, dark pointer
+        // a 3D steel knob seen slightly from above: soft cast shadow, knurled cylinder side, flat brushed top, dark pointer
         auto b = Rectangle<int> (x, y, w, h).toFloat().reduced (h < 50 ? 1.5f : 5.0f);
         const bool small = h < 50;
         const float r = jmin (b.getWidth(), b.getHeight()) * 0.5f;
         const auto c = b.getCentre();
         const float angle = start + pos * (end - start);
         const float br = r * (small ? 0.8f : 0.78f);
-        auto circ = [&c] (float rr) { return Rectangle<float> (rr * 2.0f, rr * 2.0f).withCentre (c); };
-        g.setColour (Colours::black.withAlpha (0.55f));
-        g.fillEllipse (circ (br * 1.0f).translated (br * 0.06f, br * 0.16f));
-        g.setColour (Colours::black.withAlpha (0.22f));
-        g.fillEllipse (circ (br * 1.12f).translated (br * 0.1f, br * 0.24f));
-        // knurled rim
+        const float sq = 0.9f;                                  // top face seen a little from above
+        const float hgt = br * (small ? 0.32f : 0.38f);         // cylinder height on screen
+        const auto ct = c.translated (0.0f, -hgt * 0.45f);      // top face centre
+        const auto cb = c.translated (0.0f, hgt * 0.55f);       // bottom edge centre
+        auto ell = [] (Point<float> cc, float rx, float ry) { return Rectangle<float> (rx * 2.0f, ry * 2.0f).withCentre (cc); };
+        // cast shadow (light from the top left)
+        g.setColour (Colours::black.withAlpha (0.28f)); g.fillEllipse (ell (cb.translated (br * 0.22f, br * 0.22f), br * 1.18f, br * sq * 0.95f));
+        g.setColour (Colours::black.withAlpha (0.45f)); g.fillEllipse (ell (cb.translated (br * 0.1f, br * 0.1f), br * 1.02f, br * sq * 0.85f));
+        // side of the cylinder
+        Path side;
+        side.addEllipse (ell (cb, br, br * sq));
+        side.addRectangle (ct.x - br, ct.y, br * 2.0f, cb.y - ct.y);
+        side.setUsingNonZeroWinding (true);
         {
-            ColourGradient rim (Colour (0xffb9bcc0), c.x - br * 0.7f, c.y - br, Colour (0xff2c2e31), c.x + br * 0.6f, c.y + br, false);
-            rim.addColour (0.5, Colour (0xff6c6f74));
-            g.setGradientFill (rim);
-            g.fillEllipse (circ (br));
-            const int teeth = small ? 28 : 48;
-            for (int k = 0; k < teeth; ++k)
+            ColourGradient sg (Colour (0xff2a2c2f), ct.x - br, 0, Colour (0xff141516), ct.x + br, 0, false);
+            sg.addColour (0.22, Colour (0xff8b8e92));
+            sg.addColour (0.45, Colour (0xff4c4f53));
+            g.setGradientFill (sg);
+            g.fillPath (side);
+            g.saveState();
+            g.reduceClipRegion (side);
+            const int teeth = small ? 22 : 36;
+            for (int k = 0; k <= teeth; ++k)
             {
-                const float a = MathConstants<float>::twoPi * (float) k / (float) teeth;
-                g.setColour (Colours::black.withAlpha (0.38f));
-                g.drawLine (Line<float> (c.getPointOnCircumference (br * 0.8f, a), c.getPointOnCircumference (br * 0.99f, a)), 0.7f);
+                const float th = MathConstants<float>::pi * (float) k / (float) teeth;
+                const float xx = ct.x - br * std::cos (th);
+                g.setColour (Colours::black.withAlpha (0.45f));
+                g.drawLine (xx, ct.y, xx, cb.y + br * sq, 0.8f);
+                g.setColour (Colours::white.withAlpha (0.07f * std::sin (th) + 0.03f));
+                g.drawLine (xx + 0.9f, ct.y, xx + 0.9f, cb.y + br * sq, 0.5f);
             }
-            g.setColour (Colours::black.withAlpha (0.6f));
-            g.drawEllipse (circ (br + 0.4f), 0.9f);
+            g.restoreState();
         }
-        // polished cap: concentric brushing + a bright highlight at the top left
-        const float cr = br * 0.74f;
+        // top face: brushed steel, darker to the lower right
         {
-            ColourGradient cap (Colour (0xffd4d6d9), c.x - cr * 0.6f, c.y - cr * 0.8f, Colour (0xff45484c), c.x + cr * 0.7f, c.y + cr, false);
-            cap.addColour (0.5, Colour (0xff8d9095));
-            g.setGradientFill (cap);
-            g.fillEllipse (circ (cr));
-            // spun-metal brushing: fine concentric rings
-            for (int k = 2; k < 14; ++k)
+            const auto tf = ell (ct, br * 0.97f, br * sq * 0.97f);
+            ColourGradient tg (Colour (0xffb4b7bb), tf.getX(), tf.getY(), Colour (0xff3a3c3f), tf.getRight(), tf.getBottom(), false);
+            tg.addColour (0.5, Colour (0xff75787c));
+            g.setGradientFill (tg);
+            g.fillEllipse (tf);
+            for (int k = 2; k < 12; ++k)
             {
-                g.setColour ((k % 2 ? Colours::white : Colours::black).withAlpha (0.05f));
-                g.drawEllipse (circ (cr * (float) k / 14.0f), 0.5f);
+                g.setColour ((k % 2 ? Colours::white : Colours::black).withAlpha (0.045f));
+                g.drawEllipse (ell (ct, br * 0.97f * (float) k / 12.0f, br * sq * 0.97f * (float) k / 12.0f), 0.5f);
             }
-            g.setColour (Colours::white.withAlpha (0.18f));
-            g.fillEllipse (Rectangle<float> (cr * 0.8f, cr * 0.3f).withCentre (c.translated (-cr * 0.2f, -cr * 0.5f)));
-            g.setColour (Colours::black.withAlpha (0.35f));
-            g.drawEllipse (circ (cr + 0.3f), 0.8f);
+            g.setColour (Colours::white.withAlpha (0.35f));
+            g.drawEllipse (tf.reduced (0.4f), 0.7f);
+            g.setColour (Colours::black.withAlpha (0.55f));
+            g.drawEllipse (tf.expanded (0.3f), 0.6f);
         }
-        // pointer: a dark engraved line across the cap
-        g.setColour (Colours::white.withAlpha (0.35f));
-        g.drawLine ({ c.getPointOnCircumference (cr * 0.15f, angle).translated (0.6f, 0.6f), c.getPointOnCircumference (br * 0.95f, angle).translated (0.6f, 0.6f) }, jmax (1.6f, br * 0.09f));
-        g.setColour (s.isMouseOverOrDragging() ? Colour (0xff000000) : Colour (0xff1c1d1f));
-        g.drawLine ({ c.getPointOnCircumference (cr * 0.15f, angle), c.getPointOnCircumference (br * 0.95f, angle) }, jmax (1.4f, br * 0.08f));
+        // pointer: a dark engraved line with a light lower edge
+        const auto p1 = Point<float> (ct.x + std::sin (angle) * br * 0.12f, ct.y - std::cos (angle) * br * sq * 0.12f);
+        const auto p2 = Point<float> (ct.x + std::sin (angle) * br * 0.9f,  ct.y - std::cos (angle) * br * sq * 0.9f);
+        g.setColour (Colours::white.withAlpha (0.28f));
+        g.drawLine ({ p1.translated (0.5f, 0.8f), p2.translated (0.5f, 0.8f) }, jmax (1.3f, br * 0.07f));
+        g.setColour (s.isMouseOverOrDragging() ? Colour (0xff000000) : Colour (0xff121314));
+        g.drawLine ({ p1, p2 }, jmax (1.4f, br * 0.08f));
         return;
     }
     if (flatKnobs)
@@ -4752,6 +4765,27 @@ void GranulumEditor::paint (Graphics& g)
     g.setFont (uiFont (16.0f * sc, false, 0.3f));
     g.drawText ("SELECTIVE GRANULATION", titleArea.withTrimmedTop ((int) (49 * sc)), Justification::topLeft);
 
+    if (Palette::hardware)
+    {
+        // the middle band (GRANULAR, FILTER, EFFECTS) sits on its own recessed plate, like the reference
+        auto mid = grainArea.getUnion (fxArea).toFloat().expanded (10.0f, 8.0f).withTop ((float) screenFrame.getBottom() + 10.0f)
+                       .withBottom ((float) lfoFrame.getY() - 10.0f);
+        g.setColour (Colours::black.withAlpha (0.35f));
+        g.fillRoundedRectangle (mid, 12.0f);
+        g.setGradientFill (ColourGradient (Colours::black.withAlpha (0.35f), 0, mid.getY(), Colours::transparentBlack, 0, mid.getY() + 14.0f, false));
+        g.fillRoundedRectangle (mid, 12.0f);
+        g.setColour (Colours::black.withAlpha (0.8f));
+        g.drawRoundedRectangle (mid, 12.0f, 1.4f);
+        g.setColour (Colours::white.withAlpha (0.09f));
+        g.drawRoundedRectangle (mid.expanded (1.5f), 13.5f, 1.0f);
+        // dividers between GRANULAR | FILTER | EFFECTS
+        for (float xx : { (float) (grainArea.getRight() + filterArea.getX()) * 0.5f, (float) (filterArea.getRight() + fxArea.getX()) * 0.5f })
+        {
+            g.setColour (Colours::black.withAlpha (0.7f)); g.drawLine (xx, mid.getY() + 10.0f, xx, mid.getBottom() - 10.0f, 1.2f);
+            g.setColour (Colours::white.withAlpha (0.07f)); g.drawLine (xx + 1.2f, mid.getY() + 10.0f, xx + 1.2f, mid.getBottom() - 10.0f, 1.0f);
+        }
+    }
+
     for (auto fr : { screenFrame, lfoFrame })
     {
         g.setColour (Colours::black.withAlpha (0.12f));
@@ -5009,9 +5043,19 @@ void GranulumEditor::paintOverChildren (Graphics& g)
             g.fillPath (refl);
             g.setGradientFill (ColourGradient (Colours::black.withAlpha (0.45f), 0, r.getY(), Colours::transparentBlack, 0, r.getY() + jmin (10.0f, r.getHeight() * 0.25f), false));
             g.fillRect (r.withHeight (jmin (10.0f, r.getHeight() * 0.25f)));
-            // glass with a faint phosphor tint
-            g.setColour (Colour (0xff8fd0c0).withAlpha (0.045f));
+            // glass with a faint phosphor tint; the GRAIN FIELD is a real tube: grey-green glass, scan lines, a bulge of light
+            g.setColour (Colour (0xff8fd0c0).withAlpha (c == &field ? 0.09f : 0.045f));
             g.fillRect (r);
+            if (c == &field)
+            {
+                g.setColour (Colours::black.withAlpha (0.10f));
+                for (float yy = r.getY(); yy < r.getBottom(); yy += 3.0f) g.fillRect (r.getX(), yy, r.getWidth(), 1.0f);
+                g.setGradientFill (ColourGradient (Colour (0xffcfe8df).withAlpha (0.10f), r.getCentreX(), r.getCentreY() - r.getHeight() * 0.1f,
+                                                   Colours::transparentWhite, r.getX(), r.getY(), true));
+                g.fillRect (r);
+                g.setGradientFill (ColourGradient (Colours::transparentBlack, r.getCentreX(), r.getCentreY(), Colours::black.withAlpha (0.55f), r.getX() - 10.0f, r.getY() - 10.0f, true));
+                g.fillRect (r);
+            }
             // curved glass: corners fall into shadow
             g.setGradientFill (ColourGradient (Colours::transparentBlack, r.getCentreX(), r.getCentreY(), Colours::black.withAlpha (0.38f), r.getX(), r.getY(), true));
             g.fillRect (r);
