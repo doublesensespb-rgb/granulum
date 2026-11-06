@@ -35,6 +35,7 @@ namespace Palette
     inline juce::Colour lfoCol[3] { juce::Colour (0xffbff3ff), juce::Colour (0xff9ee6c4), juce::Colour (0xffd6be9c) };
     inline juce::String fontName;
     inline bool flatLed = false;
+    inline bool hardware = false;   // preview: "real hardware" look (brushed metal, wood cheeks, screws, knurled knobs, glass)
     inline int theme = 0;
 
     inline void applyTheme (int t)
@@ -120,6 +121,7 @@ public:
     void drawRotarySlider (juce::Graphics&, int x, int y, int w, int h, float pos,
                            float start, float end, juce::Slider&) override;
     void drawButtonBackground (juce::Graphics&, juce::Button&, const juce::Colour&, bool over, bool down) override;
+    void drawButtonBase (juce::Graphics&, juce::Button&, bool over, bool down);
     void drawButtonText (juce::Graphics&, juce::TextButton&, bool over, bool down) override;
     void drawComboBox (juce::Graphics&, int w, int h, bool down, int bx, int by, int bw, int bh, juce::ComboBox&) override;
     juce::Font getComboBoxFont (juce::ComboBox&) override;
@@ -743,6 +745,7 @@ private:
                          lfoPresetLabel, lfoModeLabel, lfoDivLabel, distTypeLabel, fxLabel, grainLabel, adsrReadout;
     float meter = 0.0f;
     float activity = 0.0f;
+    juce::Image hwPlate;     // cached brushed-metal faceplate (hardware look)
     uint32_t shownModVersion = 0;
     juce::String statusText;
     bool fileHover = false, dropHover = false, clearHover = false;

@@ -225,7 +225,8 @@ int main (int argc, char** argv)
     }
 
     // design preview: "Snapshot <dir> v098" -> SUB on, LFO on small knobs, waveform picker, CLIP off
-    if (argc > 2 && String (argv[2]) == "v098")
+    if (argc > 2 && String (argv[2]) == "hw") Palette::hardware = true;
+    if (argc > 2 && (String (argv[2]) == "v098" || String (argv[2]) == "hw"))
     {
         setP (ParamID::subOn, 1.0f); setP (ParamID::subH2, 0.45f); setP (ParamID::subH3, 0.2f);
         setP (ParamID::osc1On, 1.0f);

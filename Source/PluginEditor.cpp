@@ -80,9 +80,81 @@ GranulumLook::GranulumLook()
     setColour (TooltipWindow::textColourId, Palette::text);
 }
 
+#ifndef GRAINFORM_VERSION
+ #define GRAINFORM_VERSION "dev"
+#endif
+// "0.9.8" -> "0.98", "1.0.0" -> "1.0", "1.2.3" -> "1.23"
+static String versionString()
+{
+    auto parts = StringArray::fromTokens (GRAINFORM_VERSION, ".", "");
+    if (parts.size() < 3) return GRAINFORM_VERSION;
+    return parts[0] + "." + parts[1] + (parts[2] == "0" ? String() : parts[2]);
+}
+
 void GranulumLook::drawRotarySlider (Graphics& g, int x, int y, int w, int h, float pos,
                                      float start, float end, Slider& s)
 {
+    if (flatKnobs && Palette::hardware)
+    {
+        // hardware knob: shadow, black skirt, knurled grip, brushed aluminium cap, ivory pointer
+        auto b = Rectangle<int> (x, y, w, h).toFloat().reduced (h < 50 ? 1.5f : 5.0f);
+        const bool small = h < 50;
+        const float r = jmin (b.getWidth(), b.getHeight()) * 0.5f;
+        const auto c = b.getCentre();
+        const float angle = start + pos * (end - start);
+        const float br = r * (small ? 0.8f : 0.78f);
+        auto circ = [&c] (float rr) { return Rectangle<float> (rr * 2.0f, rr * 2.0f).withCentre (c); };
+        // shadow
+        g.setColour (Colours::black.withAlpha (0.5f));
+        g.fillEllipse (circ (br * 1.02f).translated (0.0f, br * 0.13f));
+        g.setColour (Colours::black.withAlpha (0.18f));
+        g.fillEllipse (circ (br * 1.12f).translated (0.0f, br * 0.2f));
+        // skirt
+        g.setGradientFill (ColourGradient (Colour (0xff3a3c3f), c.x, c.y - br, Colour (0xff121314), c.x, c.y + br, false));
+        g.fillEllipse (circ (br));
+        if (! small)
+        {
+            // skirt tick marks
+            g.setColour (Colour (0xffcfc8bf).withAlpha (0.55f));
+            for (int k = 0; k <= 10; ++k)
+            {
+                const float a = start + (end - start) * (float) k / 10.0f;
+                g.drawLine (Line<float> (c.getPointOnCircumference (br * 0.9f, a), c.getPointOnCircumference (br * 0.98f, a)), 1.0f);
+            }
+        }
+        // knurled grip
+        const float gr = br * (small ? 0.86f : 0.8f);
+        g.setGradientFill (ColourGradient (Colour (0xff2c2e31), c.x, c.y - gr, Colour (0xff0d0e0f), c.x, c.y + gr, false));
+        g.fillEllipse (circ (gr));
+        const int teeth = small ? 24 : 40;
+        for (int k = 0; k < teeth; ++k)
+        {
+            const float a = MathConstants<float>::twoPi * (float) k / (float) teeth;
+            const float lit = 0.5f + 0.5f * std::cos (a);             // light from the top
+            g.setColour (Colours::white.withAlpha (0.05f + 0.13f * lit));
+            g.drawLine (Line<float> (c.getPointOnCircumference (gr * 0.84f, a), c.getPointOnCircumference (gr * 0.99f, a)), 0.8f);
+        }
+        // cap: brushed aluminium (conical sheen)
+        const float cr = gr * 0.8f;
+        {
+            ColourGradient cap (Colour (0xff9a9ea3), c.x - cr * 0.6f, c.y - cr, Colour (0xff3e4145), c.x + cr * 0.5f, c.y + cr, false);
+            cap.addColour (0.45, Colour (0xff6d7176));
+            g.setGradientFill (cap);
+            g.fillEllipse (circ (cr));
+            g.setColour (Colours::white.withAlpha (0.07f));
+            for (int k = 1; k < 5; ++k) g.drawEllipse (circ (cr * (float) k / 5.0f), 0.6f);
+            g.setColour (Colours::white.withAlpha (0.28f));
+            g.drawEllipse (circ (cr).reduced (0.5f), 0.8f);
+            g.setColour (Colours::black.withAlpha (0.5f));
+            g.drawEllipse (circ (cr + 0.6f), 0.8f);
+        }
+        // pointer: an ivory line from the cap out to the skirt
+        g.setColour (Colours::black.withAlpha (0.5f));
+        g.drawLine ({ c.getPointOnCircumference (cr * 0.25f, angle).translated (0.0f, 0.8f), c.getPointOnCircumference (br * 0.96f, angle).translated (0.0f, 0.8f) }, jmax (1.8f, br * 0.1f));
+        g.setColour (s.isMouseOverOrDragging() ? Colours::white : Colour (0xffece6df));
+        g.drawLine ({ c.getPointOnCircumference (cr * 0.25f, angle), c.getPointOnCircumference (br * 0.96f, angle) }, jmax (1.4f, br * 0.075f));
+        return;
+    }
     if (flatKnobs)
     {
         // flat, quiet knob: a plain disc with one pointer line
@@ -141,6 +213,27 @@ void GranulumLook::drawRotarySlider (Graphics& g, int x, int y, int w, int h, fl
 }
 
 void GranulumLook::drawButtonBackground (Graphics& g, Button& b, const Colour&, bool over, bool down)
+{
+    if (! Palette::hardware) { drawButtonBase (g, b, over, down); return; }
+    // hardware: a real key cap — drop shadow, the cap, then a moulded top light and a dark lower lip
+    auto r = b.getLocalBounds().toFloat().reduced (1.5f);
+    const float rad = 5.0f;
+    g.setColour (Colours::black.withAlpha (down ? 0.25f : 0.55f));
+    g.fillRoundedRectangle (r.translated (0.0f, down ? 0.6f : 1.8f).expanded (0.6f), rad + 0.6f);
+    drawButtonBase (g, b, over, down);
+    g.saveState();
+    Path clip; clip.addRoundedRectangle (r, rad); g.reduceClipRegion (clip);
+    ColourGradient mould (Colours::white.withAlpha (down ? 0.02f : 0.11f), 0, r.getY(), Colours::black.withAlpha (down ? 0.05f : 0.22f), 0, r.getBottom(), false);
+    mould.addColour (0.45, Colours::white.withAlpha (0.0f));
+    g.setGradientFill (mould); g.fillRect (r);
+    g.setColour (Colours::white.withAlpha (down ? 0.04f : 0.16f));
+    g.fillRect (r.withHeight (1.0f).reduced (rad * 0.6f, 0.0f).translated (0.0f, 1.0f));
+    g.restoreState();
+    g.setColour (Colours::black.withAlpha (0.6f));
+    g.drawRoundedRectangle (r.expanded (0.5f), rad + 0.5f, 1.0f);
+}
+
+void GranulumLook::drawButtonBase (Graphics& g, Button& b, bool over, bool down)
 {
     auto r = b.getLocalBounds().toFloat().reduced (1.5f);
     const float rad = 6.0f;
@@ -3921,14 +4014,113 @@ void GranulumEditor::paint (Graphics& g)
     const auto full = getLocalBounds().toFloat();
     const float sc = full.getWidth() / 1080.0f;
 
-    g.setGradientFill (ColourGradient (Palette::bgTop, 0, 0, Palette::bgBottom, 0, full.getHeight(), false));
-    g.fillAll();
-    g.setColour (Colours::white.withAlpha (0.05f));
-    g.drawRoundedRectangle (full.reduced (1.0f), 14.0f, 1.0f);
+    const float cheek = Palette::hardware ? 19.0f * sc : 0.0f;
+    if (Palette::hardware)
+    {
+        // brushed, dark-anodised aluminium faceplate (cached)
+        if (hwPlate.getWidth() != getWidth() || hwPlate.getHeight() != getHeight())
+        {
+            hwPlate = Image (Image::RGB, jmax (1, getWidth()), jmax (1, getHeight()), true);
+            Graphics ig (hwPlate);
+            ig.setGradientFill (ColourGradient (Colour (0xff2e3033), 0, 0, Colour (0xff1d1f21), 0, full.getHeight(), false));
+            ig.fillAll();
+            Random rnd (98);
+            for (int y = 0; y < getHeight(); ++y)
+            {
+                float x0 = -50.0f;
+                while (x0 < full.getWidth())
+                {
+                    const float len = 40.0f + rnd.nextFloat() * 260.0f;
+                    const bool light = rnd.nextBool();
+                    ig.setColour ((light ? Colours::white : Colours::black).withAlpha (0.012f + rnd.nextFloat() * (light ? 0.03f : 0.05f)));
+                    ig.fillRect (x0, (float) y, len, 1.0f);
+                    x0 += len * (0.6f + rnd.nextFloat());
+                }
+            }
+            // soft top light
+            ig.setGradientFill (ColourGradient (Colours::white.withAlpha (0.05f), 0, 0, Colours::transparentWhite, 0, full.getHeight() * 0.45f, false));
+            ig.fillAll();
+        }
+        g.drawImageAt (hwPlate, 0, 0);
 
+        // walnut end cheeks
+        for (int side = 0; side < 2; ++side)
+        {
+            auto w = side == 0 ? full.withWidth (cheek) : full.withLeft (full.getRight() - cheek);
+            g.setGradientFill (ColourGradient (Colour (0xff6a3f24), w.getX(), 0, Colour (0xff3a2112), w.getRight(), 0, false));
+            g.fillRect (w);
+            Random rnd (7 + side);
+            for (int k = 0; k < 9; ++k)
+            {
+                Path grain;
+                const float gx = w.getX() + w.getWidth() * (0.08f + 0.84f * rnd.nextFloat());
+                const float amp = 0.6f + rnd.nextFloat() * 1.8f, fr = 0.004f + rnd.nextFloat() * 0.01f, ph = rnd.nextFloat() * 6.0f;
+                grain.startNewSubPath (gx, 0.0f);
+                for (float yy = 0.0f; yy <= full.getHeight(); yy += 6.0f)
+                    grain.lineTo (jlimit (w.getX(), w.getRight(), gx + amp * std::sin (yy * fr + ph) + 0.6f * std::sin (yy * 0.05f + ph)), yy);
+                g.setColour ((rnd.nextBool() ? Colour (0xff1a0d05) : Colour (0xff7a4a2c)).withAlpha (0.35f + 0.3f * rnd.nextFloat()));
+                g.strokePath (grain, PathStrokeType (0.6f + rnd.nextFloat()));
+            }
+            // varnish sheen + the seam to the metal
+            g.setGradientFill (ColourGradient (Colours::white.withAlpha (0.10f), w.getCentreX(), 0, Colours::transparentWhite, w.getRight(), 0, false));
+            g.fillRect (w);
+            g.setColour (Colours::black.withAlpha (0.8f));
+            g.fillRect (side == 0 ? w.withLeft (w.getRight() - 1.5f) : w.withWidth (1.5f));
+        }
+        // faceplate edge light + screws in the corners
+        auto plate = full.reduced (cheek, 0.0f);
+        g.setColour (Colours::white.withAlpha (0.08f));
+        g.drawLine (plate.getX(), 1.0f, plate.getRight(), 1.0f, 1.0f);
+        auto screw = [&g] (Point<float> p, float rr, float rot)
+        {
+            g.setColour (Colours::black.withAlpha (0.55f));
+            g.fillEllipse (Rectangle<float> (rr * 2.4f, rr * 2.4f).withCentre (p.translated (0.0f, 0.8f)));
+            g.setGradientFill (ColourGradient (Colour (0xffb9bcc0), p.x - rr, p.y - rr, Colour (0xff4a4d51), p.x + rr, p.y + rr, false));
+            g.fillEllipse (Rectangle<float> (rr * 2.0f, rr * 2.0f).withCentre (p));
+            g.setColour (Colour (0xff1a1b1c));
+            g.drawLine (Line<float> (p.getPointOnCircumference (rr * 0.75f, rot), p.getPointOnCircumference (rr * 0.75f, rot + MathConstants<float>::pi)), rr * 0.32f);
+            g.setColour (Colours::white.withAlpha (0.25f));
+            g.drawEllipse (Rectangle<float> (rr * 2.0f, rr * 2.0f).withCentre (p).reduced (0.4f), 0.6f);
+        };
+        const float sr = 4.2f * sc, inset = 9.0f * sc;
+        screw ({ plate.getX() + inset, inset }, sr, 0.4f);
+        screw ({ plate.getRight() - inset, inset }, sr, 1.1f);
+        screw ({ plate.getX() + inset, full.getHeight() - inset }, sr, 2.3f);
+        screw ({ plate.getRight() - inset, full.getHeight() - inset }, sr, 0.9f);
+        screw ({ plate.getX() + inset, (float) lfoFrame.getY() - 9.0f * sc }, sr, 1.7f);
+        screw ({ plate.getRight() - inset, (float) lfoFrame.getY() - 9.0f * sc }, sr, 0.2f);
+    }
+    else
+    {
+        g.setGradientFill (ColourGradient (Palette::bgTop, 0, 0, Palette::bgBottom, 0, full.getHeight(), false));
+        g.fillAll();
+        g.setColour (Colours::white.withAlpha (0.05f));
+        g.drawRoundedRectangle (full.reduced (1.0f), 14.0f, 1.0f);
+    }
+
+    const auto titleFont = uiFont (40.0f * sc, false, 0.04f);
+    g.setFont (titleFont);
+    if (Palette::hardware)
+    {
+        // screen-printed lettering: a hair of shadow so it sits ON the metal
+        g.setColour (Colours::black.withAlpha (0.6f));
+        g.drawText ("GRAIN FORM", titleArea.withHeight ((int) (46 * sc)).translated (0, 1), Justification::bottomLeft);
+    }
     g.setColour (Palette::text);
-    g.setFont (uiFont (40.0f * sc, false, 0.04f));
     g.drawText ("GRAIN FORM", titleArea.withHeight ((int) (46 * sc)), Justification::bottomLeft);
+    {
+        // version, always visible: a small plate right after the name
+        GlyphArrangement ga; ga.addLineOfText (titleFont, "GRAIN FORM", 0.0f, 0.0f);
+        const float tw = ga.getBoundingBox (0, -1, true).getWidth();
+        auto vr = Rectangle<float> ((float) titleArea.getX() + tw + 5.0f * sc, (float) titleArea.getY() + 22.0f * sc, 32.0f * sc, 14.0f * sc);
+        g.setColour (Palette::hardware ? Colours::black.withAlpha (0.35f) : Palette::screen.withAlpha (0.5f));
+        g.fillRoundedRectangle (vr, 3.0f * sc);
+        g.setColour (Palette::textDim.withAlpha (0.7f));
+        g.drawRoundedRectangle (vr.reduced (0.5f), 3.0f * sc, 0.8f);
+        g.setColour (Palette::label);
+        g.setFont (uiFont (9.0f * sc, true, 0.02f));
+        g.drawText ("v" + versionString(), vr, Justification::centred, false);
+    }
     g.setColour (Palette::textDim);
     g.setFont (uiFont (16.0f * sc, false, 0.3f));
     g.drawText ("SELECTIVE GRANULATION", titleArea.withTrimmedTop ((int) (49 * sc)), Justification::topLeft);
@@ -3937,8 +4129,16 @@ void GranulumEditor::paint (Graphics& g)
     {
         g.setColour (Colours::black.withAlpha (0.12f));
         g.fillRoundedRectangle (fr.toFloat().translated (0, 2.0f), 14.0f);
-        g.setColour (Palette::panel);
+        g.setColour (Palette::hardware ? Palette::panel.withAlpha (0.55f) : Palette::panel);
         g.fillRoundedRectangle (fr.toFloat(), 14.0f);
+        if (Palette::hardware)
+        {
+            // a separate, slightly raised plate: light top edge, dark lower edge
+            g.setColour (Colours::white.withAlpha (0.09f));
+            g.drawRoundedRectangle (fr.toFloat().reduced (0.5f).translated (0.0f, 0.5f), 14.0f, 1.0f);
+            g.setColour (Colours::black.withAlpha (0.55f));
+            g.drawRoundedRectangle (fr.toFloat().expanded (0.5f), 14.5f, 1.0f);
+        }
         if (Palette::theme == 8) { g.setColour (Palette::edge); g.drawRoundedRectangle (fr.toFloat().reduced (0.5f), 14.0f, 1.0f); }
     }
     g.setColour (Palette::label);
@@ -4158,6 +4358,35 @@ void GranulumEditor::paint (Graphics& g)
 
 void GranulumEditor::paintOverChildren (Graphics& g)
 {
+    if (Palette::hardware)
+    {
+        // every display sits behind glass in a black bezel
+        Component* screens[] = { &field, &harmonics, &noisePicker, &filterScope, &lfoEditor, &ampEditor, &subBars };
+        for (auto* c : screens)
+        {
+            if (! c->isVisible() || c->getWidth() < 8) continue;
+            auto r = c->getBounds().toFloat();
+            const float rad = 6.0f;
+            g.setColour (Colours::black.withAlpha (0.75f));
+            g.drawRoundedRectangle (r.expanded (1.5f), rad + 1.5f, 2.0f);
+            g.setColour (Colours::white.withAlpha (0.10f));
+            g.drawLine (r.getX() + rad, r.getBottom() + 3.0f, r.getRight() - rad, r.getBottom() + 3.0f, 1.0f);
+            g.saveState();
+            Path clip; clip.addRoundedRectangle (r, rad); g.reduceClipRegion (clip);
+            // glass: a soft diagonal reflection in the upper left + an inner shadow under the bezel
+            Path refl;
+            refl.startNewSubPath (r.getX(), r.getY());
+            refl.lineTo (r.getX() + r.getWidth() * 0.62f, r.getY());
+            refl.lineTo (r.getX() + r.getWidth() * 0.32f, r.getBottom());
+            refl.lineTo (r.getX(), r.getBottom());
+            refl.closeSubPath();
+            g.setGradientFill (ColourGradient (Colours::white.withAlpha (0.06f), r.getX(), r.getY(), Colours::white.withAlpha (0.0f), r.getX() + r.getWidth() * 0.45f, r.getBottom(), false));
+            g.fillPath (refl);
+            g.setGradientFill (ColourGradient (Colours::black.withAlpha (0.45f), 0, r.getY(), Colours::transparentBlack, 0, r.getY() + jmin (10.0f, r.getHeight() * 0.25f), false));
+            g.fillRect (r.withHeight (jmin (10.0f, r.getHeight() * 0.25f)));
+            g.restoreState();
+        }
+    }
     // hovering a routing digit outlines that oscillator
     if (hoverOsc < 0 || hoverOsc > 2) return;
     const auto a = (hoverOsc == 0 ? osc1Area : hoverOsc == 1 ? osc2Area : osc3Area).toFloat().expanded (2.0f);
