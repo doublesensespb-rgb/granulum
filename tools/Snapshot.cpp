@@ -442,6 +442,24 @@ int main (int argc, char** argv)
             };
             walk (*ed);
             ed->harmonicEditor().readout.show (2, 0, true);
+            if (argc > 4 && String (argv[4]) == "nums")
+            {
+                auto& he = ed->harmonicEditor();
+                he.readout = {};
+                for (int st = 1; st <= 3; ++st)
+                {
+                    HarmonicEditor::numStyle = st;
+                    ed->resized();
+                    run (p, ed, 25);
+                    const auto area = ed->getLocalArea (&he, he.getLocalBounds()).expanded (6, 6);
+                    auto img = base->createComponentSnapshot (area, true, 3.0f);
+                    PNGImageFormat png;
+                    outDir.getChildFile ("num" + String (st) + ".png").deleteFile();
+                    FileOutputStream os (outDir.getChildFile ("num" + String (st) + ".png"));
+                    png.writeImageToStream (img, os);
+                }
+                return 0;
+            }
             save (*base, outDir, "v0992.png");
             return 0;
         }

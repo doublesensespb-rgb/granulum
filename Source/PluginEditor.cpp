@@ -1790,13 +1790,15 @@ Rectangle<float> HarmonicEditor::barArea() const
     auto r = getLocalBounds().toFloat().reduced (7.0f, 6.0f);
     r.removeFromLeft (kGrainLabelW - 7.0f);
     r.removeFromBottom (rowStyle == 16 ? 28.0f : rowStyle >= 10 ? 26.0f : 20.0f);
+    if (numStyle == 1 || numStyle == 3) r.removeFromBottom (9.0f);   // room for the harmonic numbers
     return r;
 }
 
 Rectangle<float> HarmonicEditor::pillRow() const
 {
     auto a = barArea();
-    return { a.getX(), a.getBottom() + 5.0f, a.getWidth(), rowStyle == 16 ? 21.0f : rowStyle >= 10 ? 19.0f : 13.0f };
+    const float numH = numStyle == 1 || numStyle == 3 ? 9.0f : 0.0f;
+    return { a.getX(), a.getBottom() + 5.0f + numH, a.getWidth(), rowStyle == 16 ? 21.0f : rowStyle >= 10 ? 19.0f : 13.0f };
 }
 
 int HarmonicEditor::barAt (float x) const
@@ -1984,6 +1986,26 @@ void HarmonicEditor::mouseUp (const MouseEvent&) { if (chipDrag.harm >= 0) reado
 
 void HarmonicEditor::paintOverChildren (Graphics& g)
 {
+    // harmonic numbers (0.99.2): quiet, the stick under the mouse lights up
+    if (numStyle > 0)
+    {
+        const auto a = barArea();
+        const float colW = a.getWidth() / (float) granulum::kNumHarmonics;
+        const int hot = isMouseOver() ? barAt ((float) getMouseXYRelative().x) : -1;
+        g.setFont (uiFont (8.0f, false, 0.0f));
+        for (int k = 0; k < granulum::kNumHarmonics; ++k)
+        {
+            const bool isHot = k == hot;
+            if (numStyle == 3 && ! isHot && ! (k == 0 || (k + 1) % 4 == 0)) continue;
+            const float cx = a.getX() + colW * ((float) k + 0.5f);
+            Rectangle<float> r;
+            if (numStyle == 2) r = Rectangle<float> (colW, 10.0f).withCentre ({ cx, a.getBottom() - jlimit (0.0f, 1.0f, h[(size_t) k]) * a.getHeight() - 8.0f });
+            else               r = Rectangle<float> (colW, 9.0f).withCentre ({ cx, a.getBottom() + 7.0f });
+            if (numStyle == 2 && r.getY() < a.getY() - 6.0f) r = r.withY (a.getY() - 6.0f);
+            g.setColour (isHot ? Palette::text : Palette::textDim.withAlpha (0.45f));
+            g.drawText (String (k + 1), r, Justification::centred, false);
+        }
+    }
     if (! readout.active() || ! proc.hasModulation (kHarmTarget0 + readout.a, readout.l)) return;
     const auto a = barArea();
     auto yOf = [&a] (float v) { return a.getBottom() - jlimit (0.0f, 1.0f, v) * a.getHeight(); };

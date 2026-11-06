@@ -384,6 +384,7 @@ private:
     std::vector<Crystal> crystals;
     juce::Random rng;
 public:
+    static inline int numStyle = 1;   // 0.99.2 harmonic numbers: 0 off, 1 row under the sticks, 2 over each stick, 3 ruler (1 4 8 12 16 + hovered)
     int rowStyle = 11;   // 0.99.1: horizontal switches (owner's choice): copper = into the grains, grey = clean; drag across to set several (16 = vertical, tried)
     int hintStyle = 0;   // first-run call-out: 0 dark with copper frame, 1 solid copper
     static inline int barStyle = 5;   // 5 strings, 0 sand wave, 1 frosted glass, 2 capsule + filament, 3 line + cap, 4 fade   // 0 = pearl beads, 1 = glowing line (design preview)
