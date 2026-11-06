@@ -442,6 +442,19 @@ int main (int argc, char** argv)
             };
             walk (*ed);
             ed->harmonicEditor().readout.show (2, 0, true);
+            if (argc > 4 && String (argv[4]) == "save")
+            {
+                auto root = GranulumProcessor::presetFolder();
+                for (auto* d : { "Bass", "Pads", "Atmos", "FX" }) root.getChildFile (d).createDirectory();
+                for (auto* n : { "Glass Sub", "Growl Fold", "Breathing 808", "Deep Pulse", "Night Drive" }) p.savePreset (n, root.getChildFile ("Bass"));
+                p.savePreset ("Frozen Choir", root.getChildFile ("Pads"));
+                p.savePreset ("Growl Fold", root.getChildFile ("Bass"));
+                ed->harmonicEditor().readout = {};
+                for (auto* c : ed->getChildren()) if (auto* pb = dynamic_cast<PresetBar*> (c)) pb->openSave();
+                run (p, ed, 20);
+                save (*base, outDir, "save.png");
+                return 0;
+            }
             if (argc > 4 && String (argv[4]) == "nums")
             {
                 auto& he = ed->harmonicEditor();

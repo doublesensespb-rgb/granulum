@@ -304,10 +304,15 @@ public:
 
     // ---- presets ----
     static juce::File presetFolder();
-    juce::Array<juce::File> listPresets() const;
-    bool savePreset (const juce::String& name);
+    juce::Array<juce::File> listPresets() const;                 // all presets: the root first, then each folder (0.99.2)
+    static juce::Array<juce::File> listPresetFolders();          // sub-folders of the preset folder, A..Z
+    static juce::Array<juce::File> presetsIn (const juce::File& folder);
+    bool savePreset (const juce::String& name, const juce::File& folder = {});   // empty folder = the root
     bool loadPreset (const juce::File&);
     juce::String getPresetName() const;
+    juce::String getPresetFolderName() const { return presetSub; }   // "" = root
+    void presetFolderRenamed (const juce::String& from, const juce::String& to) { if (presetSub == from) presetSub = to; }
+    juce::File currentPresetFile() const;
 
     std::array<float, granulum::kNumHarmonics> getHarmonics() const { return harmonics; }
     // which harmonics go through the granulator (bit k = harmonic k+1); the rest stay clean & mono
@@ -389,6 +394,7 @@ private:
     std::vector<std::shared_ptr<const WaveformPeaks>> noisePeaks;
     int shownNoise = -1;
     juce::String presetName { "INIT" };
+    juce::String presetSub;   // folder of the current preset inside the preset folder ("" = root)
     std::array<float, granulum::kNumHarmonics> harmonics {};
     std::array<std::atomic<float>, granulum::kNumHarmonics> harmNow {};     // stick levels for the audio thread
     std::array<float, granulum::kNumHarmonics> harmOff {}, harmGainPrev {}; // LFO offsets per stick (audio thread)

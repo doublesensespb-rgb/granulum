@@ -1,3 +1,4 @@
+#include <map>
 #include "PluginEditor.h"
 #include "BinaryData.h"
 
@@ -3899,9 +3900,29 @@ void PresetBar::paint (Graphics& g)
     g.fillRoundedRectangle (r, 6.0f);
     g.setColour (Colours::white.withAlpha (0.06f));
     g.drawRoundedRectangle (r.reduced (0.5f), 6.0f, 1.0f);
-    g.setColour (Palette::theme >= 5 ? Palette::onScreen : Palette::text);
-    g.setFont (uiFont (13.0f, false, 0.08f));
-    g.drawText (proc.getPresetName().toUpperCase(), r.reduced (10.0f, 0.0f), Justification::centred, true);
+    {
+        // "BASS / MY SOUND": the folder small and quiet, the name as before
+        const auto name = proc.getPresetName().toUpperCase();
+        const auto folder = proc.getPresetFolderName().toUpperCase();
+        auto text = r.reduced (8.0f, 0.0f).withTrimmedRight (8.0f);
+        // long names: the font gets a bit smaller before anything is cut
+        float fs = 13.0f;
+        while (fs > 9.5f && (float) GlyphArrangement::getStringWidthInt (uiFont (fs, false, 0.04f), name) > text.getWidth()) fs -= 0.5f;
+        const auto nf = uiFont (fs, false, fs < 13.0f ? 0.04f : 0.08f), ff = uiFont (9.0f, false, 0.06f);
+        const float nw = (float) GlyphArrangement::getStringWidthInt (nf, name);
+        float fw = folder.isEmpty() ? 0.0f : (float) GlyphArrangement::getStringWidthInt (ff, folder + " / ");
+        if (nw + fw > text.getWidth()) fw = 0.0f;   // no room: the name wins (the folder is still in the menu)
+        auto group = text.withSizeKeepingCentre (jmin (text.getWidth(), nw + fw), text.getHeight());
+        if (fw > 0.0f)
+        {
+            g.setColour (Palette::textDim.withAlpha (0.8f));
+            g.setFont (ff);
+            g.drawText (folder + " / ", group.removeFromLeft (fw), Justification::centredLeft, true);
+        }
+        g.setColour (Palette::theme >= 5 ? Palette::onScreen : Palette::text);
+        g.setFont (nf);
+        g.drawText (name, group, fw > 0.0f ? Justification::centredLeft : Justification::centred, true);
+    }
     g.setColour (Palette::textDim);
     Path arrow;
     const float ax = r.getRight() - 12.0f, ay = r.getCentreY();
@@ -3919,8 +3940,9 @@ void PresetBar::step (int dir)
     const auto list = proc.listPresets();
     if (list.isEmpty()) return;
     int cur = -1;
+    const auto now = proc.currentPresetFile();
     for (int i = 0; i < list.size(); ++i)
-        if (list[i].getFileNameWithoutExtension() == proc.getPresetName()) cur = i;
+        if (list[i] == now) cur = i;
     const int n = list.size();
     const int idx = cur < 0 ? (dir > 0 ? 0 : n - 1) : ((cur + dir) % n + n) % n;
     proc.loadPreset (list[idx]);
@@ -3931,11 +3953,34 @@ void PresetBar::step (int dir)
 void PresetBar::showMenu()
 {
     const auto list = proc.listPresets();
+    const auto now = proc.currentPresetFile();
     PopupMenu m;
     m.addItem (1, "INIT");
     m.addSeparator();
-    for (int i = 0; i < list.size(); ++i)
-        m.addItem (100 + i, list[i].getFileNameWithoutExtension(), true, list[i].getFileNameWithoutExtension() == proc.getPresetName());
+    const auto root = GranulumProcessor::presetFolder();
+    int id = 100;
+    std::map<String, PopupMenu> subs;
+    StringArray order;
+    for (auto& f : list)
+    {
+        const bool inRoot = f.getParentDirectory() == root;
+        if (inRoot) m.addItem (id, f.getFileNameWithoutExtension(), true, f == now);
+        else
+        {
+            const auto dn = f.getParentDirectory().getFileName();
+            if (! order.contains (dn)) order.add (dn);
+            subs[dn].addItem (id, f.getFileNameWithoutExtension(), true, f == now);
+        }
+        ++id;
+    }
+    // folders (also the empty ones), like Serum: each one opens to the side
+    for (auto& d : GranulumProcessor::listPresetFolders())
+    {
+        const auto dn = d.getFileName();
+        auto& sm = subs[dn];
+        if (sm.getNumItems() == 0) sm.addItem (2, "(empty)", false);
+        m.addSubMenu (dn, sm, true, nullptr, dn == proc.getPresetFolderName());
+    }
     if (list.isEmpty()) m.addItem (2, "(no saved presets yet)", false);
     m.addSeparator();
     m.addItem (3, "Save as...");
@@ -3948,7 +3993,7 @@ void PresetBar::showMenu()
         if (res == 1) b.proc.resetToInit();
         else if (res == 3) { b.askSave(); return; }
         else if (res == 4) { GranulumProcessor::presetFolder().startAsProcess(); return; }
-        else if (res >= 100) b.proc.loadPreset (list[res - 100]);
+        else if (res >= 100 && res - 100 < list.size()) b.proc.loadPreset (list[res - 100]);
         if (b.onLoaded) b.onLoaded();
         b.repaint();
     });
@@ -3956,24 +4001,320 @@ void PresetBar::showMenu()
 
 void PresetBar::askSave()
 {
-    saveWindow = std::make_unique<AlertWindow> ("Save preset", "Name:", MessageBoxIconType::NoIcon, this);
-    saveWindow->addTextEditor ("name", proc.getPresetName() == "INIT" ? String ("My Sound") : proc.getPresetName());
-    saveWindow->addButton ("SAVE", 1, KeyPress (KeyPress::returnKey));
-    saveWindow->addButton ("CANCEL", 0, KeyPress (KeyPress::escapeKey));
-    saveWindow->setColour (AlertWindow::backgroundColourId, Palette::panel);
-    saveWindow->setColour (AlertWindow::textColourId, Palette::text);
-    saveWindow->setColour (AlertWindow::outlineColourId, Palette::accent.withAlpha (0.4f));
+    auto* top = findParentComponentOfClass<AudioProcessorEditor>();
+    if (top == nullptr) return;
+    saveWindow = std::make_unique<PresetSaveWindow> (proc);
     Component::SafePointer<PresetBar> safe (this);
-    saveWindow->enterModalState (true, ModalCallbackFunction::create ([safe] (int result)
+    saveWindow->onClose = [safe]
     {
         if (safe == nullptr) return;
-        if (result == 1)
+        MessageManager::callAsync ([safe] { if (safe != nullptr) { safe->saveWindow.reset(); safe->repaint(); } });
+    };
+    saveWindow->onSaved = [safe] { if (safe != nullptr) safe->repaint(); };
+    top->addAndMakeVisible (*saveWindow);
+    saveWindow->setBounds (top->getLocalBounds());
+    saveWindow->open();
+}
+
+// ============================================================================
+// Preset SAVE window (0.99.2)
+
+void PresetSaveWindow::Rows::paint (Graphics& g)
+{
+    for (int i = 0; i < items.size(); ++i)
+    {
+        auto r = Rectangle<float> (0.0f, (float) (i * rowH), (float) getWidth(), (float) rowH).reduced (2.0f, 1.0f);
+        const bool sel = i == selected, hov = i == hover;
+        if (sel || hov)
         {
-            safe->proc.savePreset (safe->saveWindow->getTextEditorContents ("name"));   // same name = update that preset
+            g.setColour (sel ? Palette::accent.withAlpha (0.16f) : Colours::white.withAlpha (0.05f));
+            g.fillRoundedRectangle (r, 4.0f);
         }
-        safe->saveWindow.reset();
-        safe->repaint();
-    }), false);
+        if (sel)
+        {
+            g.setColour (Palette::accent.withAlpha (0.7f));
+            g.fillRoundedRectangle (r.withWidth (2.5f), 1.2f);
+        }
+        auto tr = r.withTrimmedLeft (10.0f);
+        if (folders)
+        {
+            // little folder glyph
+            auto ic = tr.removeFromLeft (14.0f).withSizeKeepingCentre (12.0f, 9.0f);
+            Path p;
+            p.addRoundedRectangle (ic.getX(), ic.getY() + 1.5f, ic.getWidth(), ic.getHeight() - 1.5f, 1.5f);
+            p.addRoundedRectangle (ic.getX(), ic.getY(), ic.getWidth() * 0.45f, 3.0f, 1.0f);
+            g.setColour ((sel ? Palette::accent : Palette::textDim).withAlpha (sel ? 0.9f : 0.6f));
+            g.fillPath (p);
+            tr.removeFromLeft (6.0f);
+        }
+        g.setColour (sel ? Palette::text : Palette::text.withAlpha (hov ? 0.95f : 0.78f));
+        g.setFont (uiFont (12.0f, sel, 0.02f));
+        g.drawText (items[i], tr, Justification::centredLeft, true);
+    }
+}
+
+void PresetSaveWindow::Rows::mouseMove (const MouseEvent& e)
+{
+    const int h = e.y / rowH;
+    const int nh = h < items.size() ? h : -1;
+    if (nh != hover) { hover = nh; repaint(); }
+}
+
+void PresetSaveWindow::Rows::mouseDown (const MouseEvent& e)
+{
+    const int i = e.y / rowH;
+    if (i < 0 || i >= items.size()) return;
+    if (e.mods.isPopupMenu()) { if (onRightClick) onRightClick (i); return; }
+    if (onClick) onClick (i);
+}
+
+void PresetSaveWindow::Rows::mouseDoubleClick (const MouseEvent& e)
+{
+    const int i = e.y / rowH;
+    if (i >= 0 && i < items.size() && onDoubleClick) onDoubleClick (i);
+}
+
+PresetSaveWindow::PresetSaveWindow (GranulumProcessor& p) : proc (p)
+{
+    setWantsKeyboardFocus (true);
+    folderRows.folders = true;
+    for (auto* v : { &folderView, &presetView })
+    {
+        v->setScrollBarsShown (true, false);
+        v->setScrollBarThickness (6);
+        addAndMakeVisible (*v);
+    }
+    folderView.setViewedComponent (&folderRows, false);
+    presetView.setViewedComponent (&presetRows, false);
+    for (auto* c : { (Component*) &nameEdit, (Component*) &newFolder, (Component*) &saveBtn, (Component*) &cancelBtn }) addAndMakeVisible (*c);
+    addChildComponent (folderEdit);
+    for (auto* te : { &nameEdit, &folderEdit })
+    {
+        te->setFont (uiFont (13.0f, false, 0.02f));
+        te->setJustification (Justification::centredLeft);
+        te->setIndents (8, 4);
+    }
+    nameEdit.setTextToShowWhenEmpty ("Preset name", Palette::textDim);
+    nameEdit.onTextChange = [this] { updateSaveLabel(); };
+    nameEdit.onReturnKey  = [this] { doSave(); };
+    nameEdit.onEscapeKey  = [this] { if (onClose) onClose(); };
+    folderEdit.onReturnKey = [this] { finishFolderEdit (true); };
+    folderEdit.onEscapeKey = [this] { finishFolderEdit (false); };
+    folderEdit.onFocusLost = [this] { finishFolderEdit (true); };
+
+    newFolder.setTooltip ("Make a new folder for your presets");
+    newFolder.onClick = [this] { startFolderEdit (-1); };
+    saveBtn.onClick   = [this] { doSave(); };
+    cancelBtn.onClick = [this] { if (onClose) onClose(); };
+
+    folderRows.onClick = [this] (int i) { folderRows.selected = i; folderRows.repaint(); refreshPresets(); updateSaveLabel(); };
+    folderRows.onDoubleClick = [this] (int i) { if (i > 0) startFolderEdit (i); };
+    folderRows.onRightClick = [this] (int i)
+    {
+        folderRows.selected = i; folderRows.repaint(); refreshPresets(); updateSaveLabel();
+        PopupMenu m;
+        const bool sub = i > 0;
+        const bool empty = sub && folderFile (i).findChildFiles (File::findFilesAndDirectories, false).isEmpty();
+        m.addItem (1, "Rename", sub);
+        m.addItem (2, empty || ! sub ? String ("Delete") : String ("Delete (only empty folders)"), sub && empty);
+        m.addItem (3, "Show in folder");
+        Component::SafePointer<PresetSaveWindow> safe (this);
+        m.showMenuAsync (PopupMenu::Options(), [safe, i] (int res)
+        {
+            if (safe == nullptr) return;
+            if (res == 1) safe->startFolderEdit (i);
+            if (res == 2) { safe->folderFile (i).deleteRecursively(); safe->refreshFolders ({}); }
+            if (res == 3) safe->folderFile (i).startAsProcess();
+        });
+    };
+    presetRows.onClick = [this] (int i) { presetRows.selected = i; presetRows.repaint(); nameEdit.setText (presetRows.items[i], true); };
+    presetRows.onRightClick = [this] (int i)
+    {
+        PopupMenu m;
+        m.addItem (1, "Delete preset \"" + presetRows.items[i] + "\"");
+        Component::SafePointer<PresetSaveWindow> safe (this);
+        m.showMenuAsync (PopupMenu::Options(), [safe, i] (int res)
+        {
+            if (safe == nullptr || res != 1) return;
+            auto f = safe->folderFile (safe->folderRows.selected).getChildFile (safe->presetRows.items[i] + ".gpreset");
+            if (! f.moveToTrash()) f.deleteFile();
+            safe->refreshPresets();
+            safe->updateSaveLabel();
+        });
+    };
+}
+
+void PresetSaveWindow::open()
+{
+    const auto cur = proc.getPresetFolderName();
+    refreshFolders (cur.isEmpty() ? String ("\x01root") : cur);
+    nameEdit.setText (proc.getPresetName() == "INIT" ? String ("My Sound") : proc.getPresetName(), false);
+    updateSaveLabel();
+    resized();
+    nameEdit.grabKeyboardFocus();
+    nameEdit.selectAll();
+}
+
+File PresetSaveWindow::folderFile (int index) const
+{
+    return index <= 0 || index >= folders.size() ? GranulumProcessor::presetFolder() : folders[index];
+}
+
+void PresetSaveWindow::refreshFolders (const String& select)
+{
+    folders.clear();
+    folders.add (GranulumProcessor::presetFolder());
+    StringArray names { "Presets" };
+    for (auto& d : GranulumProcessor::listPresetFolders()) { folders.add (d); names.add (d.getFileName()); }
+    folderRows.setItems (names);
+    int sel = 0;
+    for (int i = 1; i < folders.size(); ++i) if (folders[i].getFileName() == select) sel = i;
+    folderRows.selected = sel;
+    refreshPresets();
+    updateSaveLabel();
+}
+
+void PresetSaveWindow::refreshPresets()
+{
+    StringArray names;
+    for (auto& f : GranulumProcessor::presetsIn (folderFile (folderRows.selected))) names.add (f.getFileNameWithoutExtension());
+    presetRows.setItems (names);
+    presetRows.selected = names.indexOf (nameEdit.getText().trim());
+    presetView.setViewPosition (0, 0);
+}
+
+void PresetSaveWindow::updateSaveLabel()
+{
+    const auto name = File::createLegalFileName (nameEdit.getText().trim());
+    const bool exists = name.isNotEmpty() && folderFile (folderRows.selected).getChildFile (name + ".gpreset").existsAsFile();
+    saveBtn.setButtonText (exists ? "REPLACE" : "SAVE");
+    saveBtn.setColour (TextButton::textColourOffId, exists ? Palette::accent.brighter (0.3f) : Palette::text);
+    saveBtn.setTooltip (exists ? "A preset with this name is already in this folder: it will be replaced" : "Save into the selected folder");
+    saveBtn.setEnabled (name.isNotEmpty());
+    presetRows.selected = presetRows.items.indexOf (name);
+    presetRows.repaint();
+    repaint();
+}
+
+void PresetSaveWindow::startFolderEdit (int renameIndex)
+{
+    renaming = renameIndex;
+    folderEdit.setText (renameIndex >= 1 ? folders[renameIndex].getFileName() : String ("New Folder"), false);
+    folderEdit.setVisible (true);
+    resized();
+    folderEdit.grabKeyboardFocus();
+    folderEdit.selectAll();
+}
+
+void PresetSaveWindow::finishFolderEdit (bool accept)
+{
+    if (renaming == -2) return;
+    const int which = renaming;
+    renaming = -2;
+    folderEdit.setVisible (false);
+    const auto name = File::createLegalFileName (folderEdit.getText().trim());
+    String select = folderRows.selected > 0 ? folders[folderRows.selected].getFileName() : String();
+    if (accept && name.isNotEmpty())
+    {
+        auto target = GranulumProcessor::presetFolder().getChildFile (name);
+        if (which == -1) { target.createDirectory(); select = name; }
+        else if (which >= 1 && which < folders.size() && ! target.exists())
+        {
+            const auto from = folders[which].getFileName();
+            if (folders[which].moveFileTo (target)) proc.presetFolderRenamed (from, name);   // keeps the preset bar right
+            select = name;
+        }
+    }
+    refreshFolders (select);
+    nameEdit.grabKeyboardFocus();
+}
+
+void PresetSaveWindow::doSave()
+{
+    const auto name = nameEdit.getText().trim();
+    if (File::createLegalFileName (name).isEmpty()) return;
+    proc.savePreset (name, folderFile (folderRows.selected));
+    if (onSaved) onSaved();
+    if (onClose) onClose();
+}
+
+Rectangle<int> PresetSaveWindow::panel() const
+{
+    return getLocalBounds().withSizeKeepingCentre (jmin (getWidth() - 40, 560), jmin (getHeight() - 40, 400));
+}
+
+void PresetSaveWindow::resized()
+{
+    auto r = panel().reduced (18, 16);
+    r.removeFromTop (30);                                    // title
+    auto bottom = r.removeFromBottom (34);
+    r.removeFromBottom (12);
+    auto left = r.removeFromLeft (180);
+    r.removeFromLeft (12);
+    // left: folders + "+ FOLDER"
+    auto lb = left.removeFromBottom (28);
+    newFolder.setBounds (lb);
+    left.removeFromBottom (6);
+    if (folderEdit.isVisible()) { folderEdit.setBounds (left.removeFromBottom (26)); left.removeFromBottom (4); }
+    left.removeFromTop (18);
+    folderView.setBounds (left);
+    folderRows.setSize (left.getWidth() - (folderRows.getHeight() > left.getHeight() ? 8 : 0), folderRows.getHeight());
+    // right: presets of that folder
+    r.removeFromTop (18);
+    presetView.setBounds (r);
+    presetRows.setSize (r.getWidth() - (presetRows.getHeight() > r.getHeight() ? 8 : 0), presetRows.getHeight());
+    // bottom: name, CANCEL, SAVE
+    saveBtn.setBounds (bottom.removeFromRight (96));
+    bottom.removeFromRight (8);
+    cancelBtn.setBounds (bottom.removeFromRight (86));
+    bottom.removeFromRight (12);
+    nameEdit.setBounds (bottom);
+}
+
+void PresetSaveWindow::paint (Graphics& g)
+{
+    g.fillAll (Colours::black.withAlpha (0.55f));
+    const auto p = panel().toFloat();
+    g.setColour (Colours::black.withAlpha (0.4f));
+    g.fillRoundedRectangle (p.translated (0.0f, 4.0f).expanded (2.0f), 14.0f);
+    g.setColour (Palette::panel);
+    g.fillRoundedRectangle (p, 12.0f);
+    g.setColour (Palette::accent.withAlpha (0.35f));
+    g.drawRoundedRectangle (p.reduced (0.5f), 12.0f, 1.0f);
+
+    auto r = panel().reduced (18, 16).toFloat();
+    g.setColour (Palette::text);
+    g.setFont (uiFont (15.0f, true, 0.12f));
+    g.drawText ("SAVE PRESET", r.removeFromTop (30.0f), Justification::centredLeft, false);
+    g.setColour (Palette::textDim);
+    g.setFont (uiFont (9.5f, true, 0.12f));
+    const auto lv = folderView.getBounds().toFloat(), pv = presetView.getBounds().toFloat();
+    g.drawText ("FOLDERS", lv.withY (lv.getY() - 18.0f).withHeight (16.0f), Justification::centredLeft, false);
+    const auto fname = folderRows.selected > 0 ? folders[folderRows.selected].getFileName().toUpperCase() : String ("PRESETS");
+    g.drawText ("IN " + fname + "  (" + String (presetRows.items.size()) + ")", pv.withY (pv.getY() - 18.0f).withHeight (16.0f), Justification::centredLeft, false);
+    // list wells
+    for (auto b : { lv, pv })
+    {
+        g.setColour (Palette::screen);
+        g.fillRoundedRectangle (b.expanded (2.0f), 6.0f);
+    }
+    if (presetRows.items.isEmpty())
+    {
+        g.setColour (Palette::textDim.withAlpha (0.6f));
+        g.setFont (uiFont (11.0f, false, 0.02f));
+        g.drawText ("No presets in this folder yet", pv, Justification::centred, false);
+    }
+}
+
+void PresetSaveWindow::mouseDown (const MouseEvent& e)
+{
+    if (! panel().contains (e.getPosition()) && onClose) onClose();
+}
+
+bool PresetSaveWindow::keyPressed (const KeyPress& k)
+{
+    if (k == KeyPress::escapeKey) { if (onClose) onClose(); return true; }
+    return false;
 }
 
 // ============================================================================

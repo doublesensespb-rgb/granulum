@@ -760,6 +760,7 @@ void GranulumProcessor::resetToInit()
     for (int l = 0; l < kNumLfos; ++l) setLfoPoints (l, lfoPreset (1));
     setGrainMask (0xffffu);
     presetName = "INIT";
+    presetSub = {};
 }
 
 // ===========================================================================
@@ -1659,22 +1660,47 @@ File GranulumProcessor::presetFolder()
     return f;
 }
 
-Array<File> GranulumProcessor::listPresets() const
+Array<File> GranulumProcessor::presetsIn (const File& folder)
 {
-    auto files = presetFolder().findChildFiles (File::findFiles, false, "*.gpreset");
+    auto files = folder.findChildFiles (File::findFiles, false, "*.gpreset");
     files.sort();
     return files;
 }
 
-bool GranulumProcessor::savePreset (const String& rawName)
+Array<File> GranulumProcessor::listPresetFolders()
+{
+    auto dirs = presetFolder().findChildFiles (File::findDirectories, false);
+    Array<File> out;
+    for (auto& d : dirs) if (! d.getFileName().startsWithChar ('.')) out.add (d);
+    out.sort();
+    return out;
+}
+
+Array<File> GranulumProcessor::listPresets() const
+{
+    auto all = presetsIn (presetFolder());
+    for (auto& d : listPresetFolders()) all.addArray (presetsIn (d));
+    return all;
+}
+
+File GranulumProcessor::currentPresetFile() const
+{
+    const auto dir = presetSub.isEmpty() ? presetFolder() : presetFolder().getChildFile (presetSub);
+    return dir.getChildFile (presetName + ".gpreset");
+}
+
+bool GranulumProcessor::savePreset (const String& rawName, const File& folder)
 {
     const auto name = File::createLegalFileName (rawName.trim());
     if (name.isEmpty()) return false;
+    const auto dir = folder == File() ? presetFolder() : folder;
+    dir.createDirectory();
     MemoryBlock mb;
     presetName = name;
+    presetSub = dir == presetFolder() ? String() : dir.getFileName();
     getStateInformation (mb);
     if (auto xml = getXmlFromBinary (mb.getData(), (int) mb.getSize()))
-        return xml->writeTo (presetFolder().getChildFile (name + ".gpreset"));
+        return xml->writeTo (dir.getChildFile (name + ".gpreset"));
     return false;
 }
 
@@ -1686,6 +1712,7 @@ bool GranulumProcessor::loadPreset (const File& f)
     copyXmlToBinary (*xml, mb);
     setStateInformation (mb.getData(), (int) mb.getSize());
     presetName = f.getFileNameWithoutExtension();
+    presetSub = f.getParentDirectory() == presetFolder() ? String() : f.getParentDirectory().getFileName();
     return true;
 }
 
@@ -1798,6 +1825,7 @@ void GranulumProcessor::getStateInformation (MemoryBlock& destData)
     for (float h : harmonics) hs.add (String (h, 4));
     state.setProperty ("harmonics", hs.joinIntoString (","), nullptr);
     state.setProperty ("presetName", presetName, nullptr);
+    state.setProperty ("presetFolder", presetSub, nullptr);
     state.setProperty ("pluginVersion", GRAINFORM_VERSION, nullptr);
     state.setProperty ("grainMask", (int) grainMask.load(), nullptr);
 
@@ -1861,9 +1889,11 @@ void GranulumProcessor::setStateInformation (const void* data, int sizeInBytes)
     std::array<String, kNumLfos> shapes;
     for (int l = 0; l < kNumLfos; ++l) shapes[(size_t) l] = state.getProperty ("lfoShape" + String (l + 1)).toString();
     const String pn = state.getProperty ("presetName", "INIT").toString();
+    const String pf = state.getProperty ("presetFolder", "").toString();
     const uint32_t gm = (uint32_t) (int) state.getProperty ("grainMask", 0xffff);
     apvts.replaceState (state);
     presetName = pn;
+    presetSub = pf;
 
     // Saved before 0.92: OSC 3 knob was COLOR (a tone filter), now it is PITCH -> start at 0 st
     if (! state.hasProperty ("pluginVersion"))

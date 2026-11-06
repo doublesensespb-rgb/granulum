@@ -540,6 +540,52 @@ private:
 };
 
 // Header preset browser: < NAME > SAVE
+// 0.99.2: SAVE window inside the plugin: folders on the left (+ FOLDER), the presets of that folder on the right, name + SAVE
+class PresetSaveWindow final : public juce::Component
+{
+public:
+    explicit PresetSaveWindow (GranulumProcessor&);
+    void paint (juce::Graphics&) override;
+    void resized() override;
+    void mouseDown (const juce::MouseEvent&) override;   // click outside the panel = cancel
+    bool keyPressed (const juce::KeyPress&) override;
+    void open();
+    std::function<void()> onClose, onSaved;
+
+    // a plain list of rows (used for folders and presets)
+    struct Rows final : public juce::Component
+    {
+        juce::StringArray items;
+        int selected = -1, hover = -1;
+        bool folders = false;
+        std::function<void (int)> onClick, onRightClick, onDoubleClick;
+        static constexpr int rowH = 24;
+        void paint (juce::Graphics&) override;
+        void mouseMove (const juce::MouseEvent& e) override;
+        void mouseExit (const juce::MouseEvent&) override { hover = -1; repaint(); }
+        void mouseDown (const juce::MouseEvent&) override;
+        void mouseDoubleClick (const juce::MouseEvent&) override;
+        void setItems (const juce::StringArray& s) { items = s; setSize (getWidth(), juce::jmax (1, items.size()) * rowH); repaint(); }
+    };
+private:
+    juce::Rectangle<int> panel() const;
+    void refreshFolders (const juce::String& select);
+    void refreshPresets();
+    void updateSaveLabel();
+    juce::File folderFile (int index) const;     // 0 = root
+    void startFolderEdit (int renameIndex);      // -1 = new folder
+    void finishFolderEdit (bool accept);
+    void doSave();
+
+    GranulumProcessor& proc;
+    Rows folderRows, presetRows;
+    juce::Viewport folderView, presetView;
+    juce::TextEditor nameEdit, folderEdit;
+    juce::TextButton newFolder { "+ FOLDER" }, saveBtn { "SAVE" }, cancelBtn { "CANCEL" };
+    juce::Array<juce::File> folders;             // index 0 = root
+    int renaming = -2;                           // -2 = not editing, -1 = new folder, >= 1 = rename that folder
+};
+
 class PresetBar final : public juce::Component, private juce::Timer
 {
 public:
@@ -548,6 +594,7 @@ public:
     void resized() override;
     void mouseDown (const juce::MouseEvent&) override;
     std::function<void()> onLoaded;
+    void openSave() { askSave(); }
 private:
     void timerCallback() override { repaint(); }
     void step (int dir);
@@ -556,7 +603,7 @@ private:
     GranulumProcessor& proc;
     juce::TextButton prev { juce::String::fromUTF8 ("\xe2\x97\x80") }, next { juce::String::fromUTF8 ("\xe2\x96\xb6") }, save { "SAVE" };
     juce::Rectangle<int> nameArea;
-    std::unique_ptr<juce::AlertWindow> saveWindow;
+    std::unique_ptr<PresetSaveWindow> saveWindow;
 };
 
 // OSC 3 noise picker: name + mini waveform, arrows to step, click for the full list
