@@ -88,6 +88,9 @@ namespace ParamID
     inline constexpr const char* porta     = "porta";
     inline constexpr const char* output    = "output";
     inline constexpr const char* clipOn    = "clipOn";
+    inline constexpr const char* osc1Tune  = "osc1Tune";    // 0.99.2: smooth pitch, -48..+48 semitones (like Serum COARSE)
+    inline constexpr const char* osc2Tune  = "osc2Tune";
+    inline constexpr const char* pitch     = "pitch";       // 0.99.2: master pitch of the whole synth, -12..+12 semitones
     inline constexpr const char* osc1Pan   = "osc1Pan";
     inline constexpr const char* osc2Pan   = "osc2Pan";
     inline constexpr const char* osc3Pan   = "osc3Pan";
@@ -133,6 +136,7 @@ enum ModTarget
     mtSubH1, mtSubH2, mtSubH3, mtSubH4, mtSubH5,
     mtPeakQ, mtPeakQ2,
     mtSubSemi,
+    mtOsc1Tune, mtOsc2Tune, mtPitch,
     kNumModTargets
 };
 
