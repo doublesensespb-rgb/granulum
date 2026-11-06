@@ -1020,16 +1020,15 @@ granulum::Params GranulumProcessor::subParams (const float* v) const
 
 void GranulumProcessor::noteOn (int note, float velocity)
 {
-    if (heldNotes == 0)
-    {
-        sinceTrigger = 0.0;
-        for (int l = 0; l < kNumLfos; ++l)
-            if ((int) pLfoMode[(size_t) l]->load() >= 1)
-            {
-                lfoPhase[(size_t) l] = 0.0;
-                lfoDone[(size_t) l] = false;
-            }
-    }
+    if (heldNotes == 0) sinceTrigger = 0.0;
+    // RETRIG / ENV LFOs start again on EVERY new note (0.99.2): before, a legato note in MONO (key pressed while the
+    // previous one was still held) kept the old LFO run, so an ENV LFO had already finished and did nothing on it
+    for (int l = 0; l < kNumLfos; ++l)
+        if ((int) pLfoMode[(size_t) l]->load() >= 1)
+        {
+            lfoPhase[(size_t) l] = 0.0;
+            lfoDone[(size_t) l] = false;
+        }
     ++heldNotes;
     engineAdd.noteOn   (note, velocity, voiceParams (lastV.data(), 0));
     engineAddClean.noteOn (note, velocity, voiceParams (lastV.data(), 0));
