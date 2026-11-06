@@ -327,6 +327,7 @@ public:
 
     int hoverBar = -1;          // public so the snapshot tool can show the hover look
     int lfoDropBar = -1;        // stick under a dragged LFO
+    int idleTicks = 0;
     struct ChipHit { int harm = -1, lfo = -1; };
     ChipHit chipAt (juce::Point<float>) const;
     float lfoLineX (int harm, int slot) const;
@@ -375,6 +376,7 @@ private:
     float level[2] {}, hold[2] {};
     int holdAge[2] {};
     bool clipShown = false;
+    float lastSig = -1.0f;   // last drawn state (repaint only on change)
 };
 
 // Chord / interval picker that pops out of the OSC 1 header
@@ -432,6 +434,7 @@ private:
     juce::dsp::FFT fft { 11 };
     std::array<float, 4096> fftData {};
     std::array<float, 1024> specDb {};
+    int silentFrames = 0;   // idle detection: no FFT / repaint while nothing sounds
     float dragCut = 0, dragRes = 0;
     juce::Point<float> dragStart;
     // the curve follows CUTOFF / RESO / GAIN / TYPE at once (not only on the next 30 fps tick)

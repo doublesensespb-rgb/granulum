@@ -379,9 +379,19 @@ void GranulumLook::drawButtonText (Graphics& g, TextButton& b, bool over, bool)
     {
         // "SOUNDS ▾" with breathing room at both ends: shrink the font until it fits
         const auto text = b.getButtonText();
-        const float room = (float) b.getWidth() - 16.0f;
-        float fs = b.getHeight() < 30 ? 11.5f : 13.5f;
-        while (fs > 8.5f && (float) GlyphArrangement::getStringWidthInt (uiFont (fs, false, 0.06f), text) > room) fs -= 0.25f;
+        // the fitted size is measured once per size/text and kept on the button (measuring every frame of the glint
+        // cost ~2.5 ms per paint)
+        const String key = text + "|" + String (b.getWidth()) + "x" + String (b.getHeight());
+        auto& props = b.getProperties();
+        float fs;
+        if (props["fitKey"].toString() == key) fs = (float) props["fitFs"];
+        else
+        {
+            const float room = (float) b.getWidth() - 16.0f;
+            fs = b.getHeight() < 30 ? 11.5f : 13.5f;
+            while (fs > 8.5f && (float) GlyphArrangement::getStringWidthInt (uiFont (fs, false, 0.06f), text) > room) fs -= 0.25f;
+            props.set ("fitKey", key); props.set ("fitFs", fs);
+        }
         g.setFont (uiFont (fs, false, 0.06f));
         g.setColour (Palette::onAccent());
         drawTextWithArrow (g, text, b.getLocalBounds());
@@ -1662,13 +1672,20 @@ void HarmonicEditor::timerCallback()
         crystals.erase (std::remove_if (crystals.begin(), crystals.end(), [] (const Crystal& c)
                         { return c.age >= c.life || c.y > 0.98f; }), crystals.end());
     }
+    bool changed = false;
     if (! editing)
     {
         const auto now = proc.getHarmonics();
-        if (now != h) h = now;
-        if (lastPill < 0) mask = proc.getGrainMask();
+        if (now != h) { h = now; changed = true; }
+        if (lastPill < 0) { const auto m = proc.getGrainMask(); changed |= m != mask; mask = m; }
     }
-    repaint();
+    // repaint only while something moves: granulated bars shimmer, LFOs on sticks, the hint, the intro wave, mouse, edits
+    bool lfoOnSticks = false;
+    for (int k = 0; k < granulum::kNumHarmonics && ! lfoOnSticks; ++k)
+        for (int l = 0; l < kNumLfos; ++l) if (proc.hasModulation (kHarmTarget0 + k, l)) { lfoOnSticks = true; break; }
+    const bool animating = (grainsActive() && mask != 0) || ! crystals.empty() || lfoOnSticks || showHint || introT < 2.0f
+                        || editing || isMouseOverOrDragging() || lfoDropBar >= 0;
+    if (animating || changed || ++idleTicks > 15) { idleTicks = 0; repaint(); }
 }
 
 bool HarmonicEditor::grainsActive() const
@@ -2510,7 +2527,9 @@ void PeakMeter::timerCallback()
         else if (++holdAge[c] > 40) hold[c] *= 0.93f;
     }
     if (proc.clipped.load()) clipShown = true;
-    repaint();
+    // repaint only when something visible changed (a silent meter used to repaint 30x a second)
+    const float sig = level[0] + level[1] + hold[0] * 0.5f + hold[1] * 0.5f + (clipShown ? 10.0f : 0.0f);
+    if (std::abs (sig - lastSig) > 1.0e-4f || isMouseOver()) { lastSig = sig; repaint(); }
 }
 
 void PeakMeter::mouseDown (const MouseEvent& e)
@@ -2989,6 +3008,13 @@ void FilterScope::timerCallback()
     if (! isVisible() || getWidth() <= 0) return;
     const int N = 2048;
     const int w = proc.scopeWrite.load (std::memory_order_acquire);
+    // idle: no sound coming in and the spectrum has already faded out -> no FFT, no repaint (knob changes repaint on their own)
+    {
+        float mx = 0.0f;
+        for (int i = 0; i < N; i += 4) mx = jmax (mx, std::abs (proc.scopeRing[(size_t) ((w - N + i) & (GranulumProcessor::kScopeSize - 1))]));
+        if (mx < 1.0e-5f) { if (++silentFrames > 40) return; }
+        else silentFrames = 0;
+    }
     for (int i = 0; i < N; ++i)
     {
         const float win = 0.5f - 0.5f * std::cos (MathConstants<float>::twoPi * (float) i / (float) (N - 1));
@@ -3942,6 +3968,7 @@ GranulumEditor::GranulumEditor (GranulumProcessor& p)
     add (osc2Knobs, ParamID::osc2Pan,  "Pan",  Knob::Size::Small);
     add (subKnobs, ParamID::subVol, "Vol", Knob::Size::Small);
     add (subKnobs, ParamID::subOct, "Oct", Knob::Size::Small);
+    add (subKnobs, ParamID::subSemi, "Semi", Knob::Size::Small);
     add (osc3Knobs, ParamID::osc3Vol,   "Vol",   Knob::Size::Small);
     add (osc3Knobs, ParamID::osc3Color, "Pitch", Knob::Size::Small);
     add (osc3Knobs, ParamID::osc3Pan,   "Pan",   Knob::Size::Small);

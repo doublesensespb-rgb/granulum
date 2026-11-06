@@ -37,7 +37,8 @@ namespace
         ParamID::subVol,
         ParamID::osc1Pan, ParamID::osc2Pan, ParamID::osc3Pan, ParamID::spread,
         ParamID::subH1, ParamID::subH2, ParamID::subH3,
-        ParamID::peakQ, ParamID::peakQ2
+        ParamID::peakQ, ParamID::peakQ2,
+        ParamID::subSemi
     };
 
     String hzWithNote (float hz)
@@ -587,6 +588,8 @@ AudioProcessorValueTreeState::ParameterLayout GranulumProcessor::createLayout()
     ps.push_back (std::make_unique<P> (ParameterID { ParamID::subVol, 1 }, "Sub Volume", NormalisableRange<float> (0.0f, 1.0f), 0.7f, pct));
     ps.push_back (std::make_unique<P> (ParameterID { ParamID::subOct, 1 }, "Sub Octave", NormalisableRange<float> (-3.0f, 1.0f, 1.0f), -1.0f,
                                        A().withStringFromValueFunction ([] (float v, int) { return String (roundToInt (v)) + " oct"; })));
+    ps.push_back (std::make_unique<P> (ParameterID { ParamID::subSemi, 1 }, "Sub Semitones", NormalisableRange<float> (-12.0f, 12.0f, 1.0f), 0.0f,
+                                       A().withStringFromValueFunction ([] (float v, int) { const int n = roundToInt (v); return (n > 0 ? "+" : "") + String (n) + " st"; })));
     ps.push_back (std::make_unique<P> (ParameterID { ParamID::subH1, 1 }, "Sub Harmonic 1", NormalisableRange<float> (0.0f, 1.0f), 1.0f, pct));
     ps.push_back (std::make_unique<P> (ParameterID { ParamID::subH2, 1 }, "Sub Harmonic 2", NormalisableRange<float> (0.0f, 1.0f), 0.0f, pct));
     ps.push_back (std::make_unique<P> (ParameterID { ParamID::subH3, 1 }, "Sub Harmonic 3", NormalisableRange<float> (0.0f, 1.0f), 0.0f, pct));
@@ -1000,7 +1003,7 @@ granulum::Params GranulumProcessor::subParams (const float* v) const
     p.chordSize = 1;
     p.chord = { 0, 0, 0, 0, 0 };
     p.chime = 0.0f;
-    p.transpose = std::round (pSubOct->load()) * 12.0f;
+    p.transpose = std::round (pSubOct->load()) * 12.0f + v[mtSubSemi];   // OCT + SEMI (SEMI glides under an LFO)
     // the 3 sticks are layers: their level (incl. LFO) moves at play time
     for (int k = 0; k < 3; ++k) { p.harmGain[(size_t) k] = jlimit (0.0f, 1.0f, v[mtSubH1 + k]); p.harmGainPrev[(size_t) k] = subGainPrev[(size_t) k]; }
     return p;

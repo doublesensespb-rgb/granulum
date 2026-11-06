@@ -38,6 +38,7 @@ namespace ParamID
     inline constexpr const char* peakGain  = "peakGain";
     inline constexpr const char* peakGain2 = "peakGain2";
     inline constexpr const char* peakQ     = "peakQ";
+    inline constexpr const char* subSemi   = "subSemi";
     inline constexpr const char* peakQ2    = "peakQ2";
     inline constexpr const char* loopStart = "loopStart";
     inline constexpr const char* loopEnd   = "loopEnd";
@@ -129,6 +130,7 @@ enum ModTarget
     mtOsc1Pan, mtOsc2Pan, mtOsc3Pan, mtSpread,
     mtSubH1, mtSubH2, mtSubH3,
     mtPeakQ, mtPeakQ2,
+    mtSubSemi,
     kNumModTargets
 };
 
