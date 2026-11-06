@@ -2632,10 +2632,7 @@ void PeakMeter::timerCallback()
     if (std::abs (sig - lastSig) > 1.0e-4f || isMouseOver()) { lastSig = sig; repaint(); }
 }
 
-void PeakMeter::mouseMove (const MouseEvent& e)
-{
-    setMouseCursor (e.position.x > (float) getWidth() - 38.0f ? MouseCursor::PointingHandCursor : MouseCursor::NormalCursor);
-}
+void PeakMeter::mouseMove (const MouseEvent&) { repaint(); }   // hover look on the CLIP box (no hand cursor: owner's rule)
 
 void PeakMeter::mouseDown (const MouseEvent& e)
 {

@@ -1,7 +1,7 @@
 # GRAIN FORM (repo: granulum) — guide for AI agents and developers
 
 Read this whole file before changing anything. It describes the product, the code, the build
-pipeline and how the owner wants to work. Current version: **0.99.1** (`project(... VERSION 0.9.9)` + display label `set(GRAINFORM_LABEL "0.99.1")` in CMakeLists.txt).
+pipeline and how the owner wants to work. Current version: **0.99.2** (`project(... VERSION 0.9.9)` + display label `set(GRAINFORM_LABEL "0.99.2")` in CMakeLists.txt).
 The UI shows the version on a small plate next to the title (taken from CMake `GRAINFORM_VERSION`, "0.9.8" -> "v0.98").
 
 ## 1. Product
@@ -162,6 +162,11 @@ layered), OCT -3..+1, SEMI; GRAIN switches row (`HarmonicEditor::rowStyle = 11`)
 virtual mod targets `harm1..16` (kHarmTarget0 = 1000) and mtSubH1..5, one LFO per stick, wheel = depth, look = style B
 (`lfoStickStyle = 1`); a stick with an LFO is rendered as its own layer (`SampleData::layers`, gain ramped per chunk in the
 engine); PEAK Q (peakQ/peakQ2) + gain ±36 dB, filter view 0 dB centred; no hand cursors anywhere; UI idle optimisations.
+v0.99.2: fix: state save wrote `kModTargetIds[t]` for t >= 1000 (LFO on sticks) -> out-of-bounds read, now `modTargetId(t)`;
+TUNE on OSC 1/2 (`osc1Tune`/`osc2Tune`, -48..+48 st, continuous, mod targets mtOsc1Tune/mtOsc2Tune), master PITCH (`pitch`,
+-12..+12 st, mtPitch, added to every osc + SUB transpose) next to OUTPUT in the header; whole CLIP box is the button (lit when
+on); LFO depth readout in % (`DepthReadout`: knobs show it over the value box while the mouse is on an LFO chip, sticks show a
+pill above the range; wheel 5 % steps / Shift 1 %, drag snaps to 1 %). Owner rejected the first factory bass presets: none ship.
 v0.98: OSC 4 SUB (dry), PAN on OSC 1-3, SPREAD, waveform picker, sample clear x, live filter view, Serum-like knob feel,
 CLIP toggle, OUTPUT 0 dB, Serum-like division order, INTO GRAINS click fix, LFO rings outside small knobs, version plate.
 
