@@ -292,7 +292,8 @@ public:
     void itemDragExit (const SourceDetails&) override { dropCol = -1; repaint(); }
     void itemDropped (const SourceDetails&) override;
 private:
-    int colAt (float x) const { const auto pl = plot(); return juce::jlimit (0, 2, (int) ((x - pl.getX()) / (pl.getWidth() / 3.0f))); }
+    static constexpr int kN = 5;   // number of SUB sticks
+    int colAt (float x) const { const auto pl = plot(); return juce::jlimit (0, kN - 1, (int) ((x - pl.getX()) / (pl.getWidth() / (float) kN))); }
     bool anyMod() const;
     juce::Rectangle<float> chipRect (int col, int slot) const;
     std::pair<int, int> chipAt (juce::Point<float>) const;   // {col, lfo} or {-1,-1}

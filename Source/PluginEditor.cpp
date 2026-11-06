@@ -1277,42 +1277,43 @@ void GrainField::mouseUp (const MouseEvent&)
 
 SubBars::SubBars (GranulumProcessor& p) : proc (p)
 {
-    setTooltip ("SUB: 1 = root, 2 = octave, 3 = octave + fifth. Drag the sticks up and down.");
+    setTooltip ("SUB sticks, left to right: root, octave, octave + fifth, 2 octaves, 2 octaves + third.");
     setRepaintsOnMouseActivity (true);
-    for (auto* id : { ParamID::subH1, ParamID::subH2, ParamID::subH3, ParamID::subOn }) proc.apvts.addParameterListener (id, this);
+    for (auto* id : { ParamID::subH1, ParamID::subH2, ParamID::subH3, ParamID::subH4, ParamID::subH5, ParamID::subOn }) proc.apvts.addParameterListener (id, this);
 }
 
 SubBars::~SubBars()
 {
-    for (auto* id : { ParamID::subH1, ParamID::subH2, ParamID::subH3, ParamID::subOn }) proc.apvts.removeParameterListener (id, this);
+    for (auto* id : { ParamID::subH1, ParamID::subH2, ParamID::subH3, ParamID::subH4, ParamID::subH5, ParamID::subOn }) proc.apvts.removeParameterListener (id, this);
     cancelPendingUpdate();
 }
 
 RangedAudioParameter* SubBars::param (int i) const
 {
-    return proc.apvts.getParameter (i == 0 ? ParamID::subH1 : i == 1 ? ParamID::subH2 : ParamID::subH3);
+    static const char* const ids[] = { ParamID::subH1, ParamID::subH2, ParamID::subH3, ParamID::subH4, ParamID::subH5 };
+    return proc.apvts.getParameter (ids[jlimit (0, kN - 1, i)]);
 }
 
 bool SubBars::anyMod() const
 {
-    for (int i = 0; i < 3; ++i) for (int l = 0; l < kNumLfos; ++l) if (proc.hasModulation (mtSubH1 + i, l)) return true;
+    for (int i = 0; i < kN; ++i) for (int l = 0; l < kNumLfos; ++l) if (proc.hasModulation (mtSubH1 + i, l)) return true;
     return false;
 }
 
 Rectangle<float> SubBars::chipRect (int col, int slot) const
 {
     const auto pl = plot();
-    const float colW = pl.getWidth() / 3.0f;
+    const float colW = pl.getWidth() / (float) kN;
     return Rectangle<float> (10.0f, 10.0f).withCentre ({ pl.getX() + colW * ((float) col + 0.5f) - 11.0f - (float) slot * 12.0f, pl.getY() + 5.0f });
 }
 
 std::pair<int, int> SubBars::chipAt (Point<float> pos) const
 {
-    for (int i = 0; i < 3; ++i)
+    for (int i = 0; i < kN; ++i)
     {
         int slot = 0;
         const auto pl = plot();
-        const float colW = pl.getWidth() / 3.0f, x = pl.getX() + colW * ((float) i + 0.5f);
+        const float colW = pl.getWidth() / (float) kN, x = pl.getX() + colW * ((float) i + 0.5f);
         for (int l = 0; l < kNumLfos; ++l)
             if (proc.hasModulation (mtSubH1 + i, l))
             {
@@ -1361,7 +1362,7 @@ void SubBars::mouseMove (const MouseEvent& e)
     }
     else
     {
-        setTooltip ("SUB: 1 = root, 2 = octave, 3 = octave + fifth. Drag the sticks up and down. Drop an LFO on a stick to move it.");
+        setTooltip ("SUB sticks, left to right: root, octave, octave + fifth, 2 octaves, 2 octaves + third.\nDrag them up and down. Drop an LFO on a stick to move it.");
         setMouseCursor (MouseCursor::NormalCursor);
     }
 }
@@ -1373,11 +1374,11 @@ void SubBars::paint (Graphics& g)
     g.fillRoundedRectangle (r, 7.0f);
     const bool on = proc.apvts.getRawParameterValue (ParamID::subOn)->load() > 0.5f;
     const auto pl = plot();
-    const float colW = pl.getWidth() / 3.0f;
+    const float colW = pl.getWidth() / (float) kN;
     // the resulting waveform behind the sticks (like OSC 1): root, octave, octave + fifth (= 3rd harmonic)
     {
-        float lv[3];
-        for (int i = 0; i < 3; ++i) lv[i] = anyMod() ? proc.modNorm[(size_t) (mtSubH1 + i)].load (std::memory_order_relaxed) : param (i)->getValue();
+        float lv[kN];
+        for (int i = 0; i < kN; ++i) lv[i] = anyMod() ? proc.modNorm[(size_t) (mtSubH1 + i)].load (std::memory_order_relaxed) : param (i)->getValue();
         Path wave;
         const int pts = 120;
         float peak = 0.0001f;
@@ -1385,7 +1386,9 @@ void SubBars::paint (Graphics& g)
         for (int n = 0; n < pts; ++n)
         {
             const float ph = MathConstants<float>::twoPi * 2.0f * (float) n / (float) (pts - 1);   // two cycles
-            ys[(size_t) n] = lv[0] * std::sin (ph) + lv[1] * std::sin (2.0f * ph) + lv[2] * std::sin (3.0f * ph);
+            float y = 0.0f;
+            for (int k = 0; k < kN; ++k) y += lv[k] * std::sin ((float) (k + 1) * ph);
+            ys[(size_t) n] = y;
             peak = jmax (peak, std::abs (ys[(size_t) n]));
         }
         for (int n = 0; n < pts; ++n)
@@ -1402,7 +1405,7 @@ void SubBars::paint (Graphics& g)
         g.setColour (Colours::white.withAlpha (0.10f));
         g.fillRoundedRectangle (Rectangle<float> (pl.getX() + colW * (float) dropCol, pl.getY(), colW, pl.getHeight()), 3.0f);
     }
-    for (int i = 0; i < 3; ++i)
+    for (int i = 0; i < kN; ++i)
     {
         const float v = param (i)->getValue();
         const float x = pl.getX() + colW * ((float) i + 0.5f);
@@ -1418,10 +1421,6 @@ void SubBars::paint (Graphics& g)
         g.setColour (hot ? col.brighter (0.3f) : col);
         g.drawLine (x, yTop, x, pl.getBottom(), 2.0f);
         g.fillEllipse (Rectangle<float> (7.0f, 7.0f).withCentre ({ x, yTop }));
-        // number
-        g.setColour (Palette::textDim.withAlpha (0.7f));
-        g.setFont (uiFont (8.5f, false, 0.1f));
-        g.drawText (String (i + 1), Rectangle<float> (x + 4.0f, pl.getBottom() - 11.0f, 12.0f, 10.0f), Justification::centredLeft, false);
 
         // LFO on this stick: range line, live level, chips
         int slot = 0;
@@ -1466,7 +1465,7 @@ void SubBars::mouseDown (const MouseEvent& e)
         return;
     }
     const auto pl = plot();
-    dragging = jlimit (0, 2, (int) ((e.position.x - pl.getX()) / (pl.getWidth() / 3.0f)));
+    dragging = jlimit (0, kN - 1, (int) ((e.position.x - pl.getX()) / (pl.getWidth() / (float) kN)));
     param (dragging)->beginChangeGesture();
     setFrom (e.position);
 }
@@ -5055,12 +5054,10 @@ void GranulumEditor::resized()
         auto a4 = osc4Area.reduced (S (8), S (4));
         osc4Lamp.setBounds (a4.removeFromLeft (S (108)));
         subTag = {};
-        a4.removeFromRight (S (62));                       // (column of the GRAIN buttons above/below stays empty: the sub is never granulated)
-        a4.removeFromRight (S (4));
         for (int i = (int) subKnobs.size() - 1; i >= 0; --i)
-            subKnobs[(size_t) i]->setBounds (a4.removeFromRight (S (38)));
-        a4.removeFromRight (S (6));
-        subBars.setBounds (a4.withSizeKeepingCentre (a4.getWidth() - S (44), S (40)).withX (a4.getX() + S (22)));
+            subKnobs[(size_t) i]->setBounds (a4.removeFromRight (S (40)));
+        a4.removeFromRight (S (8));
+        subBars.setBounds (a4.withSizeKeepingCentre (a4.getWidth(), S (40)));   // the screen takes the whole free width
     }
 
     // ---- blocks ----

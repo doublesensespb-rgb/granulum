@@ -354,6 +354,7 @@ int main (int argc, char** argv)
         p.setModulation (kHarmTarget0 + 4, 1, 0.45f);
         setP (ParamID::subOn, 1.0f); setP (ParamID::subH2, 0.45f); setP (ParamID::subH3, 0.2f);
         p.setModulation (GranulumProcessor::modIndexOf (ParamID::subH2), 2, 0.4f);
+        setP (ParamID::subH4, 0.3f); setP (ParamID::subH5, 0.15f);
         setP (ParamID::filterOn, 1.0f); setP (ParamID::ftype, 4.0f); setP (ParamID::cutoff, 1200.0f); setP (ParamID::peakGain, 24.0f); setP (ParamID::peakQ, 4.0f);
         p.keyboardState.noteOn (1, 48, 0.9f);
         ed->harmonicEditor().showHint = false;
