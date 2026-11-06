@@ -99,6 +99,8 @@ namespace ParamID
     inline constexpr const char* subH1     = "subH1";
     inline constexpr const char* subH2     = "subH2";
     inline constexpr const char* subH3     = "subH3";
+    inline constexpr const char* subH4     = "subH4";
+    inline constexpr const char* subH5     = "subH5";
     // LFOs: "lfo1Rate", "lfo1Sync", "lfo1Div", "lfo1Mode", "lfo1Rise" ...
     inline juce::String lfo (int index, const char* what) { return "lfo" + juce::String (index + 1) + what; }
     // which oscillators go through a block: "filterR1", "distR2", "delayR3", "revR1" ...
@@ -128,7 +130,7 @@ enum ModTarget
     mtPeakGain, mtPeakGain2,
     mtSubVol,
     mtOsc1Pan, mtOsc2Pan, mtOsc3Pan, mtSpread,
-    mtSubH1, mtSubH2, mtSubH3,
+    mtSubH1, mtSubH2, mtSubH3, mtSubH4, mtSubH5,
     mtPeakQ, mtPeakQ2,
     mtSubSemi,
     kNumModTargets
@@ -375,7 +377,8 @@ private:
     juce::AudioFormatManager formatManager;
 
     SourceSlot addSlot, addCleanSlot, smpSlot, noiseSlot, subSlot;
-    std::array<float, 3> subShown { -1.0f, -1.0f, -1.0f };
+    static constexpr int kSubHarms = 5;   // SUB sticks: root, octave, octave + fifth, 2 octaves, 2 octaves + third
+    std::array<float, 5> subShown { -1.0f, -1.0f, -1.0f, -1.0f, -1.0f };
     float lastGSub = 0.0f;
     std::atomic<uint32_t> grainMask { 0xffffu };
     std::vector<std::shared_ptr<granulum::SampleData>> noises;
@@ -447,7 +450,7 @@ private:
     std::array<std::atomic<float>*, kNumLfos> pLfoSync {}, pLfoDiv {}, pLfoMode {}, pLfoRise {}, pLfoOn {}, pLfoGrains {};
     std::array<double, kNumLfos> lfoRateNow {};
     std::atomic<float>* pClipOn {};
-    std::atomic<float>* pSubOn {}; std::atomic<float>* pSubOct {}; std::array<std::atomic<float>*, 3> pSubH {};
+    std::atomic<float>* pSubOn {}; std::atomic<float>* pSubOct {}; std::array<std::atomic<float>*, 5> pSubH {};
     std::atomic<float>* pLoopMode {}; std::atomic<float>* pLoopStart {}; std::atomic<float>* pLoopEnd {};
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (GranulumProcessor)

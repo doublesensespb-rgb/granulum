@@ -36,7 +36,7 @@ namespace
         ParamID::peakGain, ParamID::peakGain2,
         ParamID::subVol,
         ParamID::osc1Pan, ParamID::osc2Pan, ParamID::osc3Pan, ParamID::spread,
-        ParamID::subH1, ParamID::subH2, ParamID::subH3,
+        ParamID::subH1, ParamID::subH2, ParamID::subH3, ParamID::subH4, ParamID::subH5,
         ParamID::peakQ, ParamID::peakQ2,
         ParamID::subSemi
     };
@@ -593,6 +593,8 @@ AudioProcessorValueTreeState::ParameterLayout GranulumProcessor::createLayout()
     ps.push_back (std::make_unique<P> (ParameterID { ParamID::subH1, 1 }, "Sub Harmonic 1", NormalisableRange<float> (0.0f, 1.0f), 1.0f, pct));
     ps.push_back (std::make_unique<P> (ParameterID { ParamID::subH2, 1 }, "Sub Harmonic 2", NormalisableRange<float> (0.0f, 1.0f), 0.0f, pct));
     ps.push_back (std::make_unique<P> (ParameterID { ParamID::subH3, 1 }, "Sub Harmonic 3", NormalisableRange<float> (0.0f, 1.0f), 0.0f, pct));
+    ps.push_back (std::make_unique<P> (ParameterID { ParamID::subH4, 1 }, "Sub Harmonic 4", NormalisableRange<float> (0.0f, 1.0f), 0.0f, pct));
+    ps.push_back (std::make_unique<P> (ParameterID { ParamID::subH5, 1 }, "Sub Harmonic 5", NormalisableRange<float> (0.0f, 1.0f), 0.0f, pct));
     ps.push_back (std::make_unique<P> (ParameterID { ParamID::output, 1 }, "Output", NormalisableRange<float> (-36.0f, 12.0f, 0.1f), 0.0f,
                                        A().withStringFromValueFunction ([] (float v, int) { return fmt (v, 1, " dB"); })));
 
@@ -671,7 +673,8 @@ GranulumProcessor::GranulumProcessor()
     pClipOn    = apvts.getRawParameterValue (ParamID::clipOn);
     pSubOn     = apvts.getRawParameterValue (ParamID::subOn);
     pSubOct    = apvts.getRawParameterValue (ParamID::subOct);
-    pSubH      = { apvts.getRawParameterValue (ParamID::subH1), apvts.getRawParameterValue (ParamID::subH2), apvts.getRawParameterValue (ParamID::subH3) };
+    pSubH      = { apvts.getRawParameterValue (ParamID::subH1), apvts.getRawParameterValue (ParamID::subH2), apvts.getRawParameterValue (ParamID::subH3),
+                   apvts.getRawParameterValue (ParamID::subH4), apvts.getRawParameterValue (ParamID::subH5) };
     pLoopMode  = apvts.getRawParameterValue (ParamID::loopMode);
     pLoopStart = apvts.getRawParameterValue (ParamID::loopStart);
     pLoopEnd   = apvts.getRawParameterValue (ParamID::loopEnd);
@@ -1005,7 +1008,7 @@ granulum::Params GranulumProcessor::subParams (const float* v) const
     p.chime = 0.0f;
     p.transpose = std::round (pSubOct->load()) * 12.0f + v[mtSubSemi];   // OCT + SEMI (SEMI glides under an LFO)
     // the 3 sticks are layers: their level (incl. LFO) moves at play time
-    for (int k = 0; k < 3; ++k) { p.harmGain[(size_t) k] = jlimit (0.0f, 1.0f, v[mtSubH1 + k]); p.harmGainPrev[(size_t) k] = subGainPrev[(size_t) k]; }
+    for (int k = 0; k < kSubHarms; ++k) { p.harmGain[(size_t) k] = jlimit (0.0f, 1.0f, v[mtSubH1 + k]); p.harmGainPrev[(size_t) k] = subGainPrev[(size_t) k]; }
     return p;
 }
 
@@ -1266,7 +1269,7 @@ void GranulumProcessor::processChunk (int from, int len)
         float* SL = subBuf.getWritePointer (0) + from;
         float* SR = subBuf.getWritePointer (1) + from;
         engineSub.render (SL, SR, len, subParams (v), subSlot.active.get());
-        for (int k = 0; k < 3; ++k) subGainPrev[(size_t) k] = jlimit (0.0f, 1.0f, v[mtSubH1 + k]);
+        for (int k = 0; k < kSubHarms; ++k) subGainPrev[(size_t) k] = jlimit (0.0f, 1.0f, v[mtSubH1 + k]);
         for (int i = 0; i < len; ++i)
         {
             const float gg = lastGSub + (gsSub - lastGSub) * (float) (i + 1) / (float) len;
@@ -1519,13 +1522,14 @@ void GranulumProcessor::timerCallback()
 
     // OSC 4 SUB source: 3 harmonics (rebuilt when the sticks move)
     {
-        const std::array<float, 3> now { pSubH[0]->load(), pSubH[1]->load(), pSubH[2]->load() };
+        std::array<float, kSubHarms> now {};
+        for (int k = 0; k < kSubHarms; ++k) now[(size_t) k] = pSubH[(size_t) k]->load();
         if (now != subShown)
         {
             subShown = now;
             std::array<float, granulum::kNumHarmonics> amps {};
-            amps[0] = now[0]; amps[1] = now[1]; amps[2] = now[2];
-            subSlot.push (std::make_shared<granulum::SampleData> (granulum::renderAdditiveSplit (amps, 0xffffu, 0x7u).first));   // 3 layers: LFO-able
+            for (int k = 0; k < kSubHarms; ++k) amps[(size_t) k] = now[(size_t) k];
+            subSlot.push (std::make_shared<granulum::SampleData> (granulum::renderAdditiveSplit (amps, 0xffffu, 0x1fu).first));   // 5 layers: LFO-able
         }
     }
 

@@ -53,6 +53,9 @@ Amp envelope: ADSR tab (with on/off lamp; off = plain gate) in the modulation st
 - Version naming: 0.9 was delivered; then 0.91, 0.92 ... Deliver files with the version in the name:
   `GRAIN-FORM-0.92-Windows.zip`, `GRAIN-FORM-0.92-macOS.zip`. Bump `VERSION` in CMakeLists.txt (0.92 -> 0.9.2).
 - Always give links (to builds, tools, sources).
+- **After EVERY build, without being asked:** send the versioned zips, the links (builds branch, README-RU.md, AGENTS.md,
+  commit history) and a fresh offline archive `GRAIN-FORM-<version>-offline.zip` (single-branch clone of main with history,
+  JUCE 8.0.10, both builds, the handbook). The owner insists on this so he can continue without the agent.
 - He writes in Russian, often with typos or wrong keyboard layout. Reply in Russian.
 - Design (NEXT STEP, owner still deciding): a 'real hardware' look based on `docs/design/hardware-reference-gemini.png`
   (take ONLY the style, ignore its layout mistakes): worn black metal faceplate, metal frame, screws, chrome knurled knobs
