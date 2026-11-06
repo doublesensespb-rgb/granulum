@@ -1800,7 +1800,7 @@ void GranulumProcessor::getStateInformation (MemoryBlock& destData)
     StringArray ms;
     for (auto& m : mods)
         if (const int t = m.target.load(); t >= 0)
-            ms.add (String (kModTargetIds[t]) + ":" + String (m.lfo.load()) + ":" + String (m.depth.load(), 4));
+            ms.add (String (modTargetId (t)) + ":" + String (m.lfo.load()) + ":" + String (m.depth.load(), 4));   // modTargetId: also "harm1..16" (never index the table with them)
     state.setProperty ("mods", ms.joinIntoString (";"), nullptr);
 
     for (int l = 0; l < kNumLfos; ++l)
