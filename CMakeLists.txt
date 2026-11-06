@@ -1,5 +1,7 @@
 cmake_minimum_required(VERSION 3.22)
-project(Granulum VERSION 0.9.8)
+project(Granulum VERSION 0.9.9)
+# Name shown on the version plate in the plugin (may have an extra step like 0.99.1; the DAW version above stays 3 numbers)
+set(GRAINFORM_LABEL "0.99.1")
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -37,6 +39,7 @@ target_sources(Granulum PRIVATE
 
 target_compile_definitions(Granulum PUBLIC
     GRAINFORM_VERSION="${PROJECT_VERSION}"
+    GRAINFORM_LABEL="${GRAINFORM_LABEL}"
     JUCE_WEB_BROWSER=0
     JUCE_USE_CURL=0
     JUCE_VST3_CAN_REPLACE_VST2=0
@@ -65,6 +68,7 @@ target_sources(Snapshot PRIVATE
     Source/PluginEditor.cpp)
 target_compile_definitions(Snapshot PRIVATE
     GRAINFORM_VERSION="${PROJECT_VERSION}"
+    GRAINFORM_LABEL="${GRAINFORM_LABEL}"
     JUCE_WEB_BROWSER=0
     JUCE_USE_CURL=0
     JUCE_MODAL_LOOPS_PERMITTED=1)

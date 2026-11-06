@@ -343,6 +343,114 @@ int main (int argc, char** argv)
         return 0;
     }
 
+    // design preview: "Snapshot <dir> v0991" -> LFO on OSC 1 / SUB sticks, PEAK with Q, version plate
+    if (argc > 2 && String (argv[2]) == "v0991")
+    {
+        setP (ParamID::osc1On, 1.0f); setP (ParamID::osc1Grain, 1.0f);
+        p.setHarmonics (WavePicker::shape (1));
+        p.setGrainMask (0xffc4u);
+        p.setModulation (kHarmTarget0 + 2, 0, 0.5f);
+        p.setModulation (kHarmTarget0 + 6, 0, 0.6f);
+        p.setModulation (kHarmTarget0 + 4, 1, 0.45f);
+        setP (ParamID::subOn, 1.0f); setP (ParamID::subH2, 0.45f); setP (ParamID::subH3, 0.2f);
+        p.setModulation (GranulumProcessor::modIndexOf (ParamID::subH2), 2, 0.4f);
+        setP (ParamID::filterOn, 1.0f); setP (ParamID::ftype, 4.0f); setP (ParamID::cutoff, 1200.0f); setP (ParamID::peakGain, 24.0f); setP (ParamID::peakQ, 4.0f);
+        p.keyboardState.noteOn (1, 48, 0.9f);
+        ed->harmonicEditor().showHint = false;
+        if (argc > 3 && String (argv[3]) == "vsw")
+        {
+            // horizontal vs vertical GRAIN switches, LFO style B (one LFO per stick)
+            auto& he = ed->harmonicEditor();
+            for (int st : { 11, 16 })
+            {
+                he.rowStyle = st; he.resized(); he.hoverBar = 4;
+                run (p, ed, 25);
+                const auto area = ed->getLocalArea (&he, he.getLocalBounds()).expanded (6, 6);
+                auto img = base->createComponentSnapshot (area, true, 3.0f);
+                PNGImageFormat png;
+                outDir.getChildFile ("sw" + String (st) + ".png").deleteFile();
+                FileOutputStream os (outDir.getChildFile ("sw" + String (st) + ".png"));
+                png.writeImageToStream (img, os);
+            }
+            he.hoverBar = -1;
+            run (p, ed, 20);
+            save (*base, outDir, "full-vertical.png");
+            return 0;
+        }
+        if (argc > 3 && String (argv[3]) == "multi")
+        {
+            // B with several LFOs: stick 3 gets LFO 1 + 2, stick 7 gets LFO 1 + 2 + 3
+            setP (ParamID::lfo (1, "On").toRawUTF8(), 1.0f); setP (ParamID::lfo (2, "On").toRawUTF8(), 1.0f);
+            p.setModulation (kHarmTarget0 + 2, 1, 0.3f);
+            p.setModulation (kHarmTarget0 + 6, 1, 0.35f); p.setModulation (kHarmTarget0 + 6, 2, -0.15f);
+            HarmonicEditor::lfoStickStyle = 1;
+            auto& he = ed->harmonicEditor();
+            const auto area = ed->getLocalArea (&he, he.getLocalBounds()).expanded (6, 6);
+            run (p, ed, 25);
+            auto img = base->createComponentSnapshot (area, true, 3.0f);
+            PNGImageFormat png;
+            outDir.getChildFile ("lfoB-multi.png").deleteFile();
+            FileOutputStream os (outDir.getChildFile ("lfoB-multi.png"));
+            png.writeImageToStream (img, os);
+            return 0;
+        }
+        if (argc > 3 && String (argv[3]) == "styles")
+        {
+            auto& he = ed->harmonicEditor();
+            const auto area = ed->getLocalArea (&he, he.getLocalBounds()).expanded (6, 6);
+            for (int st = 0; st < 4; ++st)
+            {
+                HarmonicEditor::lfoStickStyle = st;
+                run (p, ed, 25);
+                auto img = base->createComponentSnapshot (area, true, 3.0f);
+                PNGImageFormat png;
+                outDir.getChildFile ("lfostyle" + String (st) + ".png").deleteFile();
+                FileOutputStream os (outDir.getChildFile ("lfostyle" + String (st) + ".png"));
+                png.writeImageToStream (img, os);
+            }
+            return 0;
+        }
+        run (p, ed, 60);
+        save (*base, outDir, "v0991.png");
+        return 0;
+    }
+
+    // design preview: "Snapshot <dir> rows" -> GRAIN row variants A..F, each: first open (hint) and in use (hover)
+    if (argc > 2 && String (argv[2]) == "rows")
+    {
+        setP (ParamID::osc1On, 1.0f); setP (ParamID::osc1Grain, 1.0f);
+        auto& he = ed->harmonicEditor();
+        const auto area = ed->getLocalArea (&he, he.getLocalBounds()).expanded (8, 8);
+        auto grab = [&] (const String& name)
+        {
+            for (int f = 0; f < 8; ++f) MessageManager::getInstance()->runDispatchLoopUntil (30);
+            he.repaint();
+            MessageManager::getInstance()->runDispatchLoopUntil (40);
+            auto img = base->createComponentSnapshot (area, true, 2.0f);
+            PNGImageFormat png;
+            outDir.getChildFile (name).deleteFile();
+            FileOutputStream os (outDir.getChildFile (name));
+            png.writeImageToStream (img, os);
+        };
+        for (int st = 10; st <= 15; ++st)
+        {
+            he.rowStyle = st;
+            for (int hs = 0; hs < 2; ++hs)
+            {
+                he.hintStyle = hs;
+                p.setHarmonics (WavePicker::shape (0));
+                p.setGrainMask (0x0000u);
+                he.showHint = true; he.hoverBar = -1; he.introT = 5.0f;
+                grab ("row" + String (st) + "-init-hint" + String (hs) + ".png");
+            }
+            p.setHarmonics (WavePicker::shape (1));
+            p.setGrainMask (0xffc4u);
+            he.showHint = false; he.hoverBar = 4;
+            grab ("row" + String (st) + "-use.png");
+        }
+        return 0;
+    }
+
     // design preview: "Snapshot <dir> select" -> intro wave over the dots, first-run hint, hover look
     if (argc > 2 && String (argv[2]) == "select")
     {

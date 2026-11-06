@@ -273,8 +273,8 @@ public:
 };
 
 // OSC 4 SUB: three harmonic sticks (fundamental, octave, octave + fifth), same look as the OSC 1 strings
-class SubBars final : public juce::Component, public juce::SettableTooltipClient, private juce::AudioProcessorValueTreeState::Listener,
-                      private juce::AsyncUpdater
+class SubBars final : public juce::Component, public juce::SettableTooltipClient, public juce::DragAndDropTarget,
+                      private juce::AudioProcessorValueTreeState::Listener, private juce::AsyncUpdater
 {
 public:
     explicit SubBars (GranulumProcessor&);
@@ -283,7 +283,21 @@ public:
     void mouseDown (const juce::MouseEvent&) override;
     void mouseDrag (const juce::MouseEvent&) override;
     void mouseUp (const juce::MouseEvent&) override;
+    void mouseMove (const juce::MouseEvent&) override;
+    void mouseWheelMove (const juce::MouseEvent&, const juce::MouseWheelDetails&) override;
+    void frame() { if (anyMod()) repaint(); }   // editor's 30 fps tick: sticks with an LFO move live
+    // LFO on a sub stick (same as on OSC 1 sticks)
+    bool isInterestedInDragSource (const SourceDetails& s) override { return s.description.toString().startsWith ("lfo:"); }
+    void itemDragMove (const SourceDetails& s) override { dropCol = colAt ((float) s.localPosition.x); repaint(); }
+    void itemDragExit (const SourceDetails&) override { dropCol = -1; repaint(); }
+    void itemDropped (const SourceDetails&) override;
 private:
+    int colAt (float x) const { const auto pl = plot(); return juce::jlimit (0, 2, (int) ((x - pl.getX()) / (pl.getWidth() / 3.0f))); }
+    bool anyMod() const;
+    juce::Rectangle<float> chipRect (int col, int slot) const;
+    std::pair<int, int> chipAt (juce::Point<float>) const;   // {col, lfo} or {-1,-1}
+    int dropCol = -1;
+    std::pair<int, int> chipDrag { -1, -1 }; float chipStartDepth = 0.0f, chipStartY = 0.0f;
     void parameterChanged (const juce::String&, float) override { triggerAsyncUpdate(); }
     void handleAsyncUpdate() override { repaint(); }
     juce::RangedAudioParameter* param (int i) const;
@@ -294,9 +308,14 @@ private:
 };
 
 // Additive bars: draw the 16 harmonic amplitudes; the gold GRAIN row below picks which harmonics are granulated
-class HarmonicEditor final : public juce::Component, public juce::SettableTooltipClient, private juce::Timer
+class HarmonicEditor final : public juce::Component, public juce::SettableTooltipClient, public juce::DragAndDropTarget, private juce::Timer
 {
 public:
+    // LFO on a stick: drop an LFO tab onto a stick; its chip at the top: drag up/down = depth, right-click = remove
+    bool isInterestedInDragSource (const SourceDetails&) override;
+    void itemDragMove (const SourceDetails&) override;
+    void itemDragExit (const SourceDetails&) override;
+    void itemDropped (const SourceDetails&) override;
     void frame() { timerCallback(); }   // driven by the editor's single 30 fps tick (one repaint pass per frame)
     explicit HarmonicEditor (GranulumProcessor&);
     void paint (juce::Graphics&) override;
@@ -307,6 +326,14 @@ public:
     void mouseExit (const juce::MouseEvent&) override;
 
     int hoverBar = -1;          // public so the snapshot tool can show the hover look
+    int lfoDropBar = -1;        // stick under a dragged LFO
+    int idleTicks = 0;
+    struct ChipHit { int harm = -1, lfo = -1; };
+    ChipHit chipAt (juce::Point<float>) const;
+    float lfoLineX (int harm, int slot) const;
+    void mouseWheelMove (const juce::MouseEvent&, const juce::MouseWheelDetails&) override;
+    static inline int lfoStickStyle = 1;   // owner's choice B (ghost of the stick). 0 line left, 2 dotted rail + bead, 3 rail + dot
+    ChipHit chipDrag; float chipStartDepth = 0.0f, chipStartY = 0.0f;
     bool showHint = true;       // first-run hint over the dots
     float introT = 0.0f;        // time since open, drives the one-off light wave
 
@@ -330,7 +357,8 @@ private:
     std::vector<Crystal> crystals;
     juce::Random rng;
 public:
-    int rowStyle = 2;
+    int rowStyle = 11;   // 0.99.1: horizontal switches (owner's choice): copper = into the grains, grey = clean; drag across to set several (16 = vertical, tried)
+    int hintStyle = 0;   // first-run call-out: 0 dark with copper frame, 1 solid copper
     static inline int barStyle = 5;   // 5 strings, 0 sand wave, 1 frosted glass, 2 capsule + filament, 3 line + cap, 4 fade   // 0 = pearl beads, 1 = glowing line (design preview)
 };
 
@@ -348,6 +376,7 @@ private:
     float level[2] {}, hold[2] {};
     int holdAge[2] {};
     bool clipShown = false;
+    float lastSig = -1.0f;   // last drawn state (repaint only on change)
 };
 
 // Chord / interval picker that pops out of the OSC 1 header
@@ -405,6 +434,7 @@ private:
     juce::dsp::FFT fft { 11 };
     std::array<float, 4096> fftData {};
     std::array<float, 1024> specDb {};
+    int silentFrames = 0;   // idle detection: no FFT / repaint while nothing sounds
     float dragCut = 0, dragRes = 0;
     juce::Point<float> dragStart;
     // the curve follows CUTOFF / RESO / GAIN / TYPE at once (not only on the next 30 fps tick)
@@ -693,7 +723,7 @@ public:
     static inline int soundsStyle = 4;   // 4 = same as a lit GRAIN button (owner's choice); 1-3 earlier variants
 private:
     juce::TextButton samplePrev { juce::String::fromUTF8 ("\xe2\x97\x80") }, sampleNext { juce::String::fromUTF8 ("\xe2\x96\xb6") };
-    Lamp osc1Lamp { "OSC 1", "ADDITIVE" }, osc2Lamp { "OSC 2", "SAMPLE" }, osc3Lamp { "OSC 3", "NOISE" }, osc4Lamp { "OSC 4", "SUB" };
+    Lamp osc1Lamp { "OSC 1", "ADDITIVE" }, osc2Lamp { "OSC 3", "SAMPLE" }, osc3Lamp { "OSC 4", "NOISE" }, osc4Lamp { "OSC 2", "SUB" };   // shown order (0.99): ADDITIVE, SUB, SAMPLE, NOISE
     SubBars subBars { proc };
     std::unique_ptr<ButtonAtt> osc4LampA;
     std::unique_ptr<ButtonAtt> osc1LampA, osc2LampA, osc3LampA;
@@ -711,6 +741,10 @@ private:
     juce::TooltipWindow tooltips { this, 600 };
 
     std::vector<std::unique_ptr<Knob>> peakKnobs;   // GAIN for the PEAK filter type, shown instead of RESO
+    std::vector<std::unique_ptr<Knob>> peakQKnobs;  // Q (width) for the PEAK filter type
+    juce::Rectangle<int> filterRow1;
+    bool peakLayout[2] { false, false };
+    void layoutFilterKnobs();
     std::vector<std::unique_ptr<Knob>> subKnobs;   // OSC 4 SUB: VOL, OCT
     std::vector<std::unique_ptr<Knob>> heroKnobs, smallKnobs, osc1Knobs, osc2Knobs, osc3Knobs, filterKnobs, filter2Knobs,
                                        distKnobs, delayKnobs, revKnobs, globalKnobs;
