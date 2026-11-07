@@ -2434,12 +2434,15 @@ void HarmonicEditor::paint (Graphics& g)
             else if (rowStyle == 11)
             {
                 // B: little switches (copper = into grains)
-                auto tr = cell.withSizeKeepingCentre (jmin (cell.getWidth() - 3.0f, 13.0f), 8.0f);
-                g.setColour (on ? cu.withAlpha (alpha) : Palette::button.withAlpha (alpha));
+                // a real toggle: a track a little wider than tall, the knob sits left (off) or right (on, copper)
+                auto tr = cell.withSizeKeepingCentre (jlimit (12.0f, 17.0f, cell.getWidth() - 4.0f), 9.0f);
+                g.setColour (on ? cu.withAlpha (alpha) : Palette::button.brighter (0.15f).withAlpha (alpha));
                 g.fillRoundedRectangle (tr, 4.0f);
+                g.setColour ((on ? cu.darker (0.4f) : Palette::edge.withMultipliedAlpha (2.5f)).withAlpha (alpha));
+                g.drawRoundedRectangle (tr.reduced (0.5f), 4.0f, 1.0f);
                 if (hotK) { g.setColour (Colours::white.withAlpha (0.5f * alpha)); g.drawRoundedRectangle (tr.expanded (1.0f), 5.0f, 1.0f); }
-                const float kr = 3.2f;
-                const auto kc = Point<float> (on ? tr.getRight() - 4.0f : tr.getX() + 4.0f, tr.getCentreY());
+                const float kr = 3.0f;
+                const auto kc = Point<float> (on ? tr.getRight() - 4.5f : tr.getX() + 4.5f, tr.getCentreY());
                 g.setColour ((on ? Colours::white : Palette::textDim).withAlpha (alpha));
                 g.fillEllipse (Rectangle<float> (kr * 2.0f, kr * 2.0f).withCentre (kc));
             }
@@ -5464,7 +5467,7 @@ void GranulumEditor::resized()
     inside.removeFromTop (S (28));
     ledArea = {};
 
-    auto oscCol = inside.removeFromRight (S (500));
+    auto oscCol = inside.removeFromRight (S (560));   // 0.99.3: +60 from the grain field, so the OSC 1 sticks and GRAIN switches have room
     oscCol.setTop (screenFrame.getY() + S (8));
     inside.removeFromRight (S (12));
     field.setBounds (inside);
@@ -5492,8 +5495,8 @@ void GranulumEditor::resized()
         wavePicker.setBounds (h1.removeFromRight (S (92)).reduced (0, S (1)));
         osc1Lamp.setBounds (h1);
         a1.removeFromTop (S (4));
-        auto k1 = a1.removeFromRight (S (236));
-        a1.removeFromRight (S (6));
+        auto k1 = a1.removeFromRight (S (200));   // 5 knobs (TUNE added) in about the old width, so the sticks and GRAIN switches keep their size
+        a1.removeFromRight (S (4));
         harmonics.setBounds (a1);
         const int kw1 = k1.getWidth() / (int) osc1Knobs.size();
         for (auto& k : osc1Knobs) k->setBounds (k1.removeFromLeft (kw1).withSizeKeepingCentre (kw1, jmin (k1.getHeight(), S (78))));
