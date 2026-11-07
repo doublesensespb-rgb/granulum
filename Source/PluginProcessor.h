@@ -311,6 +311,7 @@ public:
     bool loadPreset (const juce::File&);
     juce::String getPresetName() const;
     juce::String getPresetFolderName() const { return presetSub; }   // "" = root
+    bool uiFold[3] {};        // 0.99.3: OSC 2 SUB / OSC 3 SAMPLE / OSC 4 NOISE folded into a strip (saved with the state)
     void presetFolderRenamed (const juce::String& from, const juce::String& to) { if (presetSub == from) presetSub = to; }
     juce::File currentPresetFile() const;
 

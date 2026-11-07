@@ -647,6 +647,14 @@ void Knob::resized()
     const int titleH = size == Size::Hero ? 20 : size == Size::Small ? 13 : 16;
     const int boxH   = size == Size::Hero ? 20 : size == Size::Small ? 15 : 18;
     auto r = getLocalBounds();
+    if (inlineMode)
+    {
+        r.removeFromLeft (26);
+        slider.setTextBoxStyle (Slider::TextBoxRight, false, 44, 15);
+        slider.setBounds (r.withWidth (jmin (r.getWidth(), r.getHeight() + 50)));
+        refreshMods();
+        return;
+    }
     r.removeFromTop (titleH);
     if (compact) slider.setTextBoxStyle (Slider::NoTextBox, false, 0, 0);
     else         slider.setTextBoxStyle (Slider::TextBoxBelow, false, jmin (getWidth() - 2, 90), boxH);
@@ -659,7 +667,33 @@ void Knob::paint (Graphics& g)
     const int titleH = size == Size::Hero ? 20 : size == Size::Small ? 13 : 16;
     g.setColour (size == Size::Hero ? Palette::text : Palette::label);
     g.setFont (uiFont (size == Size::Hero ? 13.5f : size == Size::Small ? 10.0f : 11.0f, size == Size::Hero, 0.08f));
+    if (inlineMode) { g.drawText (title.toUpperCase(), getLocalBounds().removeFromLeft (26), Justification::centredLeft); return; }
     g.drawText (title.toUpperCase(), getLocalBounds().removeFromTop (titleH), Justification::centred);
+}
+
+void FoldButton::paint (Graphics& g)
+{
+    auto r = getLocalBounds().toFloat().reduced (1.0f);
+    const bool hot = isMouseOver();
+    if (folded)
+    {
+        g.setColour (hot ? Palette::accent.brighter (0.15f) : Palette::accent);
+        g.fillRoundedRectangle (r, 5.0f);
+    }
+    else
+    {
+        g.setColour (Palette::accent.withAlpha (hot ? 0.22f : 0.08f));
+        g.fillRoundedRectangle (r, 5.0f);
+        g.setColour (Palette::accent.withAlpha (hot ? 1.0f : 0.7f));
+        g.drawRoundedRectangle (r.reduced (0.5f), 5.0f, 1.0f);
+    }
+    const auto c = r.getCentre();
+    const float w = r.getWidth() * 0.2f, h = r.getHeight() * 0.11f;
+    Path p;
+    if (folded) { p.startNewSubPath (c.x - w, c.y - h); p.lineTo (c.x, c.y + h); p.lineTo (c.x + w, c.y - h); }
+    else        { p.startNewSubPath (c.x - w, c.y + h); p.lineTo (c.x, c.y - h); p.lineTo (c.x + w, c.y + h); }
+    g.setColour (folded ? Colours::white : Palette::accent.brighter (0.2f));
+    g.strokePath (p, PathStrokeType (1.8f, PathStrokeType::curved, PathStrokeType::rounded));
 }
 
 void Knob::paintOverChildren (Graphics& g)
@@ -3955,51 +3989,26 @@ void PresetBar::step (int dir)
 
 void PresetBar::showMenu()
 {
-    const auto list = proc.listPresets();
-    const auto now = proc.currentPresetFile();
-    PopupMenu m;
-    m.addItem (1, "INIT");
-    m.addSeparator();
-    const auto root = GranulumProcessor::presetFolder();
-    int id = 100;
-    std::map<String, PopupMenu> subs;
-    StringArray order;
-    for (auto& f : list)
-    {
-        const bool inRoot = f.getParentDirectory() == root;
-        if (inRoot) m.addItem (id, f.getFileNameWithoutExtension(), true, f == now);
-        else
-        {
-            const auto dn = f.getParentDirectory().getFileName();
-            if (! order.contains (dn)) order.add (dn);
-            subs[dn].addItem (id, f.getFileNameWithoutExtension(), true, f == now);
-        }
-        ++id;
-    }
-    // folders (also the empty ones), like Serum: each one opens to the side
-    for (auto& d : GranulumProcessor::listPresetFolders())
-    {
-        const auto dn = d.getFileName();
-        auto& sm = subs[dn];
-        if (sm.getNumItems() == 0) sm.addItem (2, "(empty)", false);
-        m.addSubMenu (dn, sm, true, nullptr, dn == proc.getPresetFolderName());
-    }
-    if (list.isEmpty()) m.addItem (2, "(no saved presets yet)", false);
-    m.addSeparator();
-    m.addItem (3, "Save as...");
-    m.addItem (4, "Open presets folder");
+    // 0.99.3: the preset list is a window in the same style as SAVE (folders left, presets right)
+    auto* top = findParentComponentOfClass<AudioProcessorEditor>();
+    if (top == nullptr) return;
+    saveWindow = std::make_unique<PresetSaveWindow> (proc, true);
     Component::SafePointer<PresetBar> safe (this);
-    m.showMenuAsync (PopupMenu::Options().withTargetComponent (this).withMinimumWidth (getWidth()), [safe, list] (int res)
+    saveWindow->onClose = [safe]
     {
-        if (safe == nullptr || res == 0) return;
-        auto& b = *safe;
-        if (res == 1) b.proc.resetToInit();
-        else if (res == 3) { b.askSave(); return; }
-        else if (res == 4) { GranulumProcessor::presetFolder().startAsProcess(); return; }
-        else if (res >= 100 && res - 100 < list.size()) b.proc.loadPreset (list[res - 100]);
-        if (b.onLoaded) b.onLoaded();
-        b.repaint();
-    });
+        if (safe == nullptr) return;
+        MessageManager::callAsync ([safe] { if (safe != nullptr) { safe->saveWindow.reset(); safe->repaint(); } });
+    };
+    saveWindow->onLoaded = [safe] { if (safe != nullptr) { if (safe->onLoaded) safe->onLoaded(); safe->repaint(); } };
+    saveWindow->onSaved = [safe]
+    {
+        // SAVE AS... from the list: swap to the SAVE window
+        if (safe == nullptr) return;
+        MessageManager::callAsync ([safe] { if (safe != nullptr) { safe->saveWindow.reset(); safe->askSave(); } });
+    };
+    top->addAndMakeVisible (*saveWindow);
+    saveWindow->setBounds (top->getLocalBounds());
+    saveWindow->open();
 }
 
 void PresetBar::askSave()
@@ -4077,7 +4086,7 @@ void PresetSaveWindow::Rows::mouseDoubleClick (const MouseEvent& e)
     if (i >= 0 && i < items.size() && onDoubleClick) onDoubleClick (i);
 }
 
-PresetSaveWindow::PresetSaveWindow (GranulumProcessor& p) : proc (p)
+PresetSaveWindow::PresetSaveWindow (GranulumProcessor& p, bool browseMode) : browse (browseMode), proc (p)
 {
     setWantsKeyboardFocus (true);
     folderRows.folders = true;
@@ -4090,6 +4099,17 @@ PresetSaveWindow::PresetSaveWindow (GranulumProcessor& p) : proc (p)
     folderView.setViewedComponent (&folderRows, false);
     presetView.setViewedComponent (&presetRows, false);
     for (auto* c : { (Component*) &nameEdit, (Component*) &newFolder, (Component*) &saveBtn, (Component*) &cancelBtn }) addAndMakeVisible (*c);
+    if (browse)
+    {
+        nameEdit.setVisible (false);
+        saveBtn.setVisible (false);
+        cancelBtn.setButtonText ("CLOSE");
+        for (auto* b : { &initBtn, &openDirBtn, &saveAsBtn }) addAndMakeVisible (*b);
+        initBtn.onClick = [this] { proc.resetToInit(); presetRows.selected = -1; presetRows.repaint(); if (onLoaded) onLoaded(); };
+        openDirBtn.onClick = [this] { folderFile (folderRows.selected).startAsProcess(); };
+        saveAsBtn.onClick = [this] { if (onSaved) onSaved(); };
+        initBtn.setTooltip ("Start from a clean sound");
+    }
     addChildComponent (folderEdit);
     for (auto* te : { &nameEdit, &folderEdit })
     {
@@ -4130,7 +4150,13 @@ PresetSaveWindow::PresetSaveWindow (GranulumProcessor& p) : proc (p)
             if (res == 3) safe->folderFile (i).startAsProcess();
         });
     };
-    presetRows.onClick = [this] (int i) { presetRows.selected = i; presetRows.repaint(); nameEdit.setText (presetRows.items[i], true); };
+    presetRows.onClick = [this] (int i)
+    {
+        presetRows.selected = i; presetRows.repaint();
+        if (browse) loadRow (i);        // one click = load and hear it, the window stays open
+        else nameEdit.setText (presetRows.items[i], true);
+    };
+    presetRows.onDoubleClick = [this] (int i) { if (browse) { loadRow (i); if (onClose) onClose(); } };
     presetRows.onRightClick = [this] (int i)
     {
         PopupMenu m;
@@ -4147,6 +4173,12 @@ PresetSaveWindow::PresetSaveWindow (GranulumProcessor& p) : proc (p)
     };
 }
 
+void PresetSaveWindow::loadRow (int i)
+{
+    const auto f = folderFile (folderRows.selected).getChildFile (presetRows.items[i] + ".gpreset");
+    if (f.existsAsFile() && proc.loadPreset (f) && onLoaded) onLoaded();
+}
+
 void PresetSaveWindow::open()
 {
     const auto cur = proc.getPresetFolderName();
@@ -4154,6 +4186,13 @@ void PresetSaveWindow::open()
     nameEdit.setText (proc.getPresetName() == "INIT" ? String ("My Sound") : proc.getPresetName(), false);
     updateSaveLabel();
     resized();
+    if (browse)
+    {
+        presetRows.selected = presetRows.items.indexOf (proc.getPresetName());
+        presetRows.repaint();
+        grabKeyboardFocus();
+        return;
+    }
     nameEdit.grabKeyboardFocus();
     nameEdit.selectAll();
 }
@@ -4182,7 +4221,8 @@ void PresetSaveWindow::refreshPresets()
     StringArray names;
     for (auto& f : GranulumProcessor::presetsIn (folderFile (folderRows.selected))) names.add (f.getFileNameWithoutExtension());
     presetRows.setItems (names);
-    presetRows.selected = names.indexOf (nameEdit.getText().trim());
+    presetRows.selected = names.indexOf (browse ? proc.getPresetName() : nameEdit.getText().trim());
+    if (browse && folderFile (folderRows.selected) != proc.currentPresetFile().getParentDirectory()) presetRows.selected = -1;
     presetView.setViewPosition (0, 0);
 }
 
@@ -4194,7 +4234,7 @@ void PresetSaveWindow::updateSaveLabel()
     saveBtn.setColour (TextButton::textColourOffId, exists ? Palette::accent.brighter (0.3f) : Palette::text);
     saveBtn.setTooltip (exists ? "A preset with this name is already in this folder: it will be replaced" : "Save into the selected folder");
     saveBtn.setEnabled (name.isNotEmpty());
-    presetRows.selected = presetRows.items.indexOf (name);
+    if (! browse) presetRows.selected = presetRows.items.indexOf (name);
     presetRows.repaint();
     repaint();
 }
@@ -4266,6 +4306,17 @@ void PresetSaveWindow::resized()
     r.removeFromTop (18);
     presetView.setBounds (r);
     presetRows.setSize (r.getWidth() - (presetRows.getHeight() > r.getHeight() ? 8 : 0), presetRows.getHeight());
+    if (browse)
+    {
+        cancelBtn.setBounds (bottom.removeFromRight (86));
+        bottom.removeFromRight (8);
+        saveAsBtn.setBounds (bottom.removeFromRight (96));
+        bottom.removeFromRight (8);
+        openDirBtn.setBounds (bottom.removeFromLeft (110));
+        bottom.removeFromLeft (8);
+        initBtn.setBounds (bottom.removeFromLeft (70));
+        return;
+    }
     // bottom: name, CANCEL, SAVE
     saveBtn.setBounds (bottom.removeFromRight (96));
     bottom.removeFromRight (8);
@@ -4288,7 +4339,13 @@ void PresetSaveWindow::paint (Graphics& g)
     auto r = panel().reduced (18, 16).toFloat();
     g.setColour (Palette::text);
     g.setFont (uiFont (15.0f, true, 0.12f));
-    g.drawText ("SAVE PRESET", r.removeFromTop (30.0f), Justification::centredLeft, false);
+    g.drawText (browse ? "PRESETS" : "SAVE PRESET", r.removeFromTop (30.0f), Justification::centredLeft, false);
+    if (browse)
+    {
+        g.setColour (Palette::textDim);
+        g.setFont (uiFont (9.5f, false, 0.04f));
+        g.drawText ("click = listen   double-click = load and close", panel().reduced (18, 16).toFloat().removeFromTop (30.0f), Justification::centredRight, false);
+    }
     g.setColour (Palette::textDim);
     g.setFont (uiFont (9.5f, true, 0.12f));
     const auto lv = folderView.getBounds().toFloat(), pv = presetView.getBounds().toFloat();
@@ -4497,6 +4554,11 @@ GranulumEditor::GranulumEditor (GranulumProcessor& p)
     osc3LampA   = std::make_unique<ButtonAtt> (s, ParamID::osc3On,   osc3Lamp);
     osc4LampA   = std::make_unique<ButtonAtt> (s, ParamID::subOn,    osc4Lamp);
     addAndMakeVisible (osc4Lamp);
+    for (int i = 0; i < 3; ++i)
+    {
+        addAndMakeVisible (foldBtn[i]);
+        foldBtn[i].onClick = [this, i] { setFold (i, ! proc.uiFold[i]); };
+    }
     addAndMakeVisible (subBars);
     osc4Lamp.setTooltip ("OSC 2 SUB: a clean low layer, never granulated. Filters and effects only where their digit 2 is lit.");
 
@@ -4902,8 +4964,18 @@ void GranulumEditor::openFile (const File& f)
     repaint (dropZone);
 }
 
+void GranulumEditor::setFold (int i, bool f)
+{
+    proc.uiFold[i] = f;
+    resized();
+    repaint();
+}
+
 void GranulumEditor::timerCallback()
 {
+    // a preset / project can bring its own folded oscillators
+    if (foldSig != (int) proc.uiFold[0] + 2 * (int) proc.uiFold[1] + 4 * (int) proc.uiFold[2]) { resized(); repaint(); }
+
    #if JUCE_WINDOWS
     // JUCE 8 draws with Direct2D by default on Windows; with several animated plugin windows that made the whole
     // host stutter. The classic software renderer is light and proven in every host.
@@ -5173,6 +5245,29 @@ void GranulumEditor::paint (Graphics& g)
         if (Palette::theme == 8) { g.setColour (Palette::edge); g.drawRoundedRectangle (a.toFloat().reduced (0.5f), 10.0f, 1.0f); continue; }
         g.setColour (Colours::black.withAlpha (Palette::theme == 5 || Palette::theme == 7 ? 0.045f : 0.14f));
         g.fillRoundedRectangle (a.toFloat(), 10.0f);
+    }
+
+    // 0.99.3: folded OSC 2 / 3 / 4: a slim strip in a copper dashed frame, with the sound's name
+    for (int i = 0; i < 3; ++i)
+    {
+        if (! proc.uiFold[i]) continue;
+        const auto a = (i == 0 ? osc4Area : i == 1 ? osc2Area : osc3Area).toFloat();
+        Path border; border.addRoundedRectangle (a.reduced (0.75f), 9.0f);
+        Path dashed;
+        const float dl[] = { 4.0f, 3.0f };
+        PathStrokeType (1.1f).createDashedStroke (dashed, border, dl, 2);
+        g.setColour (Palette::accent.withAlpha (0.8f));
+        g.fillPath (dashed);
+        if (foldText[i].isEmpty() || i == 0) continue;   // SUB shows no picture when folded
+        String name;
+        if (i == 1) name = proc.hasSample() ? File::createFileWithoutCheckingPath (proc.getSampleName()).getFileNameWithoutExtension().toUpperCase() : String ("NO SAMPLE");
+        else        name = GranulumProcessor::noiseNames()[(int) proc.apvts.getRawParameterValue (ParamID::osc3Type)->load()].toUpperCase();
+        auto t = foldText[i].toFloat();
+        g.setColour (Palette::screen.withAlpha (0.9f));
+        g.fillRoundedRectangle (t, 4.0f);
+        g.setColour (Palette::text.withAlpha (0.85f));
+        g.setFont (uiFont (10.5f * sc, true, 0.14f));
+        g.drawText (name, t.reduced (8.0f * sc, 0.0f), Justification::centredLeft, true);
     }
 
 
@@ -5474,15 +5569,15 @@ void GranulumEditor::resized()
     loopBar.setBounds (screenFrame.getX() + S (150), screenFrame.getY() + S (9), inside.getRight() - screenFrame.getX() - S (150), S (22));
 
     {
-        const int rowH = S (52);
+        const int rowH = S (52), stripH = S (34), rowGap = S (6);
         // top to bottom: OSC 1 ADDITIVE, OSC 2 SUB, OSC 3 SAMPLE, OSC 4 NOISE (internal names stay osc2 = sample, osc3 = noise, osc4Area = sub)
-        osc3Area = oscCol.removeFromBottom (rowH);
-        oscCol.removeFromBottom (S (6));
-        osc2Area = oscCol.removeFromBottom (rowH);
-        oscCol.removeFromBottom (S (6));
-        osc4Area = oscCol.removeFromBottom (rowH);
-        oscCol.removeFromBottom (S (6));
-        osc1Area = oscCol;
+        // 0.99.3: OSC 2-4 can fold into a slim strip; OSC 1 keeps its size, the freed space stays empty under the strips
+        osc1Area = oscCol.removeFromTop (oscCol.getHeight() - 3 * rowH - 3 * rowGap);
+        auto nextRow = [&] (int i) { oscCol.removeFromTop (rowGap); return oscCol.removeFromTop (proc.uiFold[i] ? stripH : rowH); };
+        osc4Area = nextRow (0);
+        osc2Area = nextRow (1);
+        osc3Area = nextRow (2);
+        foldSig = (int) proc.uiFold[0] + 2 * (int) proc.uiFold[1] + 4 * (int) proc.uiFold[2];
 
         auto a1 = osc1Area.reduced (S (8), S (5));
         auto h1 = a1.removeFromTop (S (26));
@@ -5501,41 +5596,93 @@ void GranulumEditor::resized()
         const int kw1 = k1.getWidth() / (int) osc1Knobs.size();
         for (auto& k : osc1Knobs) k->setBounds (k1.removeFromLeft (kw1).withSizeKeepingCentre (kw1, jmin (k1.getHeight(), S (78))));
 
-        // OSC 2: one row  [lamp] [drop zone] [vol oct semi] [GRAIN/LOAD]
-        auto a2 = osc2Area.reduced (S (8), S (4));
-        osc2Lamp.setBounds (a2.removeFromLeft (S (108)));
-        auto btn2 = a2.removeFromRight (S (62));
-        loadButton.setBounds (btn2.removeFromBottom (btn2.getHeight() / 2).reduced (0, S (1)));   // SOUNDS menu
-        osc2Grain.setBounds (btn2.reduced (0, S (1)));
-        a2.removeFromRight (S (4));
-        for (int i = (int) osc2Knobs.size() - 1; i >= 0; --i)
-            osc2Knobs[(size_t) i]->setBounds (a2.removeFromRight (S (35)));
-        a2.removeFromRight (S (6));
+        // fold buttons sit at the right end of every OSC 2-4 row (open or folded)
+        auto takeFold = [&] (int i, Rectangle<int>& a)
         {
+            foldBtn[i].folded = proc.uiFold[i];
+            foldBtn[i].setTooltip (proc.uiFold[i] ? "Open this oscillator" : "Fold this oscillator into a strip");
+            foldBtn[i].setBounds (a.removeFromRight (S (26)).withSizeKeepingCentre (S (24), S (22)));
+            foldBtn[i].repaint();
+            a.removeFromRight (S (6));
+        };
+        // a folded strip: [lamp] [sound name] [VOL o 70 %] [v]
+        auto foldRow = [&] (Rectangle<int> area, int i, Component& lamp, Knob& vol, std::initializer_list<Component*> hide)
+        {
+            auto a = area.reduced (S (8), S (3));
+            takeFold (i, a);
+            lamp.setBounds (a.removeFromLeft (S (108)));
+            vol.setInline (true);
+            vol.setBounds (a.removeFromRight (S (104)));
+            a.removeFromRight (S (8));
+            foldText[i] = a.withSizeKeepingCentre (a.getWidth(), S (20));
+            for (auto* h : hide) h->setVisible (false);
+        };
+        auto showAll = [] (std::initializer_list<Component*> cs) { for (auto* c : cs) c->setVisible (true); };
+
+        // OSC 3 SAMPLE: [lamp] [drop zone] [vol oct semi tune pan] [GRAIN/SOUNDS]
+        if (proc.uiFold[1])
+        {
+            foldRow (osc2Area, 1, osc2Lamp, *osc2Knobs[0], { osc2Knobs[1].get(), osc2Knobs[2].get(), osc2Knobs[3].get(), osc2Knobs[4].get(),
+                                                             &loadButton, &osc2Grain, &samplePrev, &sampleNext });
+            dropZone = {};
+        }
+        else
+        {
+            showAll ({ osc2Knobs[1].get(), osc2Knobs[2].get(), osc2Knobs[3].get(), osc2Knobs[4].get(), &loadButton, &osc2Grain, &samplePrev, &sampleNext });
+            osc2Knobs[0]->setInline (false);
+            foldText[1] = {};
+            auto a2 = osc2Area.reduced (S (8), S (4));
+            takeFold (1, a2);
+            osc2Lamp.setBounds (a2.removeFromLeft (S (108)));
+            auto btn2 = a2.removeFromRight (S (62));
+            loadButton.setBounds (btn2.removeFromBottom (btn2.getHeight() / 2).reduced (0, S (1)));   // SOUNDS menu
+            osc2Grain.setBounds (btn2.reduced (0, S (1)));
+            a2.removeFromRight (S (4));
+            for (int i = (int) osc2Knobs.size() - 1; i >= 0; --i)
+                osc2Knobs[(size_t) i]->setBounds (a2.removeFromRight (S (35)));
+            a2.removeFromRight (S (6));
             auto z = a2.withSizeKeepingCentre (a2.getWidth(), S (40));
             samplePrev.setBounds (z.removeFromLeft (S (20)).withSizeKeepingCentre (S (20), S (26)));
             sampleNext.setBounds (z.removeFromRight (S (20)).withSizeKeepingCentre (S (20), S (26)));
             dropZone = z.reduced (S (3), 0);
         }
 
-        // OSC 3: one row  [lamp] [noise picker] [vol color] [GRAIN]
-        auto a3 = osc3Area.reduced (S (8), S (4));
-        osc3Lamp.setBounds (a3.removeFromLeft (S (108)));
-        osc3Grain.setBounds (a3.removeFromRight (S (62)).withSizeKeepingCentre (S (62), S (26)));
-        a3.removeFromRight (S (4));
-        for (int i = (int) osc3Knobs.size() - 1; i >= 0; --i)
-            osc3Knobs[(size_t) i]->setBounds (a3.removeFromRight (S (38)));
-        a3.removeFromRight (S (6));
-        noisePicker.setBounds (a3.withSizeKeepingCentre (a3.getWidth(), S (38)));
+        // OSC 4 NOISE: [lamp] [noise picker] [vol pitch pan] [GRAIN]
+        if (proc.uiFold[2])
+            foldRow (osc3Area, 2, osc3Lamp, *osc3Knobs[0], { osc3Knobs[1].get(), osc3Knobs[2].get(), &osc3Grain, &noisePicker });
+        else
+        {
+            showAll ({ osc3Knobs[1].get(), osc3Knobs[2].get(), &osc3Grain, &noisePicker });
+            osc3Knobs[0]->setInline (false);
+            foldText[2] = {};
+            auto a3 = osc3Area.reduced (S (8), S (4));
+            takeFold (2, a3);
+            osc3Lamp.setBounds (a3.removeFromLeft (S (108)));
+            osc3Grain.setBounds (a3.removeFromRight (S (62)).withSizeKeepingCentre (S (62), S (26)));
+            a3.removeFromRight (S (4));
+            for (int i = (int) osc3Knobs.size() - 1; i >= 0; --i)
+                osc3Knobs[(size_t) i]->setBounds (a3.removeFromRight (S (38)));
+            a3.removeFromRight (S (6));
+            noisePicker.setBounds (a3.withSizeKeepingCentre (a3.getWidth(), S (38)));
+        }
 
-        // OSC 4 SUB: [lamp] [3 sticks] [vol oct] [DRY]
-        auto a4 = osc4Area.reduced (S (8), S (4));
-        osc4Lamp.setBounds (a4.removeFromLeft (S (108)));
+        // OSC 2 SUB: [lamp] [5 sticks] [vol oct semi]
         subTag = {};
-        for (int i = (int) subKnobs.size() - 1; i >= 0; --i)
-            subKnobs[(size_t) i]->setBounds (a4.removeFromRight (S (40)));
-        a4.removeFromRight (S (8));
-        subBars.setBounds (a4.withSizeKeepingCentre (a4.getWidth(), S (40)));   // the screen takes the whole free width
+        if (proc.uiFold[0])
+            foldRow (osc4Area, 0, osc4Lamp, *subKnobs[0], { subKnobs[1].get(), subKnobs[2].get(), &subBars });
+        else
+        {
+            showAll ({ subKnobs[1].get(), subKnobs[2].get(), &subBars });
+            subKnobs[0]->setInline (false);
+            foldText[0] = {};
+            auto a4 = osc4Area.reduced (S (8), S (4));
+            takeFold (0, a4);
+            osc4Lamp.setBounds (a4.removeFromLeft (S (108)));
+            for (int i = (int) subKnobs.size() - 1; i >= 0; --i)
+                subKnobs[(size_t) i]->setBounds (a4.removeFromRight (S (40)));
+            a4.removeFromRight (S (8));
+            subBars.setBounds (a4.withSizeKeepingCentre (a4.getWidth(), S (40)));   // the screen takes the whole free width
+        }
     }
 
     // ---- blocks ----

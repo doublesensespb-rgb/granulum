@@ -1861,6 +1861,7 @@ void GranulumProcessor::getStateInformation (MemoryBlock& destData)
     state.setProperty ("harmonics", hs.joinIntoString (","), nullptr);
     state.setProperty ("presetName", presetName, nullptr);
     state.setProperty ("presetFolder", presetSub, nullptr);
+    state.setProperty ("oscFold", String ((int) uiFold[0]) + String ((int) uiFold[1]) + String ((int) uiFold[2]), nullptr);
     state.setProperty ("pluginVersion", GRAINFORM_VERSION, nullptr);
     state.setProperty ("grainMask", (int) grainMask.load(), nullptr);
 
@@ -1925,6 +1926,10 @@ void GranulumProcessor::setStateInformation (const void* data, int sizeInBytes)
     for (int l = 0; l < kNumLfos; ++l) shapes[(size_t) l] = state.getProperty ("lfoShape" + String (l + 1)).toString();
     const String pn = state.getProperty ("presetName", "INIT").toString();
     const String pf = state.getProperty ("presetFolder", "").toString();
+    {
+        const String fo = state.getProperty ("oscFold", "000").toString();
+        for (int i = 0; i < 3; ++i) uiFold[i] = fo.length() > i && fo[i] == '1';
+    }
     const uint32_t gm = (uint32_t) (int) state.getProperty ("grainMask", 0xffff);
     apvts.replaceState (state);
     presetName = pn;

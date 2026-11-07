@@ -442,6 +442,18 @@ int main (int argc, char** argv)
             };
             walk (*ed);
             ed->harmonicEditor().readout.show (2, 0, true);
+            if (argc > 4 && String (argv[4]) == "fold")
+            {
+                ed->harmonicEditor().readout = {};
+                for (auto* c : ed->getChildren()) if (auto* k = dynamic_cast<Knob*> (c)) k->readout = {};
+                p.uiFold[0] = true; p.uiFold[1] = false; p.uiFold[2] = true;
+                ed->resized(); run (p, ed, 20); save (*base, outDir, "fold1.png");
+                p.uiFold[1] = true;
+                ed->resized(); run (p, ed, 20); save (*base, outDir, "fold2.png");
+                p.uiFold[0] = p.uiFold[1] = p.uiFold[2] = false;
+                ed->resized(); run (p, ed, 20); save (*base, outDir, "fold3.png");
+                return 0;
+            }
             if (argc > 4 && String (argv[4]) == "save")
             {
                 auto root = GranulumProcessor::presetFolder();
@@ -450,7 +462,8 @@ int main (int argc, char** argv)
                 p.savePreset ("Frozen Choir", root.getChildFile ("Pads"));
                 p.savePreset ("Growl Fold", root.getChildFile ("Bass"));
                 ed->harmonicEditor().readout = {};
-                for (auto* c : ed->getChildren()) if (auto* pb = dynamic_cast<PresetBar*> (c)) pb->openSave();
+                p.loadPreset (root.getChildFile ("Bass").getChildFile ("Deep Pulse.gpreset"));
+                for (auto* c : ed->getChildren()) if (auto* pb = dynamic_cast<PresetBar*> (c)) { if (argc > 5) pb->openBrowser(); else pb->openSave(); }
                 run (p, ed, 20);
                 save (*base, outDir, "save.png");
                 return 0;

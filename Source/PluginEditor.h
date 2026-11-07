@@ -203,6 +203,9 @@ public:
     void tick();
     // no value box: the value pops up while dragging, inside the plugin window (a desktop popup lags / misbehaves in some hosts)
     void setCompact (bool c, juce::Component* popupParent = nullptr) { compact = c; slider.setPopupDisplayEnabled (c, false, popupParent); resized(); }
+    // 0.99.3: one-line knob for a folded oscillator strip:  VOL (o) [70 %]
+    void setInline (bool b) { if (inlineMode != b) { inlineMode = b; resized(); repaint(); } }
+    bool inlineMode = false;
 
     FineSlider slider;
     const int target;       // modulation target index, -1 if not modulatable
@@ -544,13 +547,14 @@ private:
 class PresetSaveWindow final : public juce::Component
 {
 public:
-    explicit PresetSaveWindow (GranulumProcessor&);
+    explicit PresetSaveWindow (GranulumProcessor&, bool browseMode = false);   // browse = the preset list (click on the preset name)
     void paint (juce::Graphics&) override;
     void resized() override;
     void mouseDown (const juce::MouseEvent&) override;   // click outside the panel = cancel
     bool keyPressed (const juce::KeyPress&) override;
     void open();
-    std::function<void()> onClose, onSaved;
+    std::function<void()> onClose, onSaved, onLoaded;
+    const bool browse;
 
     // a plain list of rows (used for folders and presets)
     struct Rows final : public juce::Component
@@ -582,6 +586,8 @@ private:
     juce::Viewport folderView, presetView;
     juce::TextEditor nameEdit, folderEdit;
     juce::TextButton newFolder { "+ FOLDER" }, saveBtn { "SAVE" }, cancelBtn { "CANCEL" };
+    juce::TextButton initBtn { "INIT" }, openDirBtn { "OPEN FOLDER" }, saveAsBtn { "SAVE AS..." };   // browse mode
+    void loadRow (int i);
     juce::Array<juce::File> folders;             // index 0 = root
     int renaming = -2;                           // -2 = not editing, -1 = new folder, >= 1 = rename that folder
 };
@@ -595,6 +601,7 @@ public:
     void mouseDown (const juce::MouseEvent&) override;
     std::function<void()> onLoaded;
     void openSave() { askSave(); }
+    void openBrowser() { showMenu(); }
 private:
     void timerCallback() override { repaint(); }
     void step (int dir);
@@ -737,6 +744,18 @@ public:
     float fontSize = 14.5f;
 };
 
+// 0.99.3: folds OSC 2 / 3 / 4 into a slim strip. Folded = copper button with a down arrow (open me), open = outlined up arrow
+class FoldButton final : public juce::Component, public juce::SettableTooltipClient
+{
+public:
+    bool folded = false;
+    std::function<void()> onClick;
+    void paint (juce::Graphics&) override;
+    void mouseDown (const juce::MouseEvent&) override { if (onClick) onClick(); }
+    void mouseEnter (const juce::MouseEvent&) override { repaint(); }
+    void mouseExit (const juce::MouseEvent&) override { repaint(); }
+};
+
 class GranulumEditor final : public juce::AudioProcessorEditor,
                              public juce::DragAndDropContainer,
                              public juce::FileDragAndDropTarget,
@@ -799,6 +818,10 @@ public:
     static inline int soundsStyle = 4;   // 4 = same as a lit GRAIN button (owner's choice); 1-3 earlier variants
 private:
     juce::TextButton samplePrev { juce::String::fromUTF8 ("\xe2\x97\x80") }, sampleNext { juce::String::fromUTF8 ("\xe2\x96\xb6") };
+    FoldButton foldBtn[3];                       // 0 = OSC 2 SUB, 1 = OSC 3 SAMPLE, 2 = OSC 4 NOISE
+    juce::Rectangle<int> foldText[3];            // folded strip: where the sound name is written (SAMPLE, NOISE)
+    int foldSig = -1;
+    void setFold (int i, bool f);
     Lamp osc1Lamp { "OSC 1", "ADDITIVE" }, osc2Lamp { "OSC 3", "SAMPLE" }, osc3Lamp { "OSC 4", "NOISE" }, osc4Lamp { "OSC 2", "SUB" };   // shown order (0.99): ADDITIVE, SUB, SAMPLE, NOISE
     SubBars subBars { proc };
     std::unique_ptr<ButtonAtt> osc4LampA;
