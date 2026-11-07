@@ -598,7 +598,8 @@ AudioProcessorValueTreeState::ParameterLayout GranulumProcessor::createLayout()
     ps.push_back (std::make_unique<P> (ParameterID { ParamID::subH3, 1 }, "Sub Harmonic 3", NormalisableRange<float> (0.0f, 1.0f), 0.0f, pct));
     ps.push_back (std::make_unique<P> (ParameterID { ParamID::subH4, 1 }, "Sub Harmonic 4", NormalisableRange<float> (0.0f, 1.0f), 0.0f, pct));
     ps.push_back (std::make_unique<P> (ParameterID { ParamID::subH5, 1 }, "Sub Harmonic 5", NormalisableRange<float> (0.0f, 1.0f), 0.0f, pct));
-    ps.push_back (std::make_unique<P> (ParameterID { ParamID::pitch, 1 }, "Pitch", NormalisableRange<float> (-12.0f, 12.0f, 1.0f), 0.0f, semiFmt));
+    ps.push_back (std::make_unique<P> (ParameterID { ParamID::pitch, 1 }, "Pitch", NormalisableRange<float> (-24.0f, 24.0f, 0.0f), 0.0f,
+                                       A().withStringFromValueFunction ([] (float v, int) { return (v > 0.05f ? "+" : "") + String (v, 1) + " st"; })));   // 0.99.3: +-2 oct, smooth
     ps.push_back (std::make_unique<P> (ParameterID { ParamID::output, 1 }, "Output", NormalisableRange<float> (-36.0f, 12.0f, 0.1f), 0.0f,
                                        A().withStringFromValueFunction ([] (float v, int) { return fmt (v, 1, " dB"); })));
 

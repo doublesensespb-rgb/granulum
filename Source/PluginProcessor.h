@@ -90,7 +90,7 @@ namespace ParamID
     inline constexpr const char* clipOn    = "clipOn";
     inline constexpr const char* osc1Tune  = "osc1Tune";    // 0.99.2: smooth pitch, -48..+48 semitones (like Serum COARSE)
     inline constexpr const char* osc2Tune  = "osc2Tune";
-    inline constexpr const char* pitch     = "pitch";       // 0.99.2: master pitch of the whole synth, -12..+12 semitones
+    inline constexpr const char* pitch     = "pitch";       // master pitch of the whole synth, -24..+24 semitones, smooth (0.99.3)
     inline constexpr const char* osc1Pan   = "osc1Pan";
     inline constexpr const char* osc2Pan   = "osc2Pan";
     inline constexpr const char* osc3Pan   = "osc3Pan";

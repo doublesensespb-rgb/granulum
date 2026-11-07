@@ -799,8 +799,9 @@ private:
         // stereo: SCATTER + BLOOM + SMEAR (+ DRIFT sway) set how far a grain goes from the centre, SPREAD scales it.
         // Grains take turns left / right, so the cloud stays centred on average (DRIFT used to push the whole cloud
         // into one ear for seconds at a time).
+        // 0.99.3: SPREAD gives width on its own (0.85 base), SCATTER / BLOOM / SMEAR add to it; at full SCATTER it is as before
         const float width = std::clamp (scatter + bloom * 0.35f + smear * 0.2f, 0.0f, 1.0f);
-        const float away = std::abs (width * rng.bipolar()) + drift * 0.4f * std::abs (v.walk[3]);
+        const float away = std::abs ((0.85f + 0.15f * width) * rng.bipolar()) + drift * 0.4f * std::abs (v.walk[3]);
         v.panSide = ! v.panSide;
         const float pan = std::clamp ((v.panSide ? away : -away) * std::clamp (p.spread, 0.0f, 1.0f), -1.0f, 1.0f);
         const float a = (pan + 1.0f) * 0.25f * (float) kPi;

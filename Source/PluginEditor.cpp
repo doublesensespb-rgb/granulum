@@ -4470,7 +4470,7 @@ GranulumEditor::GranulumEditor (GranulumProcessor& p)
     add (globalKnobs, ParamID::porta,  "Porta",  Knob::Size::Small);
     add (globalKnobs, ParamID::output, "Output", Knob::Size::Small);
     add (globalKnobs, ParamID::pitch,  "Pitch",  Knob::Size::Small);
-    globalKnobs[2]->slider.setTooltip ("PITCH: moves the whole synth up or down in semitones (all oscillators, SUB and grains). Double-click = 0");
+    globalKnobs[2]->slider.setTooltip ("PITCH: moves the whole synth up or down, smoothly, up to 2 octaves each way (all oscillators, SUB and grains). Double-click = 0");
     for (auto* k : { osc1Knobs[3].get(), osc2Knobs[3].get() })
         k->slider.setTooltip ("TUNE: smooth pitch of this oscillator, -48..+48 semitones, no steps. Put an LFO on it for rises, drops and pitch sweeps. Double-click = 0");
 
