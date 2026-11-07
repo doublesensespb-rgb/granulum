@@ -1147,10 +1147,25 @@ void GranulumProcessor::processChunk (int from, int len)
     std::copy (v, v + kNumModTargets, lastV.begin());
     const double sr = getSampleRate() > 0 ? getSampleRate() : 44100.0;
 
-    const float g[kNumOscs] = { pOsc1On->load() > 0.5f ? v[mtOsc1Vol] : 0.0f,
-                                pOsc2On->load() > 0.5f ? v[mtOsc2Vol] : 0.0f,
-                                pOsc3On->load() > 0.5f ? v[mtOsc3Vol] * 1.4f : 0.0f };
+    const float gWant[kNumOscs] = { pOsc1On->load() > 0.5f ? v[mtOsc1Vol] : 0.0f,
+                                    pOsc2On->load() > 0.5f ? v[mtOsc2Vol] : 0.0f,
+                                    pOsc3On->load() > 0.5f ? v[mtOsc3Vol] * 1.4f : 0.0f };
     float* lastG[kNumOscs] = { &lastG1, &lastG2, &lastG3 };
+    // 0.99.4: a volume never moves faster than 0 -> 1 in ~4 ms. A RETRIG LFO restarting on a new note (or a hard LFO
+    // shape) used to swing the level inside one 32-sample chunk (0.7 ms) = a click. With no voice sounding the
+    // level simply jumps (nothing to hear), so the first note does not start with a stale level ramp.
+    // two gentle smoothing stages (~1.5 ms each): the level glides with no corners, so a jump never clicks
+    const float sm = 1.0f - std::exp (-(float) len / (float) (0.0015 * sr));
+    const bool silentNow[kNumOscs] = { ! engineAdd.anyActive() && ! engineAddClean.anyActive(), ! engineSmp.anyActive(), ! engineNoise.anyActive() };
+    float g[kNumOscs];
+    for (int o = 0; o < kNumOscs; ++o)
+    {
+        auto& st = volSmooth[(size_t) o];
+        if (silentNow[o]) { st[0] = st[1] = *lastG[o] = gWant[o]; }
+        st[0] += (gWant[o] - st[0]) * sm;
+        st[1] += (st[0] - st[1]) * sm;
+        g[o] = st[1];
+    }
     AudioBuffer<float>* bufs[kNumOscs] = { &addBuf, &smpBuf, &noiseBuf };
     granulum::GrainEngine* engines[kNumOscs] = { &engineAdd, &engineSmp, &engineNoise };
     SourceSlot* slots[kNumOscs] = { &addSlot, &smpSlot, &noiseSlot };
@@ -1300,7 +1315,11 @@ void GranulumProcessor::processChunk (int from, int len)
     }
 
     // ---- every oscillator (and the SUB) through the blocks it is routed to ----
-    const float gsSub = pSubOn->load() > 0.5f ? v[mtSubVol] : 0.0f;
+    const float gsWant = pSubOn->load() > 0.5f ? v[mtSubVol] : 0.0f;
+    if (! engineSub.anyActive()) subSmooth[0] = subSmooth[1] = lastGSub = gsWant;
+    subSmooth[0] += (gsWant - subSmooth[0]) * sm;
+    subSmooth[1] += (subSmooth[0] - subSmooth[1]) * sm;
+    const float gsSub = subSmooth[1];
     const bool subLive = gsSub > 0.0001f || lastGSub > 0.0001f;
     if (subLive)
     {

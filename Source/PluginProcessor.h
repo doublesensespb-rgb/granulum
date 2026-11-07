@@ -392,6 +392,8 @@ private:
     static constexpr int kSubHarms = 5;   // SUB sticks: root, octave, octave + fifth, 2 octaves, 2 octaves + third
     std::array<float, 5> subShown { -1.0f, -1.0f, -1.0f, -1.0f, -1.0f };
     float lastGSub = 0.0f;
+    std::array<std::array<float, 2>, 3> volSmooth {};   // 0.99.4: OSC volume smoothing (no clicks from LFO jumps)
+    std::array<float, 2> subSmooth {};
     std::atomic<uint32_t> grainMask { 0xffffu };
     std::vector<std::shared_ptr<granulum::SampleData>> noises;
     std::vector<std::shared_ptr<const WaveformPeaks>> noisePeaks;

@@ -248,6 +248,8 @@ public:
         vizCount.store (0); vizHeadCount.store (0);
     }
 
+    bool anyActive() const { for (auto& v : voices) if (v.active) return true; return false; }
+
     void noteOn (int note, float velocity, const Params& p)
     {
         const bool overlap = heldCount > 0;
@@ -384,7 +386,9 @@ public:
             l += x; r += x;
         };
 
-        const float attackInc  = 1.0f / (std::max (0.0005f, p.attackMs * 0.001f) * (float) sr);
+        // 0.99.4: at least 4 ms of attack: 0.5 ms clicked on loud low basses (the wave starts away from zero)
+        const float attackInc  = 1.0f / (std::max (0.004f, p.attackMs * 0.001f) * (float) sr);
+        const bool  shortAttack = p.attackMs < 15.0f;
         const float sus        = std::clamp (p.sustain, 0.0f, 1.0f);
         const float decayDec   = (1.0f - sus) / (std::max (0.001f, p.decayMs * 0.001f) * (float) sr);
         const float releaseSec = std::max (p.releaseMs * 0.001f, p.grainOn ? 0.15f + 1.2f * p.chime * p.chime : 0.0f);
@@ -477,7 +481,9 @@ public:
 
                 const double semis = (p.keyTrack ? v.curNote - 60.0 : 0.0) + (double) p.transpose;
                 const double ratio = std::exp2 (semis / 12.0) * fileRate;
-                const float  amp   = v.env * v.velocity * v.chordGain;
+                // short attacks follow an S-curve (no corner at the very start = no tick on loud low notes)
+                const float  envOut = (v.stage == Stage::Attack && shortAttack) ? v.env * v.env * (3.0f - 2.0f * v.env) : v.env;
+                const float  amp   = envOut * v.velocity * v.chordGain;
 
                 // dry: plain looping playback
                 float dl, dr;
@@ -503,8 +509,11 @@ public:
 
                 if (! p.grainOn)
                 {
-                    outL[i] += dl * amp * 0.85f;
-                    outR[i] += dr * amp * 0.85f;
+                    float sl = dl * amp * 0.85f, sr2 = dr * amp * 0.85f;
+                    if (v.tailN > 0) { const float t = (float) v.tailN / (float) v.tailLen; sl += v.tailL * t * t; sr2 += v.tailR * t * t; --v.tailN; }
+                    v.lastL = sl; v.lastR = sr2;
+                    outL[i] += sl;
+                    outR[i] += sr2;
                     continue;
                 }
 
@@ -591,8 +600,12 @@ public:
                     gr += rr * chimeAmt;
                 }
                 const float dryLevel = p.volInGrains ? p.levelPrev + (p.level - p.levelPrev) * (float) (i + 1) / (float) numSamples : 1.0f;
-                outL[i] += (dl * 0.85f * (1.0f - wet) * dryLevel + gl * wet) * amp;
-                outR[i] += (dr * 0.85f * (1.0f - wet) * dryLevel + gr * wet) * amp;
+                float sl = (dl * 0.85f * (1.0f - wet) * dryLevel + gl * wet) * amp;
+                float sr2 = (dr * 0.85f * (1.0f - wet) * dryLevel + gr * wet) * amp;
+                if (v.tailN > 0) { const float t = (float) v.tailN / (float) v.tailLen; sl += v.tailL * t * t; sr2 += v.tailR * t * t; --v.tailN; }
+                v.lastL = sl; v.lastR = sr2;
+                outL[i] += sl;
+                outR[i] += sr2;
             }
         }
 
@@ -633,6 +646,10 @@ private:
         float    velocity = 1.0f, chordGain = 1.0f;
         Stage    stage = Stage::Off;
         float    env = 0.0f;
+        // 0.99.4 declick: when a sounding voice is started again, its last output fades out over ~5 ms
+        // while the new note fades in, instead of jumping (mono retrigger / voice steal)
+        float    lastL = 0.0f, lastR = 0.0f, tailL = 0.0f, tailR = 0.0f;
+        int      tailN = 0, tailLen = 1;
         float    norm = 1.0f;
         double   curNote = 60.0, glideFrom = 60.0, glideTarget = 60.0;
         int      glideLen = 0, glideAge = 0;
@@ -655,6 +672,12 @@ private:
 
     void startVoice (Voice& v, int note, float velocity, const Params& p, bool fresh)
     {
+        if (! fresh && v.active)
+        {
+            v.tailL = v.lastL; v.tailR = v.lastR;
+            v.tailLen = v.tailN = std::max (1, (int) (0.005 * sr));
+            v.env = 0.0f;
+        }
         v.active = true; v.note = note; v.velocity = velocity;
         v.curNote = v.glideFrom = v.glideTarget = note; v.glideLen = v.glideAge = 0;
         v.stage = Stage::Attack; v.startStamp = ++stamp;
