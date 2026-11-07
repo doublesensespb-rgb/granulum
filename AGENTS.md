@@ -1,7 +1,7 @@
 # GRAIN FORM (repo: granulum) — guide for AI agents and developers
 
 Read this whole file before changing anything. It describes the product, the code, the build
-pipeline and how the owner wants to work. Current version: **0.99.2** (`project(... VERSION 0.9.9)` + display label `set(GRAINFORM_LABEL "0.99.2")` in CMakeLists.txt).
+pipeline and how the owner wants to work. Current version: **0.99.3** (`project(... VERSION 0.9.9)` + display label `set(GRAINFORM_LABEL "0.99.3")` in CMakeLists.txt).
 The UI shows the version on a small plate next to the title (taken from CMake `GRAINFORM_VERSION`, "0.9.8" -> "v0.98").
 
 ## 1. Product
@@ -162,6 +162,10 @@ layered), OCT -3..+1, SEMI; GRAIN switches row (`HarmonicEditor::rowStyle = 11`)
 virtual mod targets `harm1..16` (kHarmTarget0 = 1000) and mtSubH1..5, one LFO per stick, wheel = depth, look = style B
 (`lfoStickStyle = 1`); a stick with an LFO is rendered as its own layer (`SampleData::layers`, gain ramped per chunk in the
 engine); PEAK Q (peakQ/peakQ2) + gain ±36 dB, filter view 0 dB centred; no hand cursors anywhere; UI idle optimisations.
+v0.99.3: grain field 60 px narrower / OSC column 560 (GRAIN switches had shrunk to dots in 0.99.2); OSC 2/3/4 fold into a
+strip (`proc.uiFold[3]`, state property `oscFold`, `FoldButton`, `Knob::setInline`), OSC 1 never folds; preset list = `PresetSaveWindow`
+in browse mode (click loads, double-click loads + closes); SPREAD base width 0.85 (works with SCATTER 0, owner re-tunes his presets);
+master PITCH +-24 st continuous.
 v0.99.2: fix: state save wrote `kModTargetIds[t]` for t >= 1000 (LFO on sticks) -> out-of-bounds read, now `modTargetId(t)`;
 TUNE on OSC 1/2 (`osc1Tune`/`osc2Tune`, -48..+48 st, continuous, mod targets mtOsc1Tune/mtOsc2Tune), master PITCH (`pitch`,
 -12..+12 st, mtPitch, added to every osc + SUB transpose) next to OUTPUT in the header; whole CLIP box is the button (lit when
