@@ -66,7 +66,7 @@ float Distortion::shape (int type, float x, float drive, int ch)
         case 0:
         {
             const float u = x * (1.0f + 16.0f * drive * drive);
-            return u >= 0.0f ? std::tanh (u) : 0.8f * std::tanh (u * 0.8f);
+            return u >= 0.0f ? std::tanh (u) : 0.97f * std::tanh (u * 0.97f);   // 0.99.5: almost symmetric (clean, like Serum)
         }
         case 1:
             return jlimit (-1.0f, 1.0f, x * (1.0f + 22.0f * drive * drive));
@@ -104,9 +104,6 @@ void Distortion::process (float* L, float* R, int n, int type, float drive, floa
     const float envK = 1.0f - (float) std::exp (-1.0 / (0.12 * osr));                         // ~120 ms level followers
     static constexpr int menuToShape[4] = { 2, 0, 1, 4 };
     const int shp = menuToShape[jlimit (0, 3, type)];
-    const float preK = 1.0f - (float) std::exp (-MathConstants<double>::twoPi * 13000.0 / osr);
-    const float bias = 0.06f * drive;
-    const float biasOut = shape (shp, bias, drive, 0);
 
     float* chans[2] = { L, R };
     juce::dsp::AudioBlock<float> block (chans, 2, (size_t) n);
@@ -118,10 +115,7 @@ void Distortion::process (float* L, float* R, int n, int type, float drive, floa
         for (int i = 0; i < m; ++i)
         {
             const float in = x[i];
-            // 0.99.5: the shaper hears the signal without its very top (one pole ~13 kHz) and with a slight tube-like
-            // lean (bias): noise turns into a warm crackle, a noise + tone mix "gurgles" (the bias is removed after)
-            pre[c] += (in - pre[c]) * preK;
-            const float y = shape (shp, pre[c] + bias, drive, c) - biasOut;
+            const float y = shape (shp, in, drive, c);   // symmetric, full band (like Serum): crisp crackle, no mud
             const float d = y - dcX[c] + dcK * dcY[c];
             dcX[c] = y; dcY[c] = d;
             lp[c] = (1.0f - a) * d + a * lp[c];
