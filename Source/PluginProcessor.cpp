@@ -180,11 +180,11 @@ float FilterUnit::response (int type, float hz, float fc, float q, double sr, fl
     };
     switch (type)
     {
-        case LP12:  return (float) std::abs (svf (hz, fcl, q, 0));
-        case HP:    return (float) std::abs (svf (hz, fcl, q, 1));
+        case LP12:  return (float) std::abs (svf (hz, fcl, q, 0)) * resoComp (q);
+        case HP:    return (float) std::abs (svf (hz, fcl, q, 1)) * resoComp (q);
         case BP:    return (float) std::abs (svf (hz, fcl, q, 2));
         case Peak:  { const double a2m1 = std::pow (10.0, peakGainDb / 20.0) - 1.0; return (float) std::abs (1.0 + a2m1 * svf (hz, fcl, jlimit (0.3, 16.0, (double) q), 2)); }
-        case LP24:  return (float) (std::abs (svf (hz, fcl, 0.54, 0)) * std::abs (svf (hz, fcl, q * 1.3, 0)));
+        case LP24:  return (float) (std::abs (svf (hz, fcl, 0.54, 0)) * std::abs (svf (hz, fcl, q * 1.3, 0))) * resoComp (q * 1.3f);
         case Comb:
         {
             const double d = sr / jmax (15.0, fcl);
@@ -206,10 +206,14 @@ float FilterUnit::response (int type, float hz, float fc, float q, double sr, fl
             C sum;
             for (int f = 0; f < 3; ++f)
                 sum += gains[f] * svf (hz, table[a][f] + (table[a + 1][f] - table[a][f]) * t, fq, 4);
-            return (float) (std::abs (sum) / fq);
+            return (float) (std::abs (sum) * 2.4 / fq);
         }
     }
 }
+
+// 0.99.6: high resonance lowers the overall level a little (like Serum's filters), so the resonant peak whistles
+// without pushing the sound over 0 dB (Q 10 used to peak ~+8 dB)
+float FilterUnit::resoComp (float q) { return std::pow (jmax (1.0f, q / 0.707f), -0.35f); }
 
 void FilterUnit::process (float* L, float* R, int n, int type, float fc, float q, float peakGainDb)
 {
@@ -219,12 +223,13 @@ void FilterUnit::process (float* L, float* R, int n, int type, float fc, float q
         case LP12: case HP: case BP:
         {
             for (auto& s : s1) s.set (fc, q, sr);
+            const float rc = type == BP ? 1.0f : resoComp (q);
             for (int c = 0; c < 2; ++c)
                 for (int i = 0; i < n; ++i)
                 {
                     float lp, bp, hp;
                     s1[c].tick (ch[c][i], lp, bp, hp);
-                    ch[c][i] = type == LP12 ? lp : type == HP ? hp : bp * s1[c].k;
+                    ch[c][i] = (type == LP12 ? lp : type == HP ? hp : bp * s1[c].k) * rc;
                 }
             break;
         }
@@ -248,13 +253,14 @@ void FilterUnit::process (float* L, float* R, int n, int type, float fc, float q
             // two stages; the resonance sits on the second one, the first stays gentle
             for (auto& s : s1) s.set (fc, 0.54f, sr);
             for (auto& s : s2) s.set (fc, q * 1.3f, sr);
+            const float rc = resoComp (q * 1.3f);
             for (int c = 0; c < 2; ++c)
                 for (int i = 0; i < n; ++i)
                 {
                     float lp, bp, hp, lp2;
                     s1[c].tick (ch[c][i], lp, bp, hp);
                     s2[c].tick (lp, lp2, bp, hp);
-                    ch[c][i] = lp2;
+                    ch[c][i] = lp2 * rc;
                 }
             break;
         }
@@ -294,6 +300,7 @@ void FilterUnit::process (float* L, float* R, int n, int type, float fc, float q
             const float t = pos - (float) a;
             const float gains[3] = { 1.0f, 0.6f, 0.35f };
             const float fq = 4.0f + 2.0f * q;
+            const float norm = 2.4f / fq;
             for (int f = 0; f < 3; ++f)
             {
                 const float hz = table[a][f] + (table[a + 1][f] - table[a][f]) * t;
@@ -309,7 +316,7 @@ void FilterUnit::process (float* L, float* R, int n, int type, float fc, float q
                         fm[f][c].tick (ch[c][i], lp, bp, hp);
                         out += bp * gains[f];
                     }
-                    ch[c][i] = out * 1.0f;
+                    ch[c][i] = out * norm;   // 0.99.6: normalised like the filter view (it used to boost ~+14 dB = clipping)
                 }
             break;
         }

@@ -221,6 +221,7 @@ public:
     void process (float* L, float* R, int n, int type, float cutoffHz, float q, float peakGainDb = 0.0f);
     // magnitude (linear) of this filter at frequency hz, for the filter view
     static float response (int type, float hz, float cutoffHz, float q, double sampleRate, float peakGainDb = 0.0f);
+    static float resoComp (float q);
 private:
     struct Svf
     {

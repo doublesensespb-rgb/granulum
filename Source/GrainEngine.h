@@ -306,7 +306,7 @@ public:
         ++heldCount;
         lastNote.store ((float) note, std::memory_order_relaxed);
         const int n = std::clamp (p.chordSize, 1, 5);
-        const float chordGain = 1.0f / std::sqrt ((float) n);
+        const float chordGain = std::pow ((float) n, -0.8f);   // 0.99.6: was 1/sqrt(n); big chords peaked well over 0 dB
         const bool porta = p.portaMs > 0.5f && lastPitch >= 0.0 && overlap;
 
         if (p.mono)
