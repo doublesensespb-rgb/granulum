@@ -39,7 +39,7 @@ namespace
         ParamID::subH1, ParamID::subH2, ParamID::subH3, ParamID::subH4, ParamID::subH5,
         ParamID::peakQ, ParamID::peakQ2,
         ParamID::subSemi,
-        ParamID::osc1Tune, ParamID::osc2Tune, ParamID::pitch
+        ParamID::osc1Tune, ParamID::osc2Tune, ParamID::pitch, ParamID::osc1WaveMix
     };
 
     String hzWithNote (float hz)
@@ -469,7 +469,8 @@ AudioProcessorValueTreeState::ParameterLayout GranulumProcessor::createLayout()
         ps.push_back (std::make_unique<B> (ParameterID { o == 1 ? ParamID::osc1Grain : ParamID::osc2Grain, 1 }, n + "Granular", false));
         if (o == 1)
         {
-            ps.push_back (std::make_unique<juce::AudioParameterChoice> (ParameterID { ParamID::osc1Mode, 1 }, "OSC 1 Mode", StringArray { "ADDITIVE", "WAVE" }, 0));
+            ps.push_back (std::make_unique<juce::AudioParameterChoice> (ParameterID { ParamID::osc1Mode, 1 }, "OSC 1 Mode", StringArray { "ADDITIVE", "MIX", "WAVE" }, 0));
+            ps.push_back (std::make_unique<P> (ParameterID { ParamID::osc1WaveMix, 1 }, "OSC 1 Wave Mix", NormalisableRange<float> (0.0f, 1.0f), 0.5f, pct));
             ps.push_back (std::make_unique<juce::AudioParameterChoice> (ParameterID { ParamID::osc1Wave, 1 }, "OSC 1 Wave", StringArray { "SINE", "SAW", "SQUARE", "TRIANGLE" }, 1));
         }
         ps.push_back (std::make_unique<P> (ParameterID { o == 1 ? ParamID::osc1Tune : ParamID::osc2Tune, 1 }, n + "Tune", NormalisableRange<float> (-48.0f, 48.0f, 0.0f), 0.0f,
@@ -640,6 +641,7 @@ GranulumProcessor::GranulumProcessor()
     }
 
     pOsc1On    = apvts.getRawParameterValue (ParamID::osc1On);
+    pOsc1Mode  = apvts.getRawParameterValue (ParamID::osc1Mode);
     pOsc2On    = apvts.getRawParameterValue (ParamID::osc2On);
     pOsc1Grain = apvts.getRawParameterValue (ParamID::osc1Grain);
     pOsc2Grain = apvts.getRawParameterValue (ParamID::osc2Grain);
@@ -715,6 +717,8 @@ void GranulumProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
 {
     engineAdd.prepare (sampleRate);
     engineAddClean.prepare (sampleRate);
+    engineWave.prepare (sampleRate);
+    builtWave = -1;   // mips depend on the sample rate
     engineSmp.prepare (sampleRate);
     engineNoise.prepare (sampleRate);
     engineSub.prepare (sampleRate);
@@ -738,7 +742,7 @@ void GranulumProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
     outGain.setCurrentAndTargetValue (Decibels::decibelsToGain (apvts.getRawParameterValue (ParamID::output)->load()));
 
     const int n = jmax (kChunk, samplesPerBlock);
-    for (auto* b : { &addBuf, &smpBuf, &noiseBuf, &work, &wetBuf, &subBuf }) b->setSize (2, n, false, true, true);
+    for (auto* b : { &addBuf, &smpBuf, &noiseBuf, &work, &wetBuf, &subBuf, &waveBuf }) b->setSize (2, n, false, true, true);
     colorLp[0] = colorLp[1] = colorHp[0] = colorHp[1] = 0.0f;
 
     heldNotes = 0;
@@ -1039,6 +1043,7 @@ void GranulumProcessor::noteOn (int note, float velocity)
     ++heldNotes;
     engineAdd.noteOn   (note, velocity, voiceParams (lastV.data(), 0));
     engineAddClean.noteOn (note, velocity, voiceParams (lastV.data(), 0));
+    engineWave.noteOn (note, velocity, voiceParams (lastV.data(), 0));
     engineSmp.noteOn   (note, velocity, voiceParams (lastV.data(), 1));
     engineNoise.noteOn (note, velocity, voiceParams (lastV.data(), 2));
     engineSub.noteOn (note, velocity, subParams (lastV.data()));
@@ -1049,6 +1054,7 @@ void GranulumProcessor::noteOff (int note)
     heldNotes = jmax (0, heldNotes - 1);
     engineAdd.noteOff   (note, voiceParams (lastV.data(), 0));
     engineAddClean.noteOff (note, voiceParams (lastV.data(), 0));
+    engineWave.noteOff (note, voiceParams (lastV.data(), 0));
     engineSmp.noteOff   (note, voiceParams (lastV.data(), 1));
     engineNoise.noteOff (note, voiceParams (lastV.data(), 2));
     engineSub.noteOff (note, subParams (lastV.data()));
@@ -1061,6 +1067,7 @@ void GranulumProcessor::processBlock (AudioBuffer<float>& buffer, MidiBuffer& mi
 
     addSlot.swapOnAudioThread();
     addCleanSlot.swapOnAudioThread();
+    waveSlot.swapOnAudioThread();
     smpSlot.swapOnAudioThread();
     noiseSlot.swapOnAudioThread();
     subSlot.swapOnAudioThread();
@@ -1071,7 +1078,7 @@ void GranulumProcessor::processBlock (AudioBuffer<float>& buffer, MidiBuffer& mi
     if (cut)
     {
         heldNotes = 0;
-        for (auto* e : { &engineAdd, &engineAddClean, &engineSmp, &engineNoise, &engineSub }) e->reset();
+        for (auto* e : { &engineAdd, &engineAddClean, &engineWave, &engineSmp, &engineNoise, &engineSub }) e->reset();
         for (auto* cp : { &chains[0], &chains[1], &chains[2], &subChain })
         {
             cp->filter.reset(); cp->filter2.reset(); cp->distortion.reset(); cp->delay.reset();
@@ -1083,7 +1090,7 @@ void GranulumProcessor::processBlock (AudioBuffer<float>& buffer, MidiBuffer& mi
     }
 
     if (work.getNumSamples() < numSamples)
-        for (auto* b : { &addBuf, &smpBuf, &noiseBuf, &work, &wetBuf, &subBuf }) b->setSize (2, numSamples, false, false, true);
+        for (auto* b : { &addBuf, &smpBuf, &noiseBuf, &work, &wetBuf, &subBuf, &waveBuf }) b->setSize (2, numSamples, false, false, true);
     for (auto* b : { &addBuf, &smpBuf, &noiseBuf, &work, &subBuf }) b->clear();
 
     hostBpm = 120.0; hostPpq = -1.0; hostPlaying = false;
@@ -1108,7 +1115,7 @@ void GranulumProcessor::processBlock (AudioBuffer<float>& buffer, MidiBuffer& mi
         else if (m.isAllNotesOff() || m.isAllSoundOff())
         {
             heldNotes = 0;
-            engineAdd.allNotesOff(); engineAddClean.allNotesOff(); engineSmp.allNotesOff(); engineNoise.allNotesOff(); engineSub.allNotesOff();
+            engineAdd.allNotesOff(); engineAddClean.allNotesOff(); engineWave.allNotesOff(); engineSmp.allNotesOff(); engineNoise.allNotesOff(); engineSub.allNotesOff();
         }
     }
     renderRange (pos, numSamples);
@@ -1162,7 +1169,7 @@ void GranulumProcessor::processChunk (int from, int len)
     // level simply jumps (nothing to hear), so the first note does not start with a stale level ramp.
     // two gentle smoothing stages (~1.5 ms each): the level glides with no corners, so a jump never clicks
     const float sm = 1.0f - std::exp (-(float) len / (float) (0.0015 * sr));
-    const bool silentNow[kNumOscs] = { ! engineAdd.anyActive() && ! engineAddClean.anyActive(), ! engineSmp.anyActive(), ! engineNoise.anyActive() };
+    const bool silentNow[kNumOscs] = { ! engineAdd.anyActive() && ! engineAddClean.anyActive() && ! engineWave.anyActive(), ! engineSmp.anyActive(), ! engineNoise.anyActive() };
     float g[kNumOscs];
     for (int o = 0; o < kNumOscs; ++o)
     {
@@ -1236,16 +1243,43 @@ void GranulumProcessor::processChunk (int from, int len)
             }
         }
 
+        // 0.99.5 OSC 1: ADDITIVE (sticks), WAVE (one full waveform) or MIX of the two (WAVE MIX knob)
+        const int o1mode = o == 0 ? (int) pOsc1Mode->load() : 0;
+        const float waveAmt = o1mode == 2 ? 1.0f : o1mode == 1 ? jlimit (0.0f, 1.0f, v[mtOsc1WaveMix]) : 0.0f;
+        const float addAmt = 1.0f - waveAmt;
         if (o == 0)
         {
             // harmonics switched off in the GRAIN row: clean and mono, never granulated (normal volume)
             auto clean = vp;
             clean.grainOn = false;
             clean.volInGrains = false;
-            engineAddClean.render (L, R, len, clean, audible ? addCleanSlot.active.get() : nullptr);
+            engineAddClean.render (L, R, len, clean, audible && addAmt > 0.0f ? addCleanSlot.active.get() : nullptr);
             if (vp.volInGrains) ramp (L, R);
         }
-        engines[o]->render (L, R, len, vp, audible ? slots[o]->active.get() : nullptr);
+        engines[o]->render (L, R, len, vp, audible && (o != 0 || addAmt > 0.0f) ? slots[o]->active.get() : nullptr);
+        if (o == 0)
+        {
+            // additive part at (1 - mix), the full wave at mix: rendered on its own and added
+            const float a0 = lastAddAmt, w0 = 1.0f - lastAddAmt;
+            for (int i = 0; i < len; ++i)
+            {
+                const float t = (float) (i + 1) / (float) len;
+                const float ga = a0 + (addAmt - a0) * t;
+                L[i] *= ga; R[i] *= ga;
+            }
+            float* WL = waveBuf.getWritePointer (0);
+            float* WR = waveBuf.getWritePointer (1);
+            FloatVectorOperations::clear (WL, len);
+            FloatVectorOperations::clear (WR, len);
+            engineWave.render (WL, WR, len, vp, audible && (waveAmt > 0.0f || w0 > 0.0f) ? waveSlot.active.get() : nullptr);
+            for (int i = 0; i < len; ++i)
+            {
+                const float t = (float) (i + 1) / (float) len;
+                const float gw = w0 + (waveAmt - w0) * t;
+                L[i] += WL[i] * gw; R[i] += WR[i] * gw;
+            }
+            lastAddAmt = addAmt;
+        }
         if (o == 0) harmGainPrev = vp.harmGain;
         if (! vp.volInGrains) ramp (L, R);
         *lastG[o] = g[o];
@@ -1574,6 +1608,18 @@ void GranulumProcessor::timerCallback()
 {
     addSlot.collect();
     addCleanSlot.collect();
+    waveSlot.collect();
+    {
+        // OSC 1 WAVE: build the band-limited mips of the chosen waveform when it (or the sample rate) changes
+        const int wv = jlimit (0, 3, (int) apvts.getRawParameterValue (ParamID::osc1Wave)->load());
+        const bool used = apvts.getRawParameterValue (ParamID::osc1Mode)->load() > 0.5f;
+        const double rate = getSampleRate() > 0.0 ? getSampleRate() : 44100.0;
+        if (used && (wv != builtWave || rate != builtWaveRate))
+        {
+            builtWave = wv; builtWaveRate = rate;
+            waveSlot.push (std::make_shared<granulum::SampleData> (granulum::renderWaveMips (wv, rate)));
+        }
+    }
     subSlot.collect();
     smpSlot.collect();
     noiseSlot.collect();

@@ -29,6 +29,11 @@ struct SampleData
     // 1 = unknown (samples, noises): the hammer works as before.
     float level = 1.0f;
     std::vector<float> layerLevel;
+    // 0.99.5 WAVE: band-limited copies of the same looping wave (same length/period), mip m holds harmonics 1..mipTop[m].
+    // Each read picks the richest mip whose top harmonic stays under ~19 kHz at that read speed: no aliasing on any note.
+    std::vector<std::vector<float>> mips;
+    std::vector<int> mipTop;
+    double mipLimit = 0.0;   // = 19000 * period / sampleRate(out): a mip is fine while mipTop * step <= mipLimit
 
     int numFrames() const   { return channels.empty() ? 0 : (int) channels[0].size(); }
     int numChannels() const { return (int) channels.size(); }
@@ -107,6 +112,51 @@ inline std::pair<SampleData, SampleData> renderAdditiveSplit (const std::array<f
         for (auto& L : part->layers) part->layerLevel.push_back (peakOf (L));
     }
     return { std::move (g), std::move (c) };
+}
+
+// 0.99.5: OSC 1 WAVE mode: one full classic waveform (0 SINE, 1 SAW, 2 SQUARE, 3 TRIANGLE) with all its harmonics,
+// as band-limited mips. Same "plays at C4 on note 60" convention as the additive buffer.
+inline SampleData renderWaveMips (int wave, double outSampleRate)
+{
+    constexpr int period = 1024;          // up to 512 harmonics
+    constexpr int cycles = 256;
+    constexpr int N = period * cycles;
+    constexpr double c4 = 261.6255653;
+    SampleData d;
+    d.sampleRate = period * c4;
+    auto amp = [wave] (int k) -> double
+    {
+        switch (wave)
+        {
+            case 0:  return k == 1 ? 1.0 : 0.0;
+            case 1:  return 1.0 / k;
+            case 2:  return (k % 2 == 1) ? 1.0 / k : 0.0;
+            default: return (k % 2 == 1) ? ((((k - 1) / 2) % 2 == 0) ? 1.0 : -1.0) / ((double) k * k) : 0.0;
+        }
+    };
+    std::vector<double> cyc ((size_t) period);
+    for (int top = period / 2; top >= 1; top /= 2)
+    {
+        std::fill (cyc.begin(), cyc.end(), 0.0);
+        for (int k = 1; k <= top; ++k)
+        {
+            const double a = amp (k);
+            if (a == 0.0) continue;
+            for (int i = 0; i < period; ++i) cyc[(size_t) i] += a * std::sin (2.0 * kPi * (double) k * i / period);
+        }
+        double peak = 0.0;
+        for (double v : cyc) peak = std::max (peak, std::abs (v));
+        const double g = peak > 1.0e-9 ? 0.7 / peak : 0.0;   // every mip at the same loudness
+        std::vector<float> buf ((size_t) N);
+        for (int i = 0; i < N; ++i) buf[(size_t) i] = (float) (cyc[(size_t) (i % period)] * g);
+        d.mips.push_back (std::move (buf));
+        d.mipTop.push_back (top);
+        if (wave == 0) break;                               // a sine needs only one
+    }
+    d.channels.assign (1, d.mips.front());
+    d.mipLimit = 19000.0 * period / outSampleRate;
+    d.level = 0.7f;
+    return d;
 }
 
 inline SampleData renderAdditive (const std::array<float, kNumHarmonics>& amps)
@@ -366,8 +416,18 @@ public:
             lgStep[(size_t) j] = (p.harmGain[(size_t) hk] - p.harmGainPrev[(size_t) hk]) / (float) std::max (1, numSamples);
         }
         // reads the source + the layers at pos (mono layers are added to both sides)
-        auto readAll = [&] (double pos, int i, float& l, float& r)
+        const int nMips = hasSample ? (int) sample->mips.size() : 0;
+        auto readAll = [&] (double pos, int i, float& l, float& r, double step = 1.0)
         {
+            if (nMips > 0)
+            {
+                const double s1 = std::max (1.0e-6, std::abs (step));
+                int m = 0;
+                while (m + 1 < nMips && (double) sample->mipTop[(size_t) m] * s1 > sample->mipLimit) ++m;
+                const float* mp = sample->mips[(size_t) m].data();
+                readHermite (mp, mp, N, pos, l, r);
+                return;
+            }
             readHermite (srcL, srcR, N, pos, l, r);
             if (M == 0) return;
             // layers are pure sines (one harmonic each, 184+ samples per cycle at most 16x): linear reading is clean enough
@@ -487,7 +547,7 @@ public:
 
                 // dry: plain looping playback
                 float dl, dr;
-                readAll (v.playPos, i, dl, dr);
+                readAll (v.playPos, i, dl, dr, ratio);
                 if (p.loopMode == 0)
                 {
                     v.playPos += ratio;
@@ -549,7 +609,7 @@ public:
                     if (! g.active) continue;
                     const float w = g.perc ? percWindow (g.age, g.length) * 1.6f : window (g.age, g.length, g.fade);
                     float l, r;
-                    readAll (g.pos, i, l, r);
+                    readAll (g.pos, i, l, r, g.inc);
                     float gv = 1.0f;
                     if (p.volInGrains)
                     {

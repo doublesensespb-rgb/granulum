@@ -451,6 +451,7 @@ int main (int argc, char** argv)
                 setP (ParamID::osc1Mode, 0.0f); ed->resized(); run (p, ed, 20); save (*base, outDir, "mode-add.png");
                 setP (ParamID::osc1Mode, 1.0f); setP (ParamID::osc1Wave, 1.0f); ed->resized(); run (p, ed, 20); save (*base, outDir, "mode-wave.png");
                 setP (ParamID::osc1Wave, 2.0f); run (p, ed, 20); save (*base, outDir, "mode-wave-sq.png");
+                setP (ParamID::osc1Mode, 1.0f); setP (ParamID::osc1Wave, 1.0f); setP (ParamID::osc1WaveMix, 0.4f); ed->resized(); run (p, ed, 20); save (*base, outDir, "mode-mix.png");
                 return 0;
             }
             if (argc > 4 && String (argv[4]) == "fold")

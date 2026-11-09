@@ -92,6 +92,7 @@ namespace ParamID
     inline constexpr const char* osc2Tune  = "osc2Tune";
     inline constexpr const char* osc1Mode  = "osc1Mode";    // 0.99.5: 0 ADDITIVE (sticks), 1 WAVE (a full waveform)
     inline constexpr const char* osc1Wave  = "osc1Wave";    // SINE SAW SQUARE TRIANGLE (WAVE mode)
+    inline constexpr const char* osc1WaveMix = "osc1WaveMix"; // MIX mode: 0 = sticks only .. 1 = wave only
     inline constexpr const char* pitch     = "pitch";       // master pitch of the whole synth, -24..+24 semitones, smooth (0.99.3)
     inline constexpr const char* osc1Pan   = "osc1Pan";
     inline constexpr const char* osc2Pan   = "osc2Pan";
@@ -138,7 +139,7 @@ enum ModTarget
     mtSubH1, mtSubH2, mtSubH3, mtSubH4, mtSubH5,
     mtPeakQ, mtPeakQ2,
     mtSubSemi,
-    mtOsc1Tune, mtOsc2Tune, mtPitch,
+    mtOsc1Tune, mtOsc2Tune, mtPitch, mtOsc1WaveMix,
     kNumModTargets
 };
 
@@ -371,6 +372,12 @@ public:
     juce::UndoManager undoManager { 30000, 60 };   // UNDO in the header: knob and switch changes
     juce::AudioProcessorValueTreeState apvts;
     granulum::GrainEngine engineAdd, engineAddClean, engineSmp, engineNoise, engineSub;
+    granulum::GrainEngine engineWave;            // 0.99.5: OSC 1 WAVE (full waveform)
+    std::atomic<float>* pOsc1Mode = nullptr;
+    juce::AudioBuffer<float> waveBuf;
+    float lastAddAmt = 1.0f;
+    int builtWave = -1;
+    double builtWaveRate = 0.0;
     juce::MidiKeyboardState keyboardState;
 
 private:
@@ -390,7 +397,7 @@ private:
 
     juce::AudioFormatManager formatManager;
 
-    SourceSlot addSlot, addCleanSlot, smpSlot, noiseSlot, subSlot;
+    SourceSlot addSlot, addCleanSlot, smpSlot, noiseSlot, subSlot, waveSlot;
     static constexpr int kSubHarms = 5;   // SUB sticks: root, octave, octave + fifth, 2 octaves, 2 octaves + third
     std::array<float, 5> subShown { -1.0f, -1.0f, -1.0f, -1.0f, -1.0f };
     float lastGSub = 0.0f;

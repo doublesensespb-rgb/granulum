@@ -347,6 +347,8 @@ public:
     void frame() { timerCallback(); if (readout.expire()) repaint(); }   // driven by the editor's single 30 fps tick (one repaint pass per frame)
     DepthReadout readout;
     void paintOverChildren (juce::Graphics&) override;
+    juce::Rectangle<float> mixPill() const;   // MIX mode: the WAVE amount control, top right of the sticks screen
+    bool mixDrag = false;
     explicit HarmonicEditor (GranulumProcessor&);
     void paint (juce::Graphics&) override;
     void mouseMove (const juce::MouseEvent&) override;
@@ -676,8 +678,8 @@ class Osc1ModeSwitch final : public juce::Component, public juce::SettableToolti
 public:
     explicit Osc1ModeSwitch (GranulumProcessor& p) : proc (p)
     {
-        setTooltip ("OSC 1: ADDITIVE = build the sound from 16 sticks.  WAVE = one full waveform (SINE / SAW / SQUARE / TRIANGLE) "
-                    "with all its harmonics. The grains work in both.");
+        setTooltip ("OSC 1: ADD = build the sound from 16 sticks.  WAVE = one full waveform (SINE / SAW / SQUARE / TRIANGLE) "
+                    "with all its harmonics.  MIX = both, the WAVE amount is on the screen. The grains work in all three.");
         setRepaintsOnMouseActivity (true);
     }
     void paint (juce::Graphics&) override;
