@@ -65,18 +65,18 @@ float Distortion::shape (int type, float x, float drive, int ch)
     {
         case 0:
         {
-            const float u = x * (1.0f + 20.0f * drive * drive);
+            const float u = x * (1.0f + 16.0f * drive * drive);
             return u >= 0.0f ? std::tanh (u) : 0.8f * std::tanh (u * 0.8f);
         }
         case 1:
-            return jlimit (-1.0f, 1.0f, x * (1.0f + 30.0f * drive * drive));
+            return jlimit (-1.0f, 1.0f, x * (1.0f + 22.0f * drive * drive));
         case 2:
-            return std::sin (x * (1.0f + 12.0f * drive) * MathConstants<float>::halfPi);
+            return std::sin (x * (1.0f + 10.0f * drive) * MathConstants<float>::halfPi);
         case 3:
         {
             const float bits = 16.0f - 13.0f * drive;
             const float levels = std::exp2 (bits - 1.0f);
-            const int factor = 1 + (int) (drive * drive * 40.0f);
+            const int factor = 4 * (1 + (int) (drive * drive * 40.0f));   // x4: it runs oversampled
             if (++count[ch] >= factor)
             {
                 count[ch] = 0;
@@ -91,22 +91,41 @@ float Distortion::shape (int type, float x, float drive, int ch)
 
 void Distortion::process (float* L, float* R, int n, int type, float drive, float tone, float mix)
 {
+    const double osr = sr * 4.0;
     const float fc = 400.0f * std::pow (50.0f, jlimit (0.0f, 1.0f, tone));
-    const float a = std::exp (-MathConstants<float>::twoPi * jmin (fc, (float) sr * 0.45f) / (float) sr);
-    float* ch[2] = { L, R };
+    const float a = std::exp (-MathConstants<float>::twoPi * jmin (fc, (float) sr * 0.45f) / (float) osr);
+    const float dcK = (float) std::exp (-MathConstants<double>::twoPi * 8.0 / osr);          // ~8 Hz DC blocker
+    const float envK = 1.0f - (float) std::exp (-1.0 / (0.12 * osr));                         // ~120 ms level followers
+    static constexpr int menuToShape[4] = { 2, 0, 1, 3 };
+    const int shp = menuToShape[jlimit (0, 3, type)];
+
+    float* chans[2] = { L, R };
+    juce::dsp::AudioBlock<float> block (chans, 2, (size_t) n);
+    auto up = os.processSamplesUp (block);
+    const int m = (int) up.getNumSamples();
     for (int c = 0; c < 2; ++c)
     {
-        float* x = ch[c];
-        for (int i = 0; i < n; ++i)
+        float* x = up.getChannelPointer ((size_t) c);
+        for (int i = 0; i < m; ++i)
         {
-            static constexpr int menuToShape[4] = { 2, 0, 1, 3 };
-            const float y = shape (menuToShape[jlimit (0, 3, type)], x[i], drive, c);
-            const float d = y - dcX[c] + 0.995f * dcY[c];
+            const float in = x[i];
+            const float y = shape (shp, in, drive, c);
+            const float d = y - dcX[c] + dcK * dcY[c];
             dcX[c] = y; dcY[c] = d;
             lp[c] = (1.0f - a) * d + a * lp[c];
-            x[i] = x[i] * (1.0f - mix) + lp[c] * mix;
+            envIn[c]  += (in * in - envIn[c]) * envK;
+            envWet[c] += (lp[c] * lp[c] - envWet[c]) * envK;
+            x[i] = in * (1.0f - mix) + lp[c] * mix * agc;
         }
     }
+    // auto level: the distorted signal follows the level of what came in (-24 .. +6 dB), smoothly
+    const float ein = envIn[0] + envIn[1], ewet = envWet[0] + envWet[1];
+    if (ein > 1.0e-9f && ewet > 1.0e-9f)
+    {
+        const float want = jlimit (0.063f, 2.0f, std::sqrt (ein / ewet));
+        agc += (want - agc) * 0.05f;
+    }
+    os.processSamplesDown (block);
 }
 
 // ===========================================================================
@@ -1829,7 +1848,12 @@ String GranulumProcessor::getPresetName() const { return presetName; }
 
 void GranulumProcessor::randomize()
 {
-    for (int s = 0; s < 4; ++s) randomizeSection (s);
+    // 0.99.5: RANDOM ALL only touches the parts ticked in its menu (randMask)
+    const int m = randMask.load();
+    if (m & rndGrainsBit)  randomizeSection (0);
+    if (m & rndFiltersBit) randomizeSection (1);
+    if (m & (rndDistBit | rndDelayBit | rndReverbBit)) randomizeSection (2);
+    if ((m & rndSticksBit) && apvts.getRawParameterValue (ParamID::osc1Mode)->load() < 1.5f) randomizeSection (3);
 }
 
 void GranulumProcessor::randomizeSection (int section)
@@ -1892,17 +1916,27 @@ void GranulumProcessor::randomizeSection (int section)
     }
     else if (section == 2)
     {
-        set (ParamID::distType,  (float) r.nextInt (4));
-        set (ParamID::distDrive, range (0.2f, 0.8f));
-        set (ParamID::distTone,  range (0.35f, 1.0f));
-        set (ParamID::distMix,   range (0.4f, 1.0f));
-        set (ParamID::revMix,    range (0.1f, 0.5f));
-        set (ParamID::revSize,   range (0.3f, 0.95f));
-        set (ParamID::revLowCut, range (80.0f, 400.0f));
-        set (ParamID::delayDiv,  (float) (3 + r.nextInt (12)));
-        set (ParamID::delayFb,   range (0.2f, 0.7f));
-        set (ParamID::delayTone, range (0.3f, 0.9f));
-        set (ParamID::delayMix,  range (0.15f, 0.45f));
+        const int m = randMask.load();   // the FX dice also respect the RANDOM menu ticks
+        if (m & rndDistBit)
+        {
+            set (ParamID::distType,  (float) r.nextInt (4));
+            set (ParamID::distDrive, range (0.1f, 0.5f));   // 0.99.5: random never slams the distortion
+            set (ParamID::distTone,  range (0.35f, 1.0f));
+            set (ParamID::distMix,   range (0.4f, 1.0f));
+        }
+        if (m & rndReverbBit)
+        {
+            set (ParamID::revMix,    range (0.1f, 0.5f));
+            set (ParamID::revSize,   range (0.3f, 0.95f));
+            set (ParamID::revLowCut, range (80.0f, 400.0f));
+        }
+        if (m & rndDelayBit)
+        {
+            set (ParamID::delayDiv,  (float) (3 + r.nextInt (12)));
+            set (ParamID::delayFb,   range (0.2f, 0.7f));
+            set (ParamID::delayTone, range (0.3f, 0.9f));
+            set (ParamID::delayMix,  range (0.15f, 0.45f));
+        }
     }
     else
     {
@@ -1932,6 +1966,7 @@ void GranulumProcessor::getStateInformation (MemoryBlock& destData)
     state.setProperty ("harmonics", hs.joinIntoString (","), nullptr);
     state.setProperty ("presetName", presetName, nullptr);
     state.setProperty ("presetFolder", presetSub, nullptr);
+    state.setProperty ("randMask", randMask.load(), nullptr);
     state.setProperty ("oscFold", String ((int) uiFold[0]) + String ((int) uiFold[1]) + String ((int) uiFold[2]), nullptr);
     state.setProperty ("pluginVersion", GRAINFORM_VERSION, nullptr);
     state.setProperty ("grainMask", (int) grainMask.load(), nullptr);
@@ -1997,6 +2032,7 @@ void GranulumProcessor::setStateInformation (const void* data, int sizeInBytes)
     for (int l = 0; l < kNumLfos; ++l) shapes[(size_t) l] = state.getProperty ("lfoShape" + String (l + 1)).toString();
     const String pn = state.getProperty ("presetName", "INIT").toString();
     const String pf = state.getProperty ("presetFolder", "").toString();
+    if (state.hasProperty ("randMask")) randMask.store ((int) state.getProperty ("randMask"));
     {
         const String fo = state.getProperty ("oscFold", "000").toString();
         for (int i = 0; i < 3; ++i) uiFold[i] = fo.length() > i && fo[i] == '1';

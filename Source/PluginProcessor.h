@@ -184,8 +184,20 @@ struct SourceSlot
 class Distortion
 {
 public:
-    void prepare (double sampleRate) { sr = sampleRate; reset(); }
-    void reset() { for (int c = 0; c < 2; ++c) { lp[c] = dcX[c] = dcY[c] = hold[c] = 0.0f; count[c] = 0; } }
+    // 0.99.5: runs 4x oversampled (the harmonics it makes no longer fold back as dirt) and keeps the level:
+    // DRIVE changes the character, not the loudness
+    void prepare (double sampleRate)
+    {
+        sr = sampleRate;
+        os.initProcessing (64);
+        reset();
+    }
+    void reset()
+    {
+        for (int c = 0; c < 2; ++c) { lp[c] = dcX[c] = dcY[c] = hold[c] = 0.0f; count[c] = 0; envIn[c] = envWet[c] = 0.0f; }
+        agc = 1.0f;
+        os.reset();
+    }
     void process (float* L, float* R, int n, int type, float drive, float tone, float mix);
     static const juce::StringArray& typeNames();
 private:
@@ -193,6 +205,8 @@ private:
     double sr = 44100.0;
     float lp[2] {}, dcX[2] {}, dcY[2] {}, hold[2] {};
     int count[2] {};
+    float envIn[2] {}, envWet[2] {}, agc = 1.0f;
+    juce::dsp::Oversampling<float> os { 2, 2, juce::dsp::Oversampling<float>::filterHalfBandPolyphaseIIR, true };
 };
 
 // Multi-mode filter: LP12, LP24, HP, BP, NOTCH (TPT state-variable), COMB (tuned feedback comb), VOWEL (3 formants)
@@ -328,6 +342,9 @@ public:
     // ---- presets / random ----
     void resetToInit();
     void randomize();
+    // 0.99.5: what RANDOM ALL may touch (ticks in its menu); kept with the project
+    enum { rndSticksBit = 1, rndGrainsBit = 2, rndFiltersBit = 4, rndDistBit = 8, rndDelayBit = 16, rndReverbBit = 32 };
+    std::atomic<int> randMask { 63 };
     void randomizeSection (int section); // 0 granular, 1 filter, 2 effects, 3 additive bars
 
     // ---- chords ----

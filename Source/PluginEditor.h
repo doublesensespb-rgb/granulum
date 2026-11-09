@@ -841,6 +841,8 @@ private:
     juce::Rectangle<int> foldText[3];            // folded strip: where the sound name is written (SAMPLE, NOISE)
     int foldSig = -1;
     void setFold (int i, bool f);
+    juce::TextButton randomMenuButton { juce::String::fromUTF8 ("\xe2\x96\xbe") };   // small down arrow next to RANDOM ALL
+    void showRandomMenu();
     Lamp osc1Lamp { "OSC 1", "ADDITIVE" }, osc2Lamp { "OSC 3", "SAMPLE" }, osc3Lamp { "OSC 4", "NOISE" }, osc4Lamp { "OSC 2", "SUB" };   // shown order (0.99): ADDITIVE, SUB, SAMPLE, NOISE
     SubBars subBars { proc };
     std::unique_ptr<ButtonAtt> osc4LampA;

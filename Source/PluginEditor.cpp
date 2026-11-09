@@ -4785,6 +4785,9 @@ GranulumEditor::GranulumEditor (GranulumProcessor& p)
     rndFx.onClick        = [this] { proc.randomizeSection (2); };
     rndBars.onClick      = [this] { proc.randomizeSection (3); };
     randomButton.onClick = [this] { proc.randomize(); };
+    addAndMakeVisible (randomMenuButton);
+    randomMenuButton.setTooltip ("What RANDOM ALL may change");
+    randomMenuButton.onClick = [this] { showRandomMenu(); };
     initButton.onClick   = [this] { proc.resetToInit(); lfoEditor.setLfo (selectedLfo); };
     loadButton.onClick   = [this] { toggleSampleMenu (! sampleMenu.isVisible()); };
     loadButton.setTooltip ("Factory sounds, or load your own file");
@@ -5104,6 +5107,24 @@ void GranulumEditor::openFile (const File& f)
     if (proc.loadSample (f, err)) statusText.clear();
     else                          statusText = err;
     repaint (dropZone);
+}
+
+void GranulumEditor::showRandomMenu()
+{
+    const int m = proc.randMask.load();
+    PopupMenu menu;
+    menu.addSectionHeader ("RANDOM ALL changes:");
+    const std::pair<int, const char*> items[] = { { GranulumProcessor::rndSticksBit, "Harmonics (sticks)" }, { GranulumProcessor::rndGrainsBit, "Grains" },
+                                                  { GranulumProcessor::rndFiltersBit, "Filters" }, { GranulumProcessor::rndDistBit, "Distortion" },
+                                                  { GranulumProcessor::rndDelayBit, "Delay" }, { GranulumProcessor::rndReverbBit, "Reverb" } };
+    for (auto& it : items) menu.addItem (it.first, it.second, true, (m & it.first) != 0);
+    Component::SafePointer<GranulumEditor> safe (this);
+    menu.showMenuAsync (PopupMenu::Options().withTargetComponent (&randomMenuButton), [safe] (int res)
+    {
+        if (safe == nullptr || res <= 0) return;
+        safe->proc.randMask.store (safe->proc.randMask.load() ^ res);
+        safe->showRandomMenu();   // stays open: tick several in a row
+    });
 }
 
 void GranulumEditor::setFold (int i, bool f)
@@ -5677,13 +5698,18 @@ void GranulumEditor::resized()
     globalKnobs[1]->setBounds (header.removeFromRight (S (62)));   // output
     globalKnobs[2]->setBounds (header.removeFromRight (S (58)));   // master pitch, next to output
     header.removeFromRight (S (8));
-    randomButton.setBounds (header.removeFromRight (S (104)).withSizeKeepingCentre (S (104), S (30)));
+    {
+        auto rb = header.removeFromRight (S (118)).withSizeKeepingCentre (S (118), S (30));
+        randomMenuButton.setBounds (rb.removeFromRight (S (22)));   // the little arrow: what RANDOM ALL may change
+        rb.removeFromRight (S (2));
+        randomButton.setBounds (rb);
+    }
     header.removeFromRight (S (6));
     initButton.setBounds (header.removeFromRight (S (54)).withSizeKeepingCentre (S (54), S (30)));
     header.removeFromRight (S (6));
     undoButton.setBounds (header.removeFromRight (S (58)).withSizeKeepingCentre (S (58), S (30)));
     header.removeFromRight (S (10));
-    presetBar.setBounds (header.removeFromRight (S (212)).withSizeKeepingCentre (S (212), S (30)));
+    presetBar.setBounds (header.removeFromRight (S (198)).withSizeKeepingCentre (S (198), S (30)));
     titleArea = header.withTrimmedLeft (S (4));
     r.removeFromTop (S (6));
 
