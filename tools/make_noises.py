@@ -238,6 +238,133 @@ NOISES = [
 ]
 
 
+# ---------------------------------------------------------------- 0.99.5: organic noises
+
+def _drops(count_rate, n, f_lo, f_hi, dec_lo, dec_hi, amp_pow=2.0, chirp=0.0):
+    out = np.zeros(n)
+    count = rng.poisson(count_rate * n / SR)
+    for p in rng.integers(0, n - 6000, count):
+        L = 6000
+        seg = np.arange(L) / SR
+        f0 = rng.uniform(f_lo, f_hi)
+        dec = rng.uniform(dec_lo, dec_hi)
+        fr = f0 * (1.0 + chirp * seg / dec)            # chirp > 0: rising pitch (bubbles)
+        ph = 2 * np.pi * np.cumsum(fr) / SR
+        out[p:p + L] += np.sin(ph) * np.exp(-seg / dec) * rng.random() ** amp_pow
+    return out
+
+
+def rain():
+    # soft rain on a window: many tiny drops + a gentle wet bed
+    def ch():
+        drops = _drops(160, N, 1800, 7000, 0.002, 0.012, amp_pow=2.5)
+        taps = bp(impulses(220, amp_pow=3), 1200, 8000, 2) * 0.6
+        bed = bp(pink(), 400, 9000, 2) * 0.012 * (0.8 + 0.2 * smooth_random(0.4))
+        return lp(drops + taps, 9000, 1) + bed * 12
+    return stereo(ch)
+
+
+def fire():
+    # fireplace: warm low roar + wood crackles and pops
+    def ch():
+        roar = lp(brown(), 500, 2) * (0.6 + 0.4 * smooth_random(1.5))
+        roar *= 0.25 / (np.std(roar) + 1e-9)
+        crack = bp(impulses(18, amp_pow=1.5), 800, 6000, 2) * 3.0
+        fizz = bp(impulses(260, amp_pow=4), 2500, 10000, 2) * 0.5 * (0.4 + 0.6 * smooth_random(2.0))
+        pops = _drops(3, N, 300, 900, 0.004, 0.015, amp_pow=0.7) * 0.8
+        return roar * np.std(crack + 1e-9) * 4 + crack + fizz + pops
+    return stereo(ch)
+
+
+def leaves():
+    # dry leaves being stirred: soft rustling gestures
+    def ch():
+        out = np.zeros(N)
+        for start in rng.integers(0, N - SR, rng.poisson(5 * N / SR)):
+            L = int(rng.uniform(0.3, 1.2) * SR)
+            seg = np.arange(L)
+            env = np.sin(np.pi * seg / L) ** 1.5
+            cr = impulses(rng.uniform(400, 1400), L, amp_pow=2.2)
+            cr = bp(cr, rng.uniform(1200, 2500), rng.uniform(6000, 10000), 2)
+            out[start:start + L] += cr * env * rng.uniform(0.3, 1.0)
+        return lp(out, 9000, 1) + bp(pink(), 800, 6000, 1) * 0.004
+    return stereo(ch)
+
+
+def sand():
+    # sand pouring: dense fine grains, slowly breathing
+    def ch():
+        x = impulses(4000, amp_pow=2.0)
+        x = lp(bp(x, 1500, 9000, 2), 8000, 1)
+        return x * (0.55 + 0.45 * smooth_random(0.5) ** 1.3)
+    return stereo(ch)
+
+
+def bubbles():
+    # water bubbles: small rising blips over a soft murmur
+    def ch():
+        b = _drops(22, N, 350, 1400, 0.008, 0.035, amp_pow=1.2, chirp=0.6)
+        murmur = lp(pink(), 700, 2) * 0.02 * (0.6 + 0.4 * smooth_random(0.8))
+        return b + murmur * 10
+    return stereo(ch)
+
+
+def fabric():
+    # cloth / fabric swishes: soft brushed noise strokes
+    def ch():
+        out = np.zeros(N)
+        for start in rng.integers(0, N - SR, rng.poisson(3.5 * N / SR)):
+            L = int(rng.uniform(0.25, 0.8) * SR)
+            seg = np.arange(L)
+            env = np.sin(np.pi * seg / L) ** 2
+            lo = rng.uniform(600, 1400)
+            out[start:start + L] += bp(white(L), lo, lo * rng.uniform(3, 6), 1) * env * rng.uniform(0.4, 1.0)
+        return lp(out, 7000, 1)
+    return stereo(ch)
+
+
+def pencil():
+    # pencil on paper: rhythmic scratchy strokes with a woody resonance
+    def ch():
+        out = np.zeros(N)
+        pos = 0
+        while pos < N - SR // 2:
+            L = int(rng.uniform(0.08, 0.35) * SR)
+            seg = np.arange(L)
+            env = np.sin(np.pi * seg / L) ** 0.8
+            grit = impulses(rng.uniform(1500, 3500), L, amp_pow=1.8)
+            grit = bp(grit, 1800, 7000, 2)
+            out[pos:pos + L] += grit * env * rng.uniform(0.5, 1.0)
+            pos += L + int(rng.uniform(0.04, 0.25) * SR)
+        return signal.lfilter([1], [1, -0.35], out)
+    return stereo(ch)
+
+
+def sea():
+    # distant sea: slow waves of soft noise rolling in and out
+    wave = (0.5 - 0.5 * np.cos(2 * np.pi * t / 2.25)) ** 1.6
+    def ch():
+        x = pink()
+        out = np.zeros(N)
+        blk = 512
+        zi = None
+        for i in range(0, N, blk):
+            fc = 400 + 2600 * float(wave[i])
+            sos = signal.butter(2, fc, fs=SR, output="sos")
+            if zi is None:
+                zi = np.zeros((sos.shape[0], 2))
+            out[i:i + blk], zi = signal.sosfilt(sos, x[i:i + blk], zi=zi)
+        foam = bp(white(), 3000, 10000, 1) * 0.06 * wave ** 3
+        return out * (0.25 + 0.75 * wave) + foam * np.std(out) * 8
+    return stereo(ch)
+
+
+NEW_NOISES = [
+    ("RAIN", rain), ("FIRE", fire), ("LEAVES", leaves), ("SAND", sand),
+    ("BUBBLES", bubbles), ("FABRIC", fabric), ("PENCIL", pencil), ("SEA", sea),
+]
+
+
 def finish(x):
     n_loop = int(DUR * SR)
     nx = int(XF * SR)
@@ -256,9 +383,9 @@ def finish(x):
 
 
 if __name__ == "__main__":
-    out = sys.argv[1] if len(sys.argv) > 1 else "noises"
+    out = next((a for a in sys.argv[1:] if not a.startswith("--")), "noises")
     os.makedirs(out, exist_ok=True)
-    for name, fn in NOISES:
+    for name, fn in (NEW_NOISES if "--new" in sys.argv else NOISES):
         x = finish(fn())
         path = os.path.join(out, name.replace(" ", "_") + ".wav")
         wavfile.write(path, SR, (x * 32767).astype(np.int16))

@@ -1005,7 +1005,7 @@ granulum::Params GranulumProcessor::voiceParams (const float* v, int osc) const
         p.keyTrack = false;        // noise sounds the same on every note
         p.randomStart = true;      // stacked voices don't phase against each other
         p.portaMs = 0.0f;
-        p.transpose = v[mtOsc3Color] * 12.0f + v[mtPitch];   // OSC 3 PITCH + master PITCH
+        p.transpose = v[mtOsc3Color] * 12.0f + 3.0f + v[mtPitch];   // OSC 4 NOISE PITCH + master PITCH; 0.99.5: all noises sit 3 semitones higher
         p.grainOn = grainBlock && pOsc3Grain->load() > 0.5f;
     }
     return p;
