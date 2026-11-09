@@ -34,6 +34,7 @@ struct SampleData
     std::vector<std::vector<float>> mips;
     std::vector<int> mipTop;
     double mipLimit = 0.0;   // = 19000 * period / sampleRate(out): a mip is fine while mipTop * step <= mipLimit
+    int mipPeriod = 0;       // 0.99.6: the mips repeat every mipPeriod samples: reads stay inside the first cycle (fits the CPU cache)
 
     int numFrames() const   { return channels.empty() ? 0 : (int) channels[0].size(); }
     int numChannels() const { return (int) channels.size(); }
@@ -155,6 +156,7 @@ inline SampleData renderWaveMips (int wave, double outSampleRate)
     }
     d.channels.assign (1, d.mips.front());
     d.mipLimit = 19000.0 * period / outSampleRate;
+    d.mipPeriod = period;
     d.level = 0.7f;
     return d;
 }
@@ -199,6 +201,10 @@ struct Params
     float volBase = 1.0f;          // normalised volume without the INTO GRAINS LFOs
     float volScale = 1.0f;         // OSC 3 is a little louder
     float level = 1.0f, levelPrev = 1.0f;   // full volume now / at the previous chunk (dry part)
+    // 0.99.6 MIX WAVE: a second looping source (the full wave, with mips) read by the SAME grains and the same plain
+    // playback, added at overlayGain (ramped from overlayGainPrev over the chunk). One grain cloud instead of two engines.
+    const SampleData* overlay = nullptr;
+    float overlayGain = 0.0f, overlayGainPrev = 0.0f;
 
     // oscillator
     float transpose = 0.0f;  // semitones
@@ -229,6 +235,9 @@ private:
     uint64_t s;
 };
 
+// which band-limited copy a read uses, remembered for the read speed it was picked for (a grain keeps its speed)
+struct MipCache { double step = -1.0; int m = 0, o = 0; bool oSet = false; };
+
 struct Grain
 {
     bool   active = false;
@@ -243,6 +252,7 @@ struct Grain
     bool   perc = false; // SHIMMER "ping": sharp attack, ringing decay (glass / bells)
     double lph[3] {};    // INTO GRAINS: this grain's own position in each LFO's rhythm
     float  gvs = -1.0f;  // INTO GRAINS: smoothed volume (no clicks on hard LFO edges)
+    MipCache mc;
 };
 
 // A grain that was just born — the UI turns these into flying shards.
@@ -265,6 +275,7 @@ class GrainEngine
 public:
     static constexpr int kMaxVoices      = 16;
     static constexpr int kGrainsPerVoice = 48;
+    static constexpr int kGrainBudget    = 200;   // live grains per engine before the clouds start to thin out
     static constexpr int kMaxViz         = 256;
     static constexpr int kEventRing      = 256;
 
@@ -417,18 +428,48 @@ public:
         }
         // reads the source + the layers at pos (mono layers are added to both sides)
         const int nMips = hasSample ? (int) sample->mips.size() : 0;
-        auto readAll = [&] (double pos, int i, float& l, float& r, double step = 1.0)
+        // MIX WAVE overlay: same musical phase in the wave's own (longer-period) buffer
+        const SampleData* ov = (hasSample && p.overlay != nullptr && ! p.overlay->mips.empty()
+                                && p.overlay->mipPeriod > 0 && (p.overlay->mipPeriod & (p.overlay->mipPeriod - 1)) == 0
+                                && (p.overlayGain > 0.0f || p.overlayGainPrev > 0.0f)) ? p.overlay : nullptr;
+        // (the wave's mips always carry a power-of-two period; anything else is not used as an overlay)
+        const int    ovN     = ov ? ov->mipPeriod : 1;
+        const int    mipP    = (nMips > 0 && sample->mipPeriod > 0 && (sample->mipPeriod & (sample->mipPeriod - 1)) == 0) ? sample->mipPeriod : 0;
+        const double mipInvP = mipP > 0 ? 1.0 / (double) mipP : 0.0;
+        const double ovScale = ov ? ov->sampleRate / sample->sampleRate : 1.0;
+        const float  ovG0    = p.overlayGainPrev;
+        const float  ovGStep = (p.overlayGain - p.overlayGainPrev) / (float) std::max (1, numSamples);
+        const double ovInvN = 1.0 / (double) ovN;
+        // the mip only changes with the read speed: each grain (and each voice's plain playback) remembers its pick
+        auto pick = [&] (MipCache& c, double step)
+        {
+            c.step = step;
+            if (nMips > 0) c.m = pickMip (*sample, step);
+            c.oSet = ov != nullptr;
+            if (ov != nullptr) c.o = pickMip (*ov, step * ovScale);
+        };
+        // pos mod n without a library call (x >= 0 after one fix-up)
+        auto modP = [] (double x, double n, double invN) { x -= n * (double) (int64_t) (x * invN); return x < 0.0 ? x + n : x; };
+        auto readAll = [&] (double pos, int i, float& l, float& r, MipCache& c, double step)
         {
             if (nMips > 0)
             {
-                const double s1 = std::max (1.0e-6, std::abs (step));
-                int m = 0;
-                while (m + 1 < nMips && (double) sample->mipTop[(size_t) m] * s1 > sample->mipLimit) ++m;
-                const float* mp = sample->mips[(size_t) m].data();
-                readHermite (mp, mp, N, pos, l, r);
+                if (step != c.step) pick (c, step);
+                const float* mp = sample->mips[(size_t) std::min (c.m, nMips - 1)].data();
+                if (mipP > 0) { l = r = readCycle (mp, mipP - 1, modP (pos, (double) mipP, mipInvP)); }
+                else readHermite (mp, mp, N, pos, l, r);
                 return;
             }
             readHermite (srcL, srcR, N, pos, l, r);
+            if (ov != nullptr)
+            {
+                const double q = modP (pos * ovScale, (double) ovN, ovInvN);
+                if (step != c.step || ! c.oSet) pick (c, step);
+                const float* mp = ov->mips[(size_t) std::min (c.o, (int) ov->mips.size() - 1)].data();
+                float w = readCycle (mp, ovN - 1, q);
+                w *= ovG0 + ovGStep * (float) (i + 1);
+                l += w; r += w;
+            }
             if (M == 0) return;
             // layers are pure sines (one harmonic each, 184+ samples per cycle at most 16x): linear reading is clean enough
             // and much cheaper than the Hermite read used for the main buffer
@@ -453,6 +494,13 @@ public:
         const float decayDec   = (1.0f - sus) / (std::max (0.001f, p.decayMs * 0.001f) * (float) sr);
         const float releaseSec = std::max (p.releaseMs * 0.001f, p.grainOn ? 0.15f + 1.2f * p.chime * p.chime : 0.0f);
         const float releaseCoef = (float) std::exp (-6.907755 / (std::max (0.003f, releaseSec) * sr));   // -60 dB over RELEASE
+
+        // 0.99.6 grain budget: with many notes at once (chords, fast playing, long releases) the grain clouds thin out a
+        // little instead of the CPU running out (which crackles in the DAW). Each voice's loudness follows its own grain
+        // overlap, so the level stays the same; one note or one chord is never touched.
+        int liveGrains = 0;
+        for (auto& v : voices) if (v.active) for (auto& g : v.grains) liveGrains += g.active ? 1 : 0;
+        const double budgetStretch = std::max (1.0, (double) liveGrains / (double) kGrainBudget);
 
         const bool chimeOn = p.grainOn && p.chime > 0.001f;
         const float strikeDecay = (float) std::exp (-1.0 / (0.0015 * sr));
@@ -547,7 +595,7 @@ public:
 
                 // dry: plain looping playback
                 float dl, dr;
-                readAll (v.playPos, i, dl, dr, ratio);
+                readAll (v.playPos, i, dl, dr, v.mc, ratio);
                 if (p.loopMode == 0)
                 {
                     v.playPos += ratio;
@@ -584,7 +632,7 @@ public:
                 if (v.nextGrainIn <= 0.0)
                 {
                     const double dens = 3.0 * std::pow (60.0, (double) p.density) * (1.0 + 2.5 * bloom);
-                    double spacing = sr / dens;
+                    double spacing = sr / dens * budgetStretch;
                     spawnGrain (v, p, *sample, ratio, spacing, fileRate, bloom);
                     const double loopLen = p.loopMode == 0 ? 1.0 : std::max (0.005, (double) (p.loopB - p.loopA));
                     v.travel += (double) p.speed * spacing * fileRate / (double) N / loopLen;   // speed stays "seconds of audio"
@@ -609,7 +657,7 @@ public:
                     if (! g.active) continue;
                     const float w = g.perc ? percWindow (g.age, g.length) * 1.6f : window (g.age, g.length, g.fade);
                     float l, r;
-                    readAll (g.pos, i, l, r, g.inc);
+                    readAll (g.pos, i, l, r, g.mc, g.inc);
                     float gv = 1.0f;
                     if (p.volInGrains)
                     {
@@ -728,6 +776,7 @@ private:
         std::array<ChimeCoef, kChimeModes> chimeCoef {};
         std::array<std::array<float, 4>, kChimeModes> chimeState {};
         std::array<Grain, kGrainsPerVoice> grains {};
+        MipCache mc;
     };
 
     void startVoice (Voice& v, int note, float velocity, const Params& p, bool fresh)
@@ -807,13 +856,36 @@ private:
         return a + wrap ((x - a) / (b - a), 1.0) * (b - a);
     }
 
+    // richest band-limited copy whose top harmonic stays under ~19 kHz at this read speed (mips halve their top each step,
+    // so the index comes straight from log2 instead of a search for every sample of every grain)
+    static inline int pickMip (const SampleData& d, double step)
+    {
+        const int n = (int) d.mips.size();
+        const double need = (double) d.mipTop[0] * std::max (1.0e-6, std::abs (step)) / d.mipLimit;
+        if (need <= 1.0) return 0;
+        int e; const double fr = std::frexp (need, &e);   // need = fr * 2^e, fr in [0.5, 1): needs ceil(log2 need) halvings
+        return std::min (n - 1, fr == 0.5 ? e - 1 : e);
+    }
+
     static inline double wrap (double x, double n)
     {
         x = std::fmod (x, n);
         return x < 0.0 ? x + n : x;
     }
 
-    static inline void readHermite (const float* L, const float* R, int N, double pos, float& outL, float& outR)
+    // 0.99.6: one cycle of a mip (power-of-two length), q in [0, n): no wrap branches, always inlined
+    static inline __attribute__((always_inline)) float readCycle (const float* c, int mask, double q)
+    {
+        const int   i1 = (int) q;
+        const float f  = (float) (q - (double) i1);
+        const float y0 = c[(i1 - 1) & mask], y1 = c[i1 & mask], y2 = c[(i1 + 1) & mask], y3 = c[(i1 + 2) & mask];
+        const float c1 = 0.5f * (y2 - y0);
+        const float c2 = y0 - 2.5f * y1 + 2.0f * y2 - 0.5f * y3;
+        const float c3 = 0.5f * (y3 - y0) + 1.5f * (y1 - y2);
+        return ((c3 * f + c2) * f + c1) * f + y1;
+    }
+
+    static inline __attribute__((always_inline)) void readHermite (const float* L, const float* R, int N, double pos, float& outL, float& outR)
     {
         if (pos < 0.0 || pos >= (double) N) pos = wrap (pos, (double) N);   // fast path: almost always inside already
         const int   i1 = std::min (N - 1, (int) pos);
@@ -894,6 +966,7 @@ private:
         g->length = length;
         g->fade = std::max (8, (int) (soft * (float) length * 0.5f));
         g->inc = reverse ? -ratio : ratio;
+        g->mc = {};
         g->pos = reverse ? start + ratio * (double) length : start;
         g->gainL = std::cos (a) * 1.41421356f;
         g->gainR = std::sin (a) * 1.41421356f;
@@ -919,6 +992,7 @@ private:
         // CHIME hammer: every grain strikes the bells (pings and sharp grains hit harder).
         // 0.99.2: only as hard as there is sound in the grains: all grain sticks down = no hammer, no phantom bells
         float srcLevel = s.level;
+        if (p.overlay != nullptr) srcLevel += std::max (0.0f, p.overlayGain) * p.overlay->level;
         for (size_t j = 0; j < s.layers.size() && j < s.layerLevel.size(); ++j)
             srcLevel += std::max (0.0f, p.harmGain[(size_t) s.layerHarm[j]]) * s.layerLevel[j];
         const float hit = std::min (1.0f, srcLevel * 3.0f);

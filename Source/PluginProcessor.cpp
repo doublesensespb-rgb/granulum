@@ -502,7 +502,7 @@ AudioProcessorValueTreeState::ParameterLayout GranulumProcessor::createLayout()
         if (o == 1)
         {
             ps.push_back (std::make_unique<juce::AudioParameterChoice> (ParameterID { ParamID::osc1Mode, 1 }, "OSC 1 Mode", StringArray { "ADDITIVE", "WAVE" }, 0));   // 0.99.6: MIX removed
-            ps.push_back (std::make_unique<P> (ParameterID { ParamID::osc1WaveMix, 1 }, "OSC 1 Wave Mix", NormalisableRange<float> (0.0f, 1.0f), 0.5f, pct));
+            ps.push_back (std::make_unique<P> (ParameterID { ParamID::osc1WaveMix, 1 }, "OSC 1 Mix Wave", NormalisableRange<float> (0.0f, 1.0f), 0.0f, pct));
             ps.push_back (std::make_unique<juce::AudioParameterChoice> (ParameterID { ParamID::osc1Wave, 1 }, "OSC 1 Wave", StringArray { "SINE", "SAW", "SQUARE", "TRIANGLE" }, 1));
         }
         ps.push_back (std::make_unique<P> (ParameterID { o == 1 ? ParamID::osc1Tune : ParamID::osc2Tune, 1 }, n + "Tune", NormalisableRange<float> (-48.0f, 48.0f, 0.0f), 0.0f,
@@ -1277,13 +1277,16 @@ void GranulumProcessor::processChunk (int from, int len)
             }
         }
 
-        // 0.99.5 OSC 1: ADDITIVE (sticks), WAVE (one full waveform) or MIX of the two (WAVE MIX knob)
+        // 0.99.6 OSC 1: WAVE = the full wave only (its own engine); ADDITIVE = the sticks, plus MIX WAVE: the full wave read
+        // by the very same grains of the additive engine (one grain cloud, not a second engine: half the CPU of 0.99.5 MIX)
         const int o1mode = o == 0 ? (int) pOsc1Mode->load() : 0;
-        const float waveAmt = o1mode == 1 ? 1.0f : 0.0f;   // 0.99.6: ADD or WAVE, no mix
-        const float addAmt = 1.0f - waveAmt;
+        const float mixW = o1mode == 0 ? jlimit (0.0f, 1.0f, v[mtOsc1WaveMix]) : 0.0f;
+        const float waveAmt = o1mode == 1 ? 1.0f : 0.0f;                     // the WAVE engine
+        const float addAmt  = o1mode == 1 ? 0.0f : 1.0f - 0.5f * mixW;       // keeps the loudness about even while mixing
+        const float ovAmt   = mixW;                                         // the wave inside the additive grains
         // a part of OSC 1 that is fully off (ADD in WAVE mode, WAVE in ADD mode) is not computed at all
         const bool addIdle  = o == 0 && addAmt <= 0.0f && lastAddAmt <= 0.0f;
-        const bool waveIdle = o == 0 && waveAmt <= 0.0f && lastAddAmt >= 1.0f;
+        const bool waveIdle = o == 0 && waveAmt <= 0.0f && lastWaveAmt <= 0.0f;
         if (o == 0)
         {
             if (addIdle)
@@ -1299,36 +1302,46 @@ void GranulumProcessor::processChunk (int from, int len)
                 clean.volInGrains = false;
                 engineAddClean.render (L, R, len, clean, audible ? addCleanSlot.active.get() : nullptr);
                 if (vp.volInGrains) ramp (L, R);
+                // MIX WAVE rides on the additive grains; its gain is relative, the whole part is scaled by addAmt below
+                if ((ovAmt > 0.0f || lastOvAmt > 0.0f) && audible)
+                {
+                    vp.overlay = waveSlot.active.get();
+                    vp.overlayGain     = ovAmt / std::max (0.05f, addAmt);
+                    vp.overlayGainPrev = lastOvAmt / std::max (0.05f, lastAddAmt > 0.01f ? lastAddAmt : addAmt);
+                }
             }
         }
         if (! addIdle) engines[o]->render (L, R, len, vp, audible ? slots[o]->active.get() : nullptr);
-        if (o == 0 && waveIdle)
+        if (o == 0)
         {
-            if (engineWave.anyActive()) engineWave.reset();
-            lastAddAmt = addAmt;
-        }
-        else if (o == 0)
-        {
-            // additive part at (1 - mix), the full wave at mix: rendered on its own and added
-            const float a0 = lastAddAmt, w0 = 1.0f - lastAddAmt;
-            for (int i = 0; i < len; ++i)
+            const float a0 = lastAddAmt;
+            if (a0 != 1.0f || addAmt != 1.0f)
+                for (int i = 0; i < len; ++i)
+                {
+                    const float ga = a0 + (addAmt - a0) * (float) (i + 1) / (float) len;
+                    L[i] *= ga; R[i] *= ga;
+                }
+            if (waveIdle)
             {
-                const float t = (float) (i + 1) / (float) len;
-                const float ga = a0 + (addAmt - a0) * t;
-                L[i] *= ga; R[i] *= ga;
+                if (engineWave.anyActive()) engineWave.reset();
             }
-            float* WL = waveBuf.getWritePointer (0);
-            float* WR = waveBuf.getWritePointer (1);
-            FloatVectorOperations::clear (WL, len);
-            FloatVectorOperations::clear (WR, len);
-            engineWave.render (WL, WR, len, vp, audible ? waveSlot.active.get() : nullptr);
-            for (int i = 0; i < len; ++i)
+            else
             {
-                const float t = (float) (i + 1) / (float) len;
-                const float gw = w0 + (waveAmt - w0) * t;
-                L[i] += WL[i] * gw; R[i] += WR[i] * gw;
+                const float w0 = lastWaveAmt;
+                float* WL = waveBuf.getWritePointer (0);
+                float* WR = waveBuf.getWritePointer (1);
+                FloatVectorOperations::clear (WL, len);
+                FloatVectorOperations::clear (WR, len);
+                engineWave.render (WL, WR, len, vp, audible ? waveSlot.active.get() : nullptr);
+                for (int i = 0; i < len; ++i)
+                {
+                    const float gw = w0 + (waveAmt - w0) * (float) (i + 1) / (float) len;
+                    L[i] += WL[i] * gw; R[i] += WR[i] * gw;
+                }
             }
             lastAddAmt = addAmt;
+            lastWaveAmt = waveAmt;
+            lastOvAmt = ovAmt;
         }
         if (o == 0) harmGainPrev = vp.harmGain;
         if (! vp.volInGrains) ramp (L, R);
@@ -1719,7 +1732,7 @@ void GranulumProcessor::timerCallback()
     {
         // OSC 1 WAVE: build the band-limited mips of the chosen waveform when it (or the sample rate) changes
         const int wv = jlimit (0, 3, (int) apvts.getRawParameterValue (ParamID::osc1Wave)->load());
-        const bool used = apvts.getRawParameterValue (ParamID::osc1Mode)->load() > 0.5f;
+        const bool used = apvts.getRawParameterValue (ParamID::osc1Mode)->load() > 0.5f || apvts.getRawParameterValue (ParamID::osc1WaveMix)->load() > 0.0001f;
         const double rate = getSampleRate() > 0.0 ? getSampleRate() : 44100.0;
         if (used && (wv != builtWave || rate != builtWaveRate))
         {
@@ -2150,11 +2163,21 @@ void GranulumProcessor::setStateInformation (const void* data, int sizeInBytes)
                     child.setProperty ("value", oldToNew[o], nullptr);
                 }
     }
-    // 0.99.6: OSC 1 mode lost MIX (0.99.5 had ADDITIVE MIX WAVE): anything but ADDITIVE becomes WAVE
+    // 0.99.6: 0.99.5 had ADDITIVE / MIX / WAVE. MIX -> ADDITIVE with its MIX WAVE kept; WAVE -> WAVE;
+    // ADDITIVE -> ADDITIVE with MIX WAVE 0 (0.99.5 stored 0.5 there by default but did not use it)
     if (! state.hasProperty ("modeOrder"))
+    {
+        int oldMode = 0;
         for (auto child : state)
-            if (child.getProperty ("id").toString() == ParamID::osc1Mode && (double) child.getProperty ("value") > 0.5)
-                child.setProperty ("value", 1, nullptr);
+            if (child.getProperty ("id").toString() == ParamID::osc1Mode)
+            {
+                oldMode = (int) std::round ((double) child.getProperty ("value"));
+                child.setProperty ("value", oldMode == 2 ? 1 : 0, nullptr);
+            }
+        if (oldMode != 1)
+            for (auto child : state)
+                if (child.getProperty ("id").toString() == ParamID::osc1WaveMix) child.setProperty ("value", 0.0, nullptr);
+    }
     // 0.99.5: BITCRUSH is gone -> HARD CLIP (its place in the menu is now SQUARE; newer states carry distOrder)
     if (! state.hasProperty ("distOrder"))
         for (auto child : state)

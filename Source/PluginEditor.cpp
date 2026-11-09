@@ -1624,6 +1624,9 @@ static int  osc1ModeIndex (GranulumProcessor& p) { return juce::jlimit (0, 1, (i
 static bool osc1WaveMode (GranulumProcessor& p) { return osc1ModeIndex (p) == 1; }      // the sticks are hidden
 static bool osc1UsesWave (GranulumProcessor& p) { return osc1ModeIndex (p) == 1; }      // the wave buttons pick the full wave
 static int  osc1WaveIndex (GranulumProcessor& p) { return juce::jlimit (0, 3, (int) p.apvts.getRawParameterValue (ParamID::osc1Wave)->load()); }
+// parts of the MIX WAVE pill: [MIX WAVE] [wave glyph] [track] [ 28%]
+static Rectangle<float> pillGlyph (Rectangle<float> r) { return r.withTrimmedLeft (62.0f).withWidth (20.0f); }
+static Rectangle<float> pillTrack (Rectangle<float> r) { return r.withTrimmedLeft (88.0f).withTrimmedRight (36.0f); }
 
 std::array<float, granulum::kNumHarmonics> WavePicker::shape (int i)
 {
@@ -2032,6 +2035,21 @@ void HarmonicEditor::mouseMove (const MouseEvent& e)
 void HarmonicEditor::mouseDown (const MouseEvent& e)
 {
     if (osc1WaveMode (proc)) return;   // WAVE mode: nothing to draw here
+    if (mixPill().contains (e.position))
+    {
+        if (pillGlyph (mixPill()).contains (e.position))
+        {
+            // the little wave: SINE -> SAW -> SQUARE -> TRIANGLE
+            if (auto* w = proc.apvts.getParameter (ParamID::osc1Wave))
+                w->setValueNotifyingHost (w->convertTo0to1 ((float) ((osc1WaveIndex (proc) + 1) % 4)));
+            repaint();
+            return;
+        }
+        mixDrag = true;
+        if (auto* m = proc.apvts.getParameter (ParamID::osc1WaveMix)) m->beginChangeGesture();
+        mouseDrag (e);
+        return;
+    }
 
     if (const auto c = chipAt (e.position); c.harm >= 0)
     {
@@ -2063,7 +2081,7 @@ void HarmonicEditor::mouseDrag (const MouseEvent& e)
 {
     if (mixDrag)
     {
-        const auto r = mixPill().reduced (40.0f, 0.0f);
+        const auto r = pillTrack (mixPill());
         if (auto* m = proc.apvts.getParameter (ParamID::osc1WaveMix))
             m->setValueNotifyingHost (jlimit (0.0f, 1.0f, (e.position.x - r.getX()) / jmax (1.0f, r.getWidth())));
         repaint();
@@ -2088,12 +2106,57 @@ void HarmonicEditor::mouseUp (const MouseEvent&) { if (mixDrag) { mixDrag = fals
 
 Rectangle<float> HarmonicEditor::mixPill() const
 {
-    return getLocalBounds().toFloat().removeFromTop (22.0f).removeFromRight (128.0f).reduced (6.0f, 4.0f);
+    return getLocalBounds().toFloat().removeFromTop (22.0f).removeFromRight (176.0f).reduced (6.0f, 4.0f);
+}
+
+
+static void drawWaveGlyph (Graphics& g, Rectangle<float> b, int wv)
+{
+    Path p;
+    const int n = 24;
+    for (int i = 0; i <= n; ++i)
+    {
+        const float ph = (float) i / (float) n;
+        float v = 0.0f;
+        switch (wv)
+        {
+            case 0:  v = std::sin (MathConstants<float>::twoPi * ph); break;
+            case 1:  v = 1.0f - 2.0f * ph; break;
+            case 2:  v = ph < 0.5f ? 1.0f : -1.0f; break;
+            default: v = ph < 0.5f ? 4.0f * ph - 1.0f : 3.0f - 4.0f * ph; break;
+        }
+        const float x = b.getX() + b.getWidth() * ph, y = b.getCentreY() - v * b.getHeight() * 0.4f;
+        if (i == 0) p.startNewSubPath (x, y); else p.lineTo (x, y);
+    }
+    g.strokePath (p, PathStrokeType (1.3f, PathStrokeType::curved, PathStrokeType::rounded));
 }
 
 void HarmonicEditor::paintOverChildren (Graphics& g)
 {
     if (osc1WaveMode (proc)) return;
+    {
+        // 0.99.6 ADDITIVE: MIX WAVE = how much full wave is mixed in with the sticks; the little wave picks which one
+        const auto r = mixPill();
+        const float v = proc.apvts.getRawParameterValue (ParamID::osc1WaveMix)->load();
+        const bool on = v > 0.001f;
+        g.setColour (Palette::screen.withAlpha (0.92f));
+        g.fillRoundedRectangle (r, r.getHeight() * 0.5f);
+        g.setColour (Palette::accent.withAlpha (on ? 0.7f : 0.3f));
+        g.drawRoundedRectangle (r.reduced (0.5f), r.getHeight() * 0.5f, 1.0f);
+        g.setFont (uiFont (8.5f, true, 0.08f));
+        g.setColour (on ? Palette::text : Palette::textDim);
+        g.drawText ("MIX WAVE", r.withTrimmedLeft (9.0f).withWidth (56.0f), Justification::centredLeft, false);
+        g.setColour (on ? Palette::accent.brighter (0.2f) : Palette::textDim);
+        drawWaveGlyph (g, pillGlyph (r).reduced (2.0f, 3.0f), osc1WaveIndex (proc));
+        auto tr = pillTrack (r).withSizeKeepingCentre (pillTrack (r).getWidth(), 3.0f);
+        g.setColour (Palette::field);
+        g.fillRoundedRectangle (tr, 1.5f);
+        g.setColour (Palette::accent);
+        g.fillRoundedRectangle (tr.withWidth (tr.getWidth() * v), 1.5f);
+        g.fillEllipse (Rectangle<float> (8.0f, 8.0f).withCentre ({ tr.getX() + tr.getWidth() * v, tr.getCentreY() }));
+        g.setColour (on ? Palette::text : Palette::textDim);
+        g.drawText (String (roundToInt (v * 100.0f)) + "%", r.withTrimmedRight (8.0f).removeFromRight (30.0f), Justification::centredRight, false);
+    }
 
     // harmonic numbers (0.99.2): quiet, the stick under the mouse lights up
     if (numStyle > 0)

@@ -396,7 +396,7 @@ public:
     granulum::GrainEngine engineWave;            // 0.99.5: OSC 1 WAVE (full waveform)
     std::atomic<float>* pOsc1Mode = nullptr;
     juce::AudioBuffer<float> waveBuf;
-    float lastAddAmt = 1.0f;
+    float lastAddAmt = 1.0f, lastWaveAmt = 0.0f, lastOvAmt = 0.0f;
     int builtWave = -1;
     double builtWaveRate = 0.0;
     juce::MidiKeyboardState keyboardState;
