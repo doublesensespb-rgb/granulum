@@ -55,7 +55,7 @@ namespace
 
 const StringArray& Distortion::typeNames()
 {
-    static const StringArray s { "FOLD", "TUBE", "HARD CLIP", "BITCRUSH" };   // menu order (FOLD first)
+    static const StringArray s { "FOLD", "TUBE", "HARD CLIP" };   // menu order (FOLD first); BITCRUSH removed in 0.99.5
     return s;
 }
 
@@ -96,11 +96,11 @@ void Distortion::process (float* L, float* R, int n, int type, float drive, floa
     const float a = std::exp (-MathConstants<float>::twoPi * jmin (fc, (float) sr * 0.45f) / (float) osr);
     const float dcK = (float) std::exp (-MathConstants<double>::twoPi * 8.0 / osr);          // ~8 Hz DC blocker
     const float envK = 1.0f - (float) std::exp (-1.0 / (0.12 * osr));                         // ~120 ms level followers
-    static constexpr int menuToShape[4] = { 2, 0, 1, 3 };
-    const int shp = menuToShape[jlimit (0, 3, type)];
+    static constexpr int menuToShape[3] = { 2, 0, 1 };
+    const int shp = menuToShape[jlimit (0, 2, type)];
     const float preK = 1.0f - (float) std::exp (-MathConstants<double>::twoPi * 7000.0 / osr);
-    const float bias = shp == 3 ? 0.0f : 0.06f * drive;           // no lean on BITCRUSH
-    const float biasOut = shape (shp == 3 ? 0 : shp, bias, drive, 0) * (shp == 3 ? 0.0f : 1.0f);
+    const float bias = 0.06f * drive;
+    const float biasOut = shape (shp, bias, drive, 0);
 
     float* chans[2] = { L, R };
     juce::dsp::AudioBlock<float> block (chans, 2, (size_t) n);
@@ -1978,7 +1978,7 @@ void GranulumProcessor::randomizeSection (int section)
         const int m = randMask.load();   // the FX dice also respect the RANDOM menu ticks
         if (m & rndDistBit)
         {
-            set (ParamID::distType,  (float) r.nextInt (4));
+            set (ParamID::distType,  (float) r.nextInt (3));
             set (ParamID::distDrive, range (0.1f, 0.5f));   // 0.99.5: random never slams the distortion
             set (ParamID::distTone,  range (0.35f, 1.0f));
             set (ParamID::distMix,   range (0.4f, 1.0f));
@@ -2085,6 +2085,10 @@ void GranulumProcessor::setStateInformation (const void* data, int sizeInBytes)
                     child.setProperty ("value", oldToNew[o], nullptr);
                 }
     }
+    // 0.99.5: BITCRUSH is gone -> HARD CLIP
+    for (auto child : state)
+        if (child.getProperty ("id").toString() == ParamID::distType && (double) child.getProperty ("value") > 2.5)
+            child.setProperty ("value", 2, nullptr);
     // 0.99.5: noise list = WHITE PINK BROWN BLUE first; STATIC / WIND / BREATH removed. Older states keep their noise.
     if (! state.hasProperty ("noiseOrder"))
         for (auto child : state)
