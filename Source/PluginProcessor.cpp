@@ -98,6 +98,9 @@ void Distortion::process (float* L, float* R, int n, int type, float drive, floa
     const float envK = 1.0f - (float) std::exp (-1.0 / (0.12 * osr));                         // ~120 ms level followers
     static constexpr int menuToShape[4] = { 2, 0, 1, 3 };
     const int shp = menuToShape[jlimit (0, 3, type)];
+    const float preK = 1.0f - (float) std::exp (-MathConstants<double>::twoPi * 7000.0 / osr);
+    const float bias = shp == 3 ? 0.0f : 0.06f * drive;           // no lean on BITCRUSH
+    const float biasOut = shape (shp == 3 ? 0 : shp, bias, drive, 0) * (shp == 3 ? 0.0f : 1.0f);
 
     float* chans[2] = { L, R };
     juce::dsp::AudioBlock<float> block (chans, 2, (size_t) n);
@@ -109,7 +112,10 @@ void Distortion::process (float* L, float* R, int n, int type, float drive, floa
         for (int i = 0; i < m; ++i)
         {
             const float in = x[i];
-            const float y = shape (shp, in, drive, c);
+            // 0.99.5: the shaper hears the signal without its very top (one pole ~7 kHz) and with a slight tube-like
+            // lean (bias): noise turns into a warm crackle, a noise + tone mix "gurgles" (the bias is removed after)
+            pre[c] += (in - pre[c]) * preK;
+            const float y = shape (shp, pre[c] + bias, drive, c) - biasOut;
             const float d = y - dcX[c] + dcK * dcY[c];
             dcX[c] = y; dcY[c] = d;
             lp[c] = (1.0f - a) * d + a * lp[c];
@@ -743,7 +749,7 @@ void GranulumProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
     engineSub.prepare (sampleRate);
 
     dsp::ProcessSpec spec { sampleRate, (uint32) jmax (kChunk, samplesPerBlock), 2 };
-    for (auto* cp : { &chains[0], &chains[1], &chains[2], &subChain })
+    for (auto* cp : { &chains[0], &chains[1], &chains[2], &subChain, &distBusChain })
     {
         auto& c = *cp;
         c.filter.prepare (sampleRate);
@@ -761,7 +767,7 @@ void GranulumProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
     outGain.setCurrentAndTargetValue (Decibels::decibelsToGain (apvts.getRawParameterValue (ParamID::output)->load()));
 
     const int n = jmax (kChunk, samplesPerBlock);
-    for (auto* b : { &addBuf, &smpBuf, &noiseBuf, &work, &wetBuf, &subBuf, &waveBuf }) b->setSize (2, n, false, true, true);
+    for (auto* b : { &addBuf, &smpBuf, &noiseBuf, &work, &wetBuf, &subBuf, &waveBuf, &distBuf }) b->setSize (2, n, false, true, true);
     colorLp[0] = colorLp[1] = colorHp[0] = colorHp[1] = 0.0f;
 
     heldNotes = 0;
@@ -1098,7 +1104,7 @@ void GranulumProcessor::processBlock (AudioBuffer<float>& buffer, MidiBuffer& mi
     {
         heldNotes = 0;
         for (auto* e : { &engineAdd, &engineAddClean, &engineWave, &engineSmp, &engineNoise, &engineSub }) e->reset();
-        for (auto* cp : { &chains[0], &chains[1], &chains[2], &subChain })
+        for (auto* cp : { &chains[0], &chains[1], &chains[2], &subChain, &distBusChain })
         {
             cp->filter.reset(); cp->filter2.reset(); cp->distortion.reset(); cp->delay.reset();
             cp->reverb.reset(); cp->revCut.reset();
@@ -1109,7 +1115,7 @@ void GranulumProcessor::processBlock (AudioBuffer<float>& buffer, MidiBuffer& mi
     }
 
     if (work.getNumSamples() < numSamples)
-        for (auto* b : { &addBuf, &smpBuf, &noiseBuf, &work, &wetBuf, &subBuf, &waveBuf }) b->setSize (2, numSamples, false, false, true);
+        for (auto* b : { &addBuf, &smpBuf, &noiseBuf, &work, &wetBuf, &subBuf, &waveBuf, &distBuf }) b->setSize (2, numSamples, false, false, true);
     for (auto* b : { &addBuf, &smpBuf, &noiseBuf, &work, &subBuf }) b->clear();
 
     hostBpm = 120.0; hostPpq = -1.0; hostPlaying = false;
@@ -1413,6 +1419,37 @@ void GranulumProcessor::processChunk (int from, int len)
         subBuf.clear (from, len);
     lastGSub = gsSub;
 
+    // 0.99.5: DIST is one shared block (like Serum / Saturn): everything routed into it is mixed first and distorted
+    // together, so a noise rides on the tone and they crackle together instead of each one fizzing on its own.
+    // After DIST that mix goes on through DELAY / REVERB if they are lit for any of its members.
+    float* DL = distBuf.getWritePointer (0);
+    float* DR = distBuf.getWritePointer (1);
+    FloatVectorOperations::clear (DL, len);
+    FloatVectorOperations::clear (DR, len);
+    bool distAny = false, distToDelay = false, distToReverb = false;
+
+    auto applyReverb = [&] (FxChain& c, float* L, float* R)
+    {
+        float* wL = wetBuf.getWritePointer (0);
+        float* wR = wetBuf.getWritePointer (1);
+        std::copy (L, L + len, wL);
+        std::copy (R, R + len, wR);
+        auto wetBlock = dsp::AudioBlock<float> (wetBuf).getSubBlock (0, (size_t) len);
+        dsp::ProcessContextReplacing<float> wctx (wetBlock);
+        c.reverb.setParameters (rp);
+        c.reverb.process (wctx);
+        if (revCutHz > 22.0f)
+        {
+            c.revCut.setCutoffFrequency (revCutHz);
+            c.revCut.process (wctx);
+        }
+        for (int i = 0; i < len; ++i)
+        {
+            L[i] = L[i] * revDry + wL[i];
+            R[i] = R[i] * revDry + wR[i];
+        }
+    };
+
     for (int o = 0; o <= kNumOscs; ++o)
     {
         const bool isSub = o == kNumOscs;
@@ -1433,34 +1470,40 @@ void GranulumProcessor::processChunk (int from, int len)
         if (filter2On && routed (4))
             c.filter2.process (L, R, len, ft2, ft2 == FilterUnit::Peak ? jlimit (20.0f, (float) (sr * 0.45), v[mtCutoff2]) : cut2, ft2 == FilterUnit::Peak ? v[mtPeakQ2] : v[mtReso2], v[mtPeakGain2]);
         if (distOn && routed (1))
-            c.distortion.process (L, R, len, (int) pDistType->load(), v[mtDistDrive], 0.88f, v[mtDistMix]);   // 0.99.5: no TONE knob, fixed gentle top (~12 kHz)
+        {
+            // into the shared DIST: its own delay / reverb are not used, the mix decides after DIST
+            FloatVectorOperations::add (DL, L, len);
+            FloatVectorOperations::add (DR, R, len);
+            distAny = true;
+            distToDelay  = distToDelay  || (delayOn && routed (2));
+            distToReverb = distToReverb || (revOn && routed (3));
+            continue;
+        }
         if (delayOn && routed (2))
             c.delay.process (L, R, len, delayMs, v[mtDelayFb], v[mtDelayTone], v[mtDelayMix], pDelayPing->load() > 0.5f);
         if (revOn && routed (3))
-        {
-            float* wL = wetBuf.getWritePointer (0);
-            float* wR = wetBuf.getWritePointer (1);
-            std::copy (L, L + len, wL);
-            std::copy (R, R + len, wR);
-            auto wetBlock = dsp::AudioBlock<float> (wetBuf).getSubBlock (0, (size_t) len);
-            dsp::ProcessContextReplacing<float> wctx (wetBlock);
-            c.reverb.setParameters (rp);
-            c.reverb.process (wctx);
-            if (revCutHz > 22.0f)
-            {
-                c.revCut.setCutoffFrequency (revCutHz);
-                c.revCut.process (wctx);
-            }
-            for (int i = 0; i < len; ++i)
-            {
-                L[i] = L[i] * revDry + wL[i];
-                R[i] = R[i] * revDry + wR[i];
-            }
-        }
+            applyReverb (c, L, R);
 
         for (int i = 0; i < len; ++i) { outL[i] += L[i]; outR[i] += R[i]; }
     }
 
+    {
+        auto& c = distBusChain;
+        float peak = 0.0f;
+        for (int i = 0; i < len; ++i) peak = jmax (peak, std::abs (DL[i]), std::abs (DR[i]));
+        c.quietSeconds = (distAny && peak > 1.0e-6f) ? 0.0 : c.quietSeconds + (double) len / sr;
+        if (distAny) { c.busDelay = distToDelay; c.busReverb = distToReverb; }
+        if (c.quietSeconds <= 12.0)
+        {
+            if (distAny)
+                c.distortion.process (DL, DR, len, (int) pDistType->load(), v[mtDistDrive], 0.88f, v[mtDistMix]);   // no TONE knob (0.99.5)
+            if (c.busDelay && delayOn)
+                c.delay.process (DL, DR, len, delayMs, v[mtDelayFb], v[mtDelayTone], v[mtDelayMix], pDelayPing->load() > 0.5f);
+            if (c.busReverb && revOn)
+                applyReverb (c, DL, DR);
+            for (int i = 0; i < len; ++i) { outL[i] += DL[i]; outR[i] += DR[i]; }
+        }
+    }
 
     // ---- output ----
     outGain.setTargetValue (Decibels::decibelsToGain (v[mtOutput]));
