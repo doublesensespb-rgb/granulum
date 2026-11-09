@@ -55,7 +55,7 @@ namespace
 
 const StringArray& Distortion::typeNames()
 {
-    static const StringArray s { "FOLD", "TUBE", "HARD CLIP" };   // menu order (FOLD first); BITCRUSH removed in 0.99.5
+    static const StringArray s { "FOLD", "TUBE", "HARD CLIP", "SQUARE" };   // menu order (FOLD first); 0.99.5: BITCRUSH -> SQUARE
     return s;
 }
 
@@ -72,6 +72,12 @@ float Distortion::shape (int type, float x, float drive, int ch)
             return jlimit (-1.0f, 1.0f, x * (1.0f + 22.0f * drive * drive));
         case 2:
             return std::sin (x * (1.0f + 10.0f * drive) * MathConstants<float>::halfPi);
+        case 4:
+        {
+            // SQUARE: turns the wave into a square at any level (a soft comparator); DRIVE = how hard the edges are
+            const float e = 0.35f * (1.0f - drive) * (1.0f - drive) + 0.004f;
+            return x * (1.0f + e) / (std::abs (x) + e);
+        }
         case 3:
         {
             const float bits = 16.0f - 13.0f * drive;
@@ -96,8 +102,8 @@ void Distortion::process (float* L, float* R, int n, int type, float drive, floa
     const float a = std::exp (-MathConstants<float>::twoPi * jmin (fc, (float) sr * 0.45f) / (float) osr);
     const float dcK = (float) std::exp (-MathConstants<double>::twoPi * 8.0 / osr);          // ~8 Hz DC blocker
     const float envK = 1.0f - (float) std::exp (-1.0 / (0.12 * osr));                         // ~120 ms level followers
-    static constexpr int menuToShape[3] = { 2, 0, 1 };
-    const int shp = menuToShape[jlimit (0, 2, type)];
+    static constexpr int menuToShape[4] = { 2, 0, 1, 4 };
+    const int shp = menuToShape[jlimit (0, 3, type)];
     const float preK = 1.0f - (float) std::exp (-MathConstants<double>::twoPi * 7000.0 / osr);
     const float bias = 0.06f * drive;
     const float biasOut = shape (shp, bias, drive, 0);
@@ -1978,7 +1984,7 @@ void GranulumProcessor::randomizeSection (int section)
         const int m = randMask.load();   // the FX dice also respect the RANDOM menu ticks
         if (m & rndDistBit)
         {
-            set (ParamID::distType,  (float) r.nextInt (3));
+            set (ParamID::distType,  (float) r.nextInt (4));
             set (ParamID::distDrive, range (0.1f, 0.5f));   // 0.99.5: random never slams the distortion
             set (ParamID::distTone,  range (0.35f, 1.0f));
             set (ParamID::distMix,   range (0.4f, 1.0f));
@@ -2027,6 +2033,7 @@ void GranulumProcessor::getStateInformation (MemoryBlock& destData)
     state.setProperty ("presetFolder", presetSub, nullptr);
     state.setProperty ("randMask", randMask.load(), nullptr);
     state.setProperty ("noiseOrder", 2, nullptr);
+    state.setProperty ("distOrder", 2, nullptr);
     state.setProperty ("oscFold", String ((int) uiFold[0]) + String ((int) uiFold[1]) + String ((int) uiFold[2]), nullptr);
     state.setProperty ("pluginVersion", GRAINFORM_VERSION, nullptr);
     state.setProperty ("grainMask", (int) grainMask.load(), nullptr);
@@ -2085,10 +2092,11 @@ void GranulumProcessor::setStateInformation (const void* data, int sizeInBytes)
                     child.setProperty ("value", oldToNew[o], nullptr);
                 }
     }
-    // 0.99.5: BITCRUSH is gone -> HARD CLIP
-    for (auto child : state)
-        if (child.getProperty ("id").toString() == ParamID::distType && (double) child.getProperty ("value") > 2.5)
-            child.setProperty ("value", 2, nullptr);
+    // 0.99.5: BITCRUSH is gone -> HARD CLIP (its place in the menu is now SQUARE; newer states carry distOrder)
+    if (! state.hasProperty ("distOrder"))
+        for (auto child : state)
+            if (child.getProperty ("id").toString() == ParamID::distType && (double) child.getProperty ("value") > 2.5)
+                child.setProperty ("value", 2, nullptr);
     // 0.99.5: noise list = WHITE PINK BROWN BLUE first; STATIC / WIND / BREATH removed. Older states keep their noise.
     if (! state.hasProperty ("noiseOrder"))
         for (auto child : state)

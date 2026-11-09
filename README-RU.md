@@ -118,7 +118,7 @@ OpenAI Codex, Cursor, Kimi и т.п. Первое сообщение агент�
   Колесо мыши — шаг 5%, с Shift — 1%; тянуть мышью — шаг 1%.
 - Грануляр: BLOOM, SMEAR, SCATTER, SHIMMER, DRIFT, CHIME + SIZE, SPEED, POSITION, DENSITY, SPREAD, MIX; RANDOM с характерами.
 - Луп: OFF / LOOP / PING-PONG / ONE-SHOT, флажки на экране.
-- Фильтры: LP12, LP24, HP, BP, PEAK (GAIN ±36 дБ, Q), COMB, VOWEL + окошко фильтра. Дисторшн (общий для всех осцилляторов, как в Serum): FOLD, TUBE, HARD CLIP, ручки DRIVE и MIX. Дилей, реверб.
+- Фильтры: LP12, LP24, HP, BP, PEAK (GAIN ±36 дБ, Q), COMB, VOWEL + окошко фильтра. Дисторшн (общий для всех осцилляторов, как в Serum): FOLD, TUBE, HARD CLIP, SQUARE (делает волну квадратной), ручки DRIVE и MIX. Дилей, реверб.
 - 3 LFO со своими точками (до 16), INTO GRAINS (без щелчков), одна ручка RATE (как в Serum); ADSR; UNDO.
 - Ручки как в Serum (Shift/Ctrl — точнее), OUTPUT 0 dB, кнопка CLIP включает/выключает клипер (нажимается вся рамка, включённая горит целиком). Курсор без «руки».
 
