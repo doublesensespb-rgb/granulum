@@ -1266,17 +1266,33 @@ void GranulumProcessor::processChunk (int from, int len)
         const int o1mode = o == 0 ? (int) pOsc1Mode->load() : 0;
         const float waveAmt = o1mode == 2 ? 1.0f : o1mode == 1 ? jlimit (0.0f, 1.0f, v[mtOsc1WaveMix]) : 0.0f;
         const float addAmt = 1.0f - waveAmt;
+        // a part of OSC 1 that is fully off (ADD in WAVE mode, WAVE in ADD mode) is not computed at all
+        const bool addIdle  = o == 0 && addAmt <= 0.0f && lastAddAmt <= 0.0f;
+        const bool waveIdle = o == 0 && waveAmt <= 0.0f && lastAddAmt >= 1.0f;
         if (o == 0)
         {
-            // harmonics switched off in the GRAIN row: clean and mono, never granulated (normal volume)
-            auto clean = vp;
-            clean.grainOn = false;
-            clean.volInGrains = false;
-            engineAddClean.render (L, R, len, clean, audible && addAmt > 0.0f ? addCleanSlot.active.get() : nullptr);
-            if (vp.volInGrains) ramp (L, R);
+            if (addIdle)
+            {
+                if (engineAdd.anyActive()) engineAdd.reset();
+                if (engineAddClean.anyActive()) engineAddClean.reset();
+            }
+            else
+            {
+                // harmonics switched off in the GRAIN row: clean and mono, never granulated (normal volume)
+                auto clean = vp;
+                clean.grainOn = false;
+                clean.volInGrains = false;
+                engineAddClean.render (L, R, len, clean, audible ? addCleanSlot.active.get() : nullptr);
+                if (vp.volInGrains) ramp (L, R);
+            }
         }
-        engines[o]->render (L, R, len, vp, audible && (o != 0 || addAmt > 0.0f) ? slots[o]->active.get() : nullptr);
-        if (o == 0)
+        if (! addIdle) engines[o]->render (L, R, len, vp, audible ? slots[o]->active.get() : nullptr);
+        if (o == 0 && waveIdle)
+        {
+            if (engineWave.anyActive()) engineWave.reset();
+            lastAddAmt = addAmt;
+        }
+        else if (o == 0)
         {
             // additive part at (1 - mix), the full wave at mix: rendered on its own and added
             const float a0 = lastAddAmt, w0 = 1.0f - lastAddAmt;
@@ -1290,7 +1306,7 @@ void GranulumProcessor::processChunk (int from, int len)
             float* WR = waveBuf.getWritePointer (1);
             FloatVectorOperations::clear (WL, len);
             FloatVectorOperations::clear (WR, len);
-            engineWave.render (WL, WR, len, vp, audible && (waveAmt > 0.0f || w0 > 0.0f) ? waveSlot.active.get() : nullptr);
+            engineWave.render (WL, WR, len, vp, audible ? waveSlot.active.get() : nullptr);
             for (int i = 0; i < len; ++i)
             {
                 const float t = (float) (i + 1) / (float) len;
