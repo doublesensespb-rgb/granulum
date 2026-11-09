@@ -4660,7 +4660,6 @@ GranulumEditor::GranulumEditor (GranulumProcessor& p)
     for (auto& k : peakQKnobs) { k->setVisible (false); k->slider.setTooltip ("Q: width of the PEAK. Low = wide and soft, high = narrow and sharp"); }
 
     add (distKnobs,  ParamID::distDrive, "Drive",    Knob::Size::Small);
-    add (distKnobs,  ParamID::distTone,  "Tone",     Knob::Size::Small);
     add (distKnobs,  ParamID::distMix,   "Mix",      Knob::Size::Small);
     add (delayKnobs, ParamID::delayTime, "Time",     Knob::Size::Small);
     add (delayKnobs, ParamID::delayFb,   "Feedback", Knob::Size::Small);

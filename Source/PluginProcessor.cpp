@@ -1433,7 +1433,7 @@ void GranulumProcessor::processChunk (int from, int len)
         if (filter2On && routed (4))
             c.filter2.process (L, R, len, ft2, ft2 == FilterUnit::Peak ? jlimit (20.0f, (float) (sr * 0.45), v[mtCutoff2]) : cut2, ft2 == FilterUnit::Peak ? v[mtPeakQ2] : v[mtReso2], v[mtPeakGain2]);
         if (distOn && routed (1))
-            c.distortion.process (L, R, len, (int) pDistType->load(), v[mtDistDrive], v[mtDistTone], v[mtDistMix]);
+            c.distortion.process (L, R, len, (int) pDistType->load(), v[mtDistDrive], 0.88f, v[mtDistMix]);   // 0.99.5: no TONE knob, fixed gentle top (~12 kHz)
         if (delayOn && routed (2))
             c.delay.process (L, R, len, delayMs, v[mtDelayFb], v[mtDelayTone], v[mtDelayMix], pDelayPing->load() > 0.5f);
         if (revOn && routed (3))
