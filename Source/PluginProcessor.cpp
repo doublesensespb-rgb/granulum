@@ -603,7 +603,7 @@ AudioProcessorValueTreeState::ParameterLayout GranulumProcessor::createLayout()
     ps.push_back (std::make_unique<P> (ParameterID { ParamID::ampR, 1 }, "Amp Release", skewed (5.0f, 10000.0f, 600.0f), 300.0f, msFmt));
 
     // VOICE / global
-    ps.push_back (std::make_unique<B> (ParameterID { ParamID::mono, 1 }, "Mono", false));
+    ps.push_back (std::make_unique<B> (ParameterID { ParamID::mono, 1 }, "Mono", true));   // 0.99.5: INIT (and a fresh plugin) starts in MONO
     ps.push_back (std::make_unique<P> (ParameterID { ParamID::porta, 1 }, "Portamento", skewed (0.0f, 3000.0f, 200.0f), 0.0f,
                                        A().withStringFromValueFunction ([] (float v, int) { return v < 0.5f ? String ("OFF") : v < 1000.0f ? fmt (v, 0, " ms") : fmt (v / 1000.0f, 2, " s"); })));
     ps.push_back (std::make_unique<B> (ParameterID { ParamID::clipOn, 1 }, "Output Clipper", true));
