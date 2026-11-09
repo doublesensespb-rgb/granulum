@@ -671,6 +671,22 @@ private:
     GranulumProcessor& proc;
 };
 
+class Osc1ModeSwitch final : public juce::Component, public juce::SettableTooltipClient
+{
+public:
+    explicit Osc1ModeSwitch (GranulumProcessor& p) : proc (p)
+    {
+        setTooltip ("OSC 1: ADDITIVE = build the sound from 16 sticks.  WAVE = one full waveform (SINE / SAW / SQUARE / TRIANGLE) "
+                    "with all its harmonics. The grains work in both.");
+        setRepaintsOnMouseActivity (true);
+    }
+    void paint (juce::Graphics&) override;
+    void mouseDown (const juce::MouseEvent&) override;
+    std::function<void()> onChange;
+private:
+    GranulumProcessor& proc;
+};
+
 // LOOP mode selector in the GRAIN FIELD title row: OFF | LOOP | PING-PONG | ONE-SHOT
 class LoopModeBar final : public juce::Component, public juce::SettableTooltipClient, private juce::Timer
 {
@@ -812,6 +828,7 @@ private:
     SampleMenu sampleMenu { proc };
     LoopModeBar loopBar { proc };
     WavePicker wavePicker { proc };
+    Osc1ModeSwitch osc1Mode { proc };
     void toggleSampleMenu (bool show);
 public:
     void openSampleMenuForPreview (bool show = true) { toggleSampleMenu (show); }

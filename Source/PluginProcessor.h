@@ -90,6 +90,8 @@ namespace ParamID
     inline constexpr const char* clipOn    = "clipOn";
     inline constexpr const char* osc1Tune  = "osc1Tune";    // 0.99.2: smooth pitch, -48..+48 semitones (like Serum COARSE)
     inline constexpr const char* osc2Tune  = "osc2Tune";
+    inline constexpr const char* osc1Mode  = "osc1Mode";    // 0.99.5: 0 ADDITIVE (sticks), 1 WAVE (a full waveform)
+    inline constexpr const char* osc1Wave  = "osc1Wave";    // SINE SAW SQUARE TRIANGLE (WAVE mode)
     inline constexpr const char* pitch     = "pitch";       // master pitch of the whole synth, -24..+24 semitones, smooth (0.99.3)
     inline constexpr const char* osc1Pan   = "osc1Pan";
     inline constexpr const char* osc2Pan   = "osc2Pan";

@@ -467,6 +467,11 @@ AudioProcessorValueTreeState::ParameterLayout GranulumProcessor::createLayout()
         ps.push_back (std::make_unique<P> (ParameterID { o == 1 ? ParamID::osc1Oct : ParamID::osc2Oct, 1 }, n + "Octave", NormalisableRange<float> (-3.0f, 3.0f, 1.0f), 0.0f, octFmt));
         ps.push_back (std::make_unique<P> (ParameterID { o == 1 ? ParamID::osc1Semi : ParamID::osc2Semi, 1 }, n + "Semi", NormalisableRange<float> (-12.0f, 12.0f, 1.0f), 0.0f, semiFmt));
         ps.push_back (std::make_unique<B> (ParameterID { o == 1 ? ParamID::osc1Grain : ParamID::osc2Grain, 1 }, n + "Granular", false));
+        if (o == 1)
+        {
+            ps.push_back (std::make_unique<juce::AudioParameterChoice> (ParameterID { ParamID::osc1Mode, 1 }, "OSC 1 Mode", StringArray { "ADDITIVE", "WAVE" }, 0));
+            ps.push_back (std::make_unique<juce::AudioParameterChoice> (ParameterID { ParamID::osc1Wave, 1 }, "OSC 1 Wave", StringArray { "SINE", "SAW", "SQUARE", "TRIANGLE" }, 1));
+        }
         ps.push_back (std::make_unique<P> (ParameterID { o == 1 ? ParamID::osc1Tune : ParamID::osc2Tune, 1 }, n + "Tune", NormalisableRange<float> (-48.0f, 48.0f, 0.0f), 0.0f,
                                            A().withStringFromValueFunction ([] (float v, int) { return (v > 0.05f ? "+" : "") + String (v, 1) + " st"; })));
     }
@@ -760,6 +765,7 @@ void GranulumProcessor::resetToInit()
     ++modVersion;
     for (int l = 0; l < kNumLfos; ++l) setLfoPoints (l, lfoPreset (1));
     setGrainMask (0xffffu);
+    clearSample();            // 0.99.5: INIT also forgets the audio file of OSC 3
     presetName = "INIT";
     presetSub = {};
     soundReset.store (true);
@@ -2000,7 +2006,9 @@ void GranulumProcessor::setStateInformation (const void* data, int sizeInBytes)
     File f (path);
     String err;
     if (path.isNotEmpty() && f.existsAsFile() && loadSample (f, err))
-        if (auto* on = apvts.getParameter (ParamID::osc2On)) on->setValueNotifyingHost (osc2 ? 1.0f : 0.0f);
+        { if (auto* on = apvts.getParameter (ParamID::osc2On)) on->setValueNotifyingHost (osc2 ? 1.0f : 0.0f); }
+    else
+        clearSample();   // 0.99.5: a preset without an audio file must not keep the file of the previous preset
     timerCallback();
 }
 

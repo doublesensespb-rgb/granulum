@@ -1617,6 +1617,9 @@ void SubBars::mouseUp (const MouseEvent&)
 // ============================================================================
 // OSC 1 waveforms
 
+static bool osc1WaveMode (GranulumProcessor& p) { return p.apvts.getRawParameterValue (ParamID::osc1Mode)->load() > 0.5f; }
+static int  osc1WaveIndex (GranulumProcessor& p) { return juce::jlimit (0, 3, (int) p.apvts.getRawParameterValue (ParamID::osc1Wave)->load()); }
+
 std::array<float, granulum::kNumHarmonics> WavePicker::shape (int i)
 {
     std::array<float, granulum::kNumHarmonics> h {};
@@ -1637,6 +1640,7 @@ std::array<float, granulum::kNumHarmonics> WavePicker::shape (int i)
 
 int WavePicker::matching() const
 {
+    if (osc1WaveMode (proc)) return osc1WaveIndex (proc);   // WAVE mode: the chosen full waveform
     const auto now = proc.getHarmonics();
     for (int i = 0; i < 4; ++i)
     {
@@ -1689,8 +1693,56 @@ void WavePicker::paint (Graphics& g)
 
 void WavePicker::mouseDown (const MouseEvent& e)
 {
-    proc.setHarmonics (shape (segmentAt (e.position.x)));
+    if (osc1WaveMode (proc))
+    {
+        if (auto* w = proc.apvts.getParameter (ParamID::osc1Wave)) w->setValueNotifyingHost (w->convertTo0to1 ((float) segmentAt (e.position.x)));
+    }
+    else
+        proc.setHarmonics (shape (segmentAt (e.position.x)));
     repaint();
+}
+
+// ============================================================================
+// OSC 1 mode: ADDITIVE (sticks) or WAVE (one full waveform, all harmonics). 0.99.5
+
+void Osc1ModeSwitch::paint (Graphics& g)
+{
+    auto r = getLocalBounds().toFloat().reduced (0.5f);
+    g.setColour (Palette::field);
+    g.fillRoundedRectangle (r, 6.0f);
+    const bool wave = osc1WaveMode (proc);
+    const char* names[2] = { "ADDITIVE", "WAVE" };
+    const float w = r.getWidth() / 2.0f;
+    for (int i = 0; i < 2; ++i)
+    {
+        auto seg = Rectangle<float> (r.getX() + w * (float) i, r.getY(), w, r.getHeight()).reduced (2.0f);
+        const bool on = (i == 1) == wave;
+        if (on)
+        {
+            g.setColour (Palette::accent);
+            g.fillRoundedRectangle (seg, 4.5f);
+        }
+        else if (isMouseOver() && seg.contains (getMouseXYRelative().toFloat()))
+        {
+            g.setColour (Colours::white.withAlpha (0.06f));
+            g.fillRoundedRectangle (seg, 4.5f);
+        }
+        g.setColour (on ? Colours::white : Palette::textDim);
+        g.setFont (uiFont (9.5f, true, 0.1f));
+        g.drawText (names[i], seg, Justification::centred, false);
+    }
+}
+
+void Osc1ModeSwitch::mouseDown (const MouseEvent& e)
+{
+    if (auto* m = proc.apvts.getParameter (ParamID::osc1Mode))
+    {
+        m->beginChangeGesture();
+        m->setValueNotifyingHost (e.position.x > (float) getWidth() * 0.5f ? 1.0f : 0.0f);
+        m->endChangeGesture();
+    }
+    repaint();
+    if (onChange) onChange();
 }
 
 // ============================================================================
@@ -1974,6 +2026,7 @@ void HarmonicEditor::mouseMove (const MouseEvent& e)
 
 void HarmonicEditor::mouseDown (const MouseEvent& e)
 {
+    if (osc1WaveMode (proc)) return;   // WAVE mode: nothing to draw here
     if (const auto c = chipAt (e.position); c.harm >= 0)
     {
         if (e.mods.isPopupMenu()) { proc.removeModulation (kHarmTarget0 + c.harm, c.lfo); repaint(); return; }
@@ -2021,6 +2074,7 @@ void HarmonicEditor::mouseUp (const MouseEvent&) { if (chipDrag.harm >= 0) reado
 
 void HarmonicEditor::paintOverChildren (Graphics& g)
 {
+    if (osc1WaveMode (proc)) return;
     // harmonic numbers (0.99.2): quiet, the stick under the mouse lights up
     if (numStyle > 0)
     {
@@ -2057,6 +2111,48 @@ void HarmonicEditor::paint (Graphics& g)
     auto r = getLocalBounds().toFloat();
     g.setColour (Palette::screen);
     g.fillRoundedRectangle (r, 9.0f);
+
+    if (osc1WaveMode (proc))
+    {
+        // WAVE mode: the screen shows the full waveform instead of the sticks (they keep their values for ADDITIVE)
+        const int wv = osc1WaveIndex (proc);
+        const bool on = proc.apvts.getRawParameterValue (ParamID::osc1On)->load() > 0.5f;
+        auto a = r.reduced (14.0f, 16.0f);
+        const float mid = a.getCentreY(), amp = a.getHeight() * 0.42f;
+        g.setColour (Palette::textDim.withAlpha (0.18f));
+        g.drawHorizontalLine ((int) mid, a.getX(), a.getRight());
+        Path p;
+        const int pts = 400;
+        for (int i = 0; i < pts; ++i)
+        {
+            const float t = (float) i / (float) (pts - 1) * 2.0f;          // two cycles
+            const float ph = t - std::floor (t);
+            float v = 0.0f;
+            switch (wv)
+            {
+                case 0:  v = std::sin (MathConstants<float>::twoPi * ph); break;
+                case 1:  v = 1.0f - 2.0f * ph; break;
+                case 2:  v = ph < 0.5f ? 1.0f : -1.0f; break;
+                default: v = ph < 0.5f ? 4.0f * ph - 1.0f : 3.0f - 4.0f * ph; break;
+            }
+            const float x = a.getX() + a.getWidth() * (float) i / (float) (pts - 1), y = mid - v * amp;
+            if (i == 0) p.startNewSubPath (x, y); else p.lineTo (x, y);
+        }
+        Path fill (p);
+        fill.lineTo (a.getRight(), mid); fill.lineTo (a.getX(), mid); fill.closeSubPath();
+        const auto cu = Palette::accent.withMultipliedAlpha (on ? 1.0f : 0.4f);
+        g.setGradientFill (ColourGradient (cu.withAlpha (0.22f), a.getX(), a.getY(), cu.withAlpha (0.02f), a.getX(), mid, false));
+        g.fillPath (fill);
+        g.setColour (cu.withAlpha (0.25f));
+        g.strokePath (p, PathStrokeType (5.0f, PathStrokeType::curved, PathStrokeType::rounded));
+        g.setColour (cu);
+        g.strokePath (p, PathStrokeType (1.8f, PathStrokeType::curved, PathStrokeType::rounded));
+        const char* names[4] = { "SINE", "SAW", "SQUARE", "TRIANGLE" };
+        g.setColour (Palette::textDim.withAlpha (0.75f));
+        g.setFont (uiFont (9.0f, true, 0.12f));
+        g.drawText (String (names[wv]) + "  \u00b7  FULL WAVE", r.reduced (10.0f, 6.0f), Justification::topLeft, false);
+        return;
+    }
 
     const bool active = proc.apvts.getRawParameterValue (ParamID::osc1On)->load() > 0.5f;
     const bool grains = grainsActive();
@@ -4554,6 +4650,8 @@ GranulumEditor::GranulumEditor (GranulumProcessor& p)
     osc3LampA   = std::make_unique<ButtonAtt> (s, ParamID::osc3On,   osc3Lamp);
     osc4LampA   = std::make_unique<ButtonAtt> (s, ParamID::subOn,    osc4Lamp);
     addAndMakeVisible (osc4Lamp);
+    addAndMakeVisible (osc1Mode);
+    osc1Mode.onChange = [this] { resized(); repaint(); harmonics.repaint(); wavePicker.repaint(); };
     for (int i = 0; i < 3; ++i)
     {
         addAndMakeVisible (foldBtn[i]);
@@ -4974,7 +5072,7 @@ void GranulumEditor::setFold (int i, bool f)
 void GranulumEditor::timerCallback()
 {
     // a preset / project can bring its own folded oscillators
-    if (foldSig != (int) proc.uiFold[0] + 2 * (int) proc.uiFold[1] + 4 * (int) proc.uiFold[2]) { resized(); repaint(); }
+    if (foldSig != (int) proc.uiFold[0] + 2 * (int) proc.uiFold[1] + 4 * (int) proc.uiFold[2] + 8 * (int) osc1WaveMode (proc)) { resized(); repaint(); }
 
    #if JUCE_WINDOWS
     // JUCE 8 draws with Direct2D by default on Windows; with several animated plugin windows that made the whole
@@ -5577,7 +5675,7 @@ void GranulumEditor::resized()
         osc4Area = nextRow (0);
         osc2Area = nextRow (1);
         osc3Area = nextRow (2);
-        foldSig = (int) proc.uiFold[0] + 2 * (int) proc.uiFold[1] + 4 * (int) proc.uiFold[2];
+        foldSig = (int) proc.uiFold[0] + 2 * (int) proc.uiFold[1] + 4 * (int) proc.uiFold[2] + 8 * (int) osc1WaveMode (proc);
 
         auto a1 = osc1Area.reduced (S (8), S (5));
         auto h1 = a1.removeFromTop (S (26));
@@ -5585,10 +5683,14 @@ void GranulumEditor::resized()
         h1.removeFromRight (S (6));
         osc1Grain.setBounds (h1.removeFromRight (S (60)).reduced (0, S (1)));
         h1.removeFromRight (S (6));
-        chordButton.setBounds (h1.removeFromRight (S (124)).reduced (0, S (1)));
+        chordButton.setBounds (h1.removeFromRight (S (112)).reduced (0, S (1)));
         h1.removeFromRight (S (6));
-        wavePicker.setBounds (h1.removeFromRight (S (92)).reduced (0, S (1)));
+        wavePicker.setBounds (h1.removeFromRight (S (88)).reduced (0, S (1)));
+        h1.removeFromRight (S (4));
+        osc1Mode.setBounds (h1.removeFromRight (S (112)).reduced (0, S (1)));   // ADDITIVE | WAVE
+        osc1Lamp.sub = {};                         // the ADDITIVE | WAVE switch says what OSC 1 is
         osc1Lamp.setBounds (h1);
+        rndBars.setVisible (! osc1WaveMode (proc));   // RANDOM sticks: only in ADDITIVE
         a1.removeFromTop (S (4));
         auto k1 = a1.removeFromRight (S (200));   // 5 knobs (TUNE added) in about the old width, so the sticks and GRAIN switches keep their size
         a1.removeFromRight (S (4));
