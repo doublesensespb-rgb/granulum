@@ -194,7 +194,7 @@ public:
     }
     void reset()
     {
-        for (int c = 0; c < 2; ++c) { lp[c] = dcX[c] = dcY[c] = hold[c] = 0.0f; count[c] = 0; envIn[c] = envWet[c] = 0.0f; }
+        for (int c = 0; c < 2; ++c) { lp[c] = dcX[c] = dcY[c] = hold[c] = pre[c] = 0.0f; count[c] = 0; envIn[c] = envWet[c] = 0.0f; }
         agc = 1.0f;
         os.reset();
     }
@@ -206,6 +206,7 @@ private:
     float lp[2] {}, dcX[2] {}, dcY[2] {}, hold[2] {};
     int count[2] {};
     float envIn[2] {}, envWet[2] {}, agc = 1.0f;
+    float pre[2] {};   // gentle top cut before the shaper: noise crackles warm instead of fizzing
     juce::dsp::Oversampling<float> os { 2, 2, juce::dsp::Oversampling<float>::filterHalfBandPolyphaseIIR, true };
 };
 
@@ -266,6 +267,7 @@ struct FxChain
     juce::dsp::Reverb reverb;
     juce::dsp::StateVariableTPTFilter<float> revCut;   // LOW CUT on the reverb tail only
     double quietSeconds = 1.0e9;
+    bool busDelay = false, busReverb = false;          // shared DIST bus only: what follows it
 };
 
 class GranulumProcessor final : public juce::AudioProcessor,
@@ -468,6 +470,8 @@ private:
 
     std::array<FxChain, kNumOscs> chains;
     FxChain subChain;   // the SUB's own effect chain (it only goes through blocks whose "2" digit is lit)
+    FxChain distBusChain;   // 0.99.5: the shared DIST (+ the delay / reverb that follow it for the distorted mix)
+    juce::AudioBuffer<float> distBuf;
     juce::SmoothedValue<float> outGain;
     juce::AudioBuffer<float> addBuf, smpBuf, noiseBuf, work, wetBuf, subBuf;
     float lastG1 = 0.0f, lastG2 = 0.0f, lastG3 = 0.0f, blockPeak = 0.0f;
