@@ -167,7 +167,11 @@ v0.99.5: OSC 1 `osc1Mode` ADD|MIX|WAVE + `osc1Wave` + `osc1WaveMix` (mod target 
 rendered. Distortion 4x oversampled (dsp::Oversampling IIR) with auto level (AGC -24..+6 dB) and gentler drive curves. RANDOM ALL
 menu (`randMask`, state). Noise list rebuilt: WHITE PINK BROWN BLUE first (tools/make_noises.py --classic / --new), STATIC WIND
 BREATH removed; old states (no `noiseOrder` property) are remapped by name. Noises +3 st. INIT / preset without file -> clearSample.
-LFO'd sticks draw at their live level (harmLive / modNorm). Branch `shared-dist` = experiment (shared DIST bus), not merged.
+LFO'd sticks draw at their live level (harmLive / modNorm). DIST is ONE shared bus (`distBusChain`, `distBuf`): sources routed
+to DIST are summed and distorted together (noise + tone intermodulate like Serum); after it the mix goes to DELAY/REVERB if lit for
+any member. Shaper is symmetric, full band (matched to the owner's Serum reference: odd harmonics, noise as bright air), TUBE almost
+symmetric, TONE knob removed (fixed open), BITCRUSH replaced by SQUARE (soft comparator); states without `distOrder` map 3 -> HARD CLIP.
+Tonal noises AC HUM / BUZZ / TRANSFORMER (make_noises.py --hum). INIT = MONO (param default).
 v0.99.4: click fixes (owner's Bass_Synth_03): min attack 4 ms + smoothstep for attacks < 15 ms; a retriggered active
 voice crossfades its last output sample out over 5 ms (`Voice::tail*`); OSC/SUB gains go through two one-pole stages
 (~1.5 ms each, per chunk, `volSmooth`/`subSmooth`) and snap when the engine has no active voice (`GrainEngine::anyActive`).
