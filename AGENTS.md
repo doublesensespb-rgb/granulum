@@ -1,7 +1,7 @@
 # GRAIN FORM (repo: granulum) — guide for AI agents and developers
 
 Read this whole file before changing anything. It describes the product, the code, the build
-pipeline and how the owner wants to work. Current version: **0.99.4** (`project(... VERSION 0.9.9)` + display label `set(GRAINFORM_LABEL "0.99.4")` in CMakeLists.txt).
+pipeline and how the owner wants to work. Current version: **0.99.5** (`project(... VERSION 0.9.9)` + display label `set(GRAINFORM_LABEL "0.99.5")` in CMakeLists.txt).
 The UI shows the version on a small plate next to the title (taken from CMake `GRAINFORM_VERSION`, "0.9.8" -> "v0.98").
 
 ## 1. Product
@@ -162,6 +162,12 @@ layered), OCT -3..+1, SEMI; GRAIN switches row (`HarmonicEditor::rowStyle = 11`)
 virtual mod targets `harm1..16` (kHarmTarget0 = 1000) and mtSubH1..5, one LFO per stick, wheel = depth, look = style B
 (`lfoStickStyle = 1`); a stick with an LFO is rendered as its own layer (`SampleData::layers`, gain ramped per chunk in the
 engine); PEAK Q (peakQ/peakQ2) + gain ±36 dB, filter view 0 dB centred; no hand cursors anywhere; UI idle optimisations.
+v0.99.5: OSC 1 `osc1Mode` ADD|MIX|WAVE + `osc1Wave` + `osc1WaveMix` (mod target mtOsc1WaveMix); WAVE = `engineWave` playing
+`renderWaveMips` (period 1024, 512 harmonics, octave mips, per-read mip pick by step -> no aliasing); idle OSC 1 parts are not
+rendered. Distortion 4x oversampled (dsp::Oversampling IIR) with auto level (AGC -24..+6 dB) and gentler drive curves. RANDOM ALL
+menu (`randMask`, state). Noise list rebuilt: WHITE PINK BROWN BLUE first (tools/make_noises.py --classic / --new), STATIC WIND
+BREATH removed; old states (no `noiseOrder` property) are remapped by name. Noises +3 st. INIT / preset without file -> clearSample.
+LFO'd sticks draw at their live level (harmLive / modNorm). Branch `shared-dist` = experiment (shared DIST bus), not merged.
 v0.99.4: click fixes (owner's Bass_Synth_03): min attack 4 ms + smoothstep for attacks < 15 ms; a retriggered active
 voice crossfades its last output sample out over 5 ms (`Voice::tail*`); OSC/SUB gains go through two one-pole stages
 (~1.5 ms each, per chunk, `volSmooth`/`subSmooth`) and snap when the engine has no active voice (`GrainEngine::anyActive`).

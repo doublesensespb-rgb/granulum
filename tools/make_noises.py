@@ -359,6 +359,25 @@ def sea():
     return stereo(ch)
 
 
+def white_n():
+    return stereo(lambda: white())
+
+
+def pink_n():
+    return stereo(lambda: hp(pink(), 20))
+
+
+def brown_n():
+    return stereo(lambda: hp(brown(), 25))
+
+
+def blue_n():
+    # +3 dB/oct: white noise through a first difference, softened at the very top
+    return stereo(lambda: lp(np.diff(white(N + 1)) * 0.7 + white() * 0.3, 16000, 1))
+
+
+CLASSIC_NOISES = [("WHITE", white_n), ("PINK", pink_n), ("BROWN", brown_n), ("BLUE", blue_n)]
+
 NEW_NOISES = [
     ("RAIN", rain), ("FIRE", fire), ("LEAVES", leaves), ("SAND", sand),
     ("BUBBLES", bubbles), ("FABRIC", fabric), ("PENCIL", pencil), ("SEA", sea),
@@ -385,7 +404,7 @@ def finish(x):
 if __name__ == "__main__":
     out = next((a for a in sys.argv[1:] if not a.startswith("--")), "noises")
     os.makedirs(out, exist_ok=True)
-    for name, fn in (NEW_NOISES if "--new" in sys.argv else NOISES):
+    for name, fn in (CLASSIC_NOISES if "--classic" in sys.argv else NEW_NOISES if "--new" in sys.argv else NOISES):
         x = finish(fn())
         path = os.path.join(out, name.replace(" ", "_") + ".wav")
         wavfile.write(path, SR, (x * 32767).astype(np.int16))

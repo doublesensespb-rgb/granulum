@@ -1983,6 +1983,7 @@ void GranulumProcessor::getStateInformation (MemoryBlock& destData)
     state.setProperty ("presetName", presetName, nullptr);
     state.setProperty ("presetFolder", presetSub, nullptr);
     state.setProperty ("randMask", randMask.load(), nullptr);
+    state.setProperty ("noiseOrder", 2, nullptr);
     state.setProperty ("oscFold", String ((int) uiFold[0]) + String ((int) uiFold[1]) + String ((int) uiFold[2]), nullptr);
     state.setProperty ("pluginVersion", GRAINFORM_VERSION, nullptr);
     state.setProperty ("grainMask", (int) grainMask.load(), nullptr);
@@ -2041,6 +2042,16 @@ void GranulumProcessor::setStateInformation (const void* data, int sizeInBytes)
                     child.setProperty ("value", oldToNew[o], nullptr);
                 }
     }
+    // 0.99.5: noise list = WHITE PINK BROWN BLUE first; STATIC / WIND / BREATH removed. Older states keep their noise.
+    if (! state.hasProperty ("noiseOrder"))
+        for (auto child : state)
+            if (child.getProperty ("id").toString() == ParamID::osc3Type)
+            {
+                // old: AIR TAPE HISS VINYL STATIC WIND BREATH PAPER DUST FROST METAL RAIN
+                static const char* const oldNames[10] = { "AIR", "TAPE HISS", "VINYL", "WHITE", "BROWN", "PINK", "PAPER", "DUST", "FROST", "METAL RAIN" };
+                const int o = jlimit (0, 9, (int) std::round ((double) child.getProperty ("value")));
+                child.setProperty ("value", jmax (0, noiseNames().indexOf (oldNames[o])), nullptr);
+            }
     const String path = state.getProperty ("samplePath").toString();
     const auto hs = StringArray::fromTokens (state.getProperty ("harmonics").toString(), ",", "");
     const auto ms = StringArray::fromTokens (state.getProperty ("mods").toString(), ";", "");
