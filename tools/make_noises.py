@@ -384,6 +384,44 @@ NEW_NOISES = [
 ]
 
 
+# ---------------------------------------------------------------- 0.99.5: tonal "organic" noises (like Serum's Organics/AC hum)
+
+def _hum(f0, tilt, even_boost, buzz, crackle_rate, seed_detune=0.0):
+    n = N
+    tt = np.arange(n) / SR
+    wob = 1.0 + 0.002 * np.sin(2 * np.pi * 0.37 * tt)               # the mains drifts a hair
+    ph = 2 * np.pi * f0 * np.cumsum(wob) / SR
+    def ch():
+        x = np.zeros(n)
+        for k in range(1, int(16000 / f0)):
+            a = k ** -tilt * (even_boost if k % 2 == 0 else 1.0)
+            x += a * np.sin(k * ph + rng.random() * 6.283)
+        # rectifier buzz: sharp spikes twice per cycle, band-limited
+        spikes = np.maximum(0.0, np.abs(np.sin(ph)) - 0.92) ** 2
+        x += bp(spikes, 600, 9000, 2) * buzz * np.std(x) / (np.std(bp(spikes, 600, 9000, 2)) + 1e-9)
+        x *= 0.85 + 0.15 * smooth_random(0.8)                          # slow life in the level
+        cr = bp(impulses(crackle_rate, amp_pow=2.0), 1500, 8000, 2)
+        x += cr * np.std(x) * 1.5
+        x += bp(pink(), 100, 6000, 1) * np.std(x) * 0.05              # a little air of the room
+        return x
+    return stereo(ch)
+
+
+def ac_hum():
+    return _hum(50.0, 1.05, 1.8, 0.35, 6)
+
+
+def buzz():
+    return _hum(60.0, 0.75, 1.2, 0.8, 14)
+
+
+def transformer():
+    return _hum(100.0, 1.4, 2.5, 0.15, 2)
+
+
+HUM_NOISES = [("AC HUM", ac_hum), ("BUZZ", buzz), ("TRANSFORMER", transformer)]
+
+
 def finish(x):
     n_loop = int(DUR * SR)
     nx = int(XF * SR)
@@ -404,7 +442,7 @@ def finish(x):
 if __name__ == "__main__":
     out = next((a for a in sys.argv[1:] if not a.startswith("--")), "noises")
     os.makedirs(out, exist_ok=True)
-    for name, fn in (CLASSIC_NOISES if "--classic" in sys.argv else NEW_NOISES if "--new" in sys.argv else NOISES):
+    for name, fn in (HUM_NOISES if "--hum" in sys.argv else CLASSIC_NOISES if "--classic" in sys.argv else NEW_NOISES if "--new" in sys.argv else NOISES):
         x = finish(fn())
         path = os.path.join(out, name.replace(" ", "_") + ".wav")
         wavfile.write(path, SR, (x * 32767).astype(np.int16))

@@ -104,7 +104,7 @@ void Distortion::process (float* L, float* R, int n, int type, float drive, floa
     const float envK = 1.0f - (float) std::exp (-1.0 / (0.12 * osr));                         // ~120 ms level followers
     static constexpr int menuToShape[4] = { 2, 0, 1, 4 };
     const int shp = menuToShape[jlimit (0, 3, type)];
-    const float preK = 1.0f - (float) std::exp (-MathConstants<double>::twoPi * 7000.0 / osr);
+    const float preK = 1.0f - (float) std::exp (-MathConstants<double>::twoPi * 13000.0 / osr);
     const float bias = 0.06f * drive;
     const float biasOut = shape (shp, bias, drive, 0);
 
@@ -118,7 +118,7 @@ void Distortion::process (float* L, float* R, int n, int type, float drive, floa
         for (int i = 0; i < m; ++i)
         {
             const float in = x[i];
-            // 0.99.5: the shaper hears the signal without its very top (one pole ~7 kHz) and with a slight tube-like
+            // 0.99.5: the shaper hears the signal without its very top (one pole ~13 kHz) and with a slight tube-like
             // lean (bias): noise turns into a warm crackle, a noise + tone mix "gurgles" (the bias is removed after)
             pre[c] += (in - pre[c]) * preK;
             const float y = shape (shp, pre[c] + bias, drive, c) - biasOut;
@@ -1502,7 +1502,7 @@ void GranulumProcessor::processChunk (int from, int len)
         if (c.quietSeconds <= 12.0)
         {
             if (distAny)
-                c.distortion.process (DL, DR, len, (int) pDistType->load(), v[mtDistDrive], 0.88f, v[mtDistMix]);   // no TONE knob (0.99.5)
+                c.distortion.process (DL, DR, len, (int) pDistType->load(), v[mtDistDrive], 1.0f, v[mtDistMix]);   // no TONE knob (0.99.5): open top
             if (c.busDelay && delayOn)
                 c.delay.process (DL, DR, len, delayMs, v[mtDelayFb], v[mtDelayTone], v[mtDelayMix], pDelayPing->load() > 0.5f);
             if (c.busReverb && revOn)
