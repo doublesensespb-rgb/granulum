@@ -494,7 +494,7 @@ AudioProcessorValueTreeState::ParameterLayout GranulumProcessor::createLayout()
         ps.push_back (std::make_unique<B> (ParameterID { o == 1 ? ParamID::osc1Grain : ParamID::osc2Grain, 1 }, n + "Granular", false));
         if (o == 1)
         {
-            ps.push_back (std::make_unique<juce::AudioParameterChoice> (ParameterID { ParamID::osc1Mode, 1 }, "OSC 1 Mode", StringArray { "ADDITIVE", "MIX", "WAVE" }, 0));
+            ps.push_back (std::make_unique<juce::AudioParameterChoice> (ParameterID { ParamID::osc1Mode, 1 }, "OSC 1 Mode", StringArray { "ADDITIVE", "WAVE" }, 0));   // 0.99.6: MIX removed
             ps.push_back (std::make_unique<P> (ParameterID { ParamID::osc1WaveMix, 1 }, "OSC 1 Wave Mix", NormalisableRange<float> (0.0f, 1.0f), 0.5f, pct));
             ps.push_back (std::make_unique<juce::AudioParameterChoice> (ParameterID { ParamID::osc1Wave, 1 }, "OSC 1 Wave", StringArray { "SINE", "SAW", "SQUARE", "TRIANGLE" }, 1));
         }
@@ -763,6 +763,8 @@ void GranulumProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
         c.quietSeconds = 1.0e9;
     }
 
+    outClipOS.initProcessing ((size_t) kChunk);
+    outClipOS.reset();
     outGain.reset (sampleRate, 0.05);
     outGain.setCurrentAndTargetValue (Decibels::decibelsToGain (apvts.getRawParameterValue (ParamID::output)->load()));
 
@@ -1270,7 +1272,7 @@ void GranulumProcessor::processChunk (int from, int len)
 
         // 0.99.5 OSC 1: ADDITIVE (sticks), WAVE (one full waveform) or MIX of the two (WAVE MIX knob)
         const int o1mode = o == 0 ? (int) pOsc1Mode->load() : 0;
-        const float waveAmt = o1mode == 2 ? 1.0f : o1mode == 1 ? jlimit (0.0f, 1.0f, v[mtOsc1WaveMix]) : 0.0f;
+        const float waveAmt = o1mode == 1 ? 1.0f : 0.0f;   // 0.99.6: ADD or WAVE, no mix
         const float addAmt = 1.0f - waveAmt;
         // a part of OSC 1 that is fully off (ADD in WAVE mode, WAVE in ADD mode) is not computed at all
         const bool addIdle  = o == 0 && addAmt <= 0.0f && lastAddAmt <= 0.0f;
@@ -1508,15 +1510,35 @@ void GranulumProcessor::processChunk (int from, int len)
     // ---- output ----
     outGain.setTargetValue (Decibels::decibelsToGain (v[mtOutput]));
     float pl = 0.0f, pr = 0.0f;
-    const bool clipper = pClipOn->load() > 0.5f;   // CLIP button: soft clipper on the output (never over 0 dB)
+    const bool clipper = pClipOn->load() > 0.5f;
     for (int i = 0; i < len; ++i)
     {
         const float gg = outGain.getNextValue();
-        const float l = outL[i] * gg, r = outR[i] * gg;
-        pl = jmax (pl, std::abs (l));
-        pr = jmax (pr, std::abs (r));
-        outL[i] = clipper ? std::tanh (l) : l;
-        outR[i] = clipper ? std::tanh (r) : r;
+        outL[i] *= gg; outR[i] *= gg;
+    }
+    if (clipper)
+    {
+        // 0.99.6 CLIP = a clean soft clipper (like FL's Fruity Soft Clipper): below -3 dB the sound is untouched,
+        // above it the peaks bend smoothly into a ceiling just under 0 dB. 4x oversampled, so no fizz from the bend.
+        float* ch[2] = { outL, outR };
+        dsp::AudioBlock<float> blk (ch, 2, (size_t) len);
+        auto up = outClipOS.processSamplesUp (blk);
+        constexpr float t = 0.708f, ceil = 0.985f, k = ceil - t;   // knee from -3 dB
+        for (size_t c = 0; c < 2; ++c)
+        {
+            float* x = up.getChannelPointer (c);
+            for (size_t i = 0; i < up.getNumSamples(); ++i)
+            {
+                const float a = std::abs (x[i]);
+                if (a > t) x[i] = std::copysign (t + k * std::tanh ((a - t) / k), x[i]);
+            }
+        }
+        outClipOS.processSamplesDown (blk);
+    }
+    for (int i = 0; i < len; ++i)
+    {
+        pl = jmax (pl, std::abs (outL[i]));
+        pr = jmax (pr, std::abs (outR[i]));
         blockPeak = jmax (blockPeak, std::abs (outL[i]), std::abs (outR[i]));
     }
     if (pl > peakL.load (std::memory_order_relaxed)) peakL.store (pl, std::memory_order_relaxed);
@@ -1910,9 +1932,10 @@ void GranulumProcessor::randomize()
     // 0.99.5: RANDOM ALL only touches the parts ticked in its menu (randMask)
     const int m = randMask.load();
     if (m & rndGrainsBit)  randomizeSection (0);
-    if (m & rndFiltersBit) randomizeSection (1);
+    if (m & (rndFiltersBit | rndFilter2Bit)) randomizeSection (1);
     if (m & (rndDistBit | rndDelayBit | rndReverbBit)) randomizeSection (2);
-    if ((m & rndSticksBit) && apvts.getRawParameterValue (ParamID::osc1Mode)->load() < 1.5f) randomizeSection (3);
+    if ((m & rndSticksBit) && apvts.getRawParameterValue (ParamID::osc1Mode)->load() < 0.5f) randomizeSection (3);
+    if (m & (rndLfo1Bit | rndLfo2Bit | rndLfo3Bit)) randomizeSection (4);
 }
 
 void GranulumProcessor::randomizeSection (int section)
@@ -1963,15 +1986,47 @@ void GranulumProcessor::randomizeSection (int section)
     }
     else if (section == 1)
     {
-        const int type = r.nextInt (2);                         // LP12 / LP24 for filter 1
-        set (ParamID::ftype,  (float) type);
-        set (ParamID::cutoff, 300.0f * std::pow (20.0f, r.nextFloat()));
-        set (ParamID::reso,   0.6f * std::pow (5.0f, r.nextFloat()));
-        const int t2 = 2 + r.nextInt (5);                       // HP .. VOWEL for filter 2
-        set (ParamID::ftype2,  (float) t2);
-        set (ParamID::cutoff2, 150.0f * std::pow (30.0f, r.nextFloat()));
-        set (ParamID::reso2,   0.6f * std::pow (6.0f, r.nextFloat()));
-        set (ParamID::peakGain2, (r.nextBool() ? 1.0f : -1.0f) * (4.0f + 10.0f * r.nextFloat()));
+        const int m = randMask.load();   // 0.99.6: FILTER 1 and FILTER 2 each have their own tick
+        if (m & rndFiltersBit)
+        {
+            const int type = r.nextInt (2);                     // LP12 / LP24 for filter 1
+            set (ParamID::ftype,  (float) type);
+            set (ParamID::cutoff, 300.0f * std::pow (20.0f, r.nextFloat()));
+            set (ParamID::reso,   0.6f * std::pow (5.0f, r.nextFloat()));
+        }
+        if (m & rndFilter2Bit)
+        {
+            const int t2 = 2 + r.nextInt (5);                   // HP .. VOWEL for filter 2
+            set (ParamID::ftype2,  (float) t2);
+            set (ParamID::cutoff2, 150.0f * std::pow (30.0f, r.nextFloat()));
+            set (ParamID::reso2,   0.6f * std::pow (6.0f, r.nextFloat()));
+            set (ParamID::peakGain2, (r.nextBool() ? 1.0f : -1.0f) * (4.0f + 10.0f * r.nextFloat()));
+        }
+    }
+    else if (section == 4)
+    {
+        // 0.99.6: LFO 1-3 (only the ticked ones): a shape (one of the presets, sometimes a fresh random one) and a musical speed.
+        // What the LFOs are linked to is kept.
+        const int m = randMask.load();
+        const int bits[kNumLfos] = { rndLfo1Bit, rndLfo2Bit, rndLfo3Bit };
+        static const StringArray divs { "1/1", "1/2", "1/2D", "1/4", "1/4D", "1/4T", "1/8", "1/8D", "1/8T", "1/16" };
+        for (int l = 0; l < kNumLfos; ++l)
+        {
+            if (! (m & bits[l])) continue;
+            if (r.nextFloat() < 0.7f) setLfoPoints (l, lfoPreset (r.nextInt (lfoPresetNames().size())));
+            else
+            {
+                LfoShape pts;
+                const int n = 3 + r.nextInt (4);
+                for (int i = 0; i < n; ++i)
+                    pts.push_back ({ i == 0 ? 0.0f : i == n - 1 ? 1.0f : (float) i / (float) (n - 1) + (r.nextFloat() - 0.5f) * 0.12f,
+                                     r.nextFloat(), (r.nextFloat() - 0.5f) * 1.2f });
+                pts.back().y = pts.front().y;   // seamless loop
+                setLfoPoints (l, pts);
+            }
+            set (ParamID::lfo (l, "Sync").toRawUTF8(), 1.0f);
+            set (ParamID::lfo (l, "Div").toRawUTF8(), (float) GranulumProcessor::divisionNames().indexOf (divs[r.nextInt (divs.size())]));
+        }
     }
     else if (section == 2)
     {
@@ -2028,6 +2083,8 @@ void GranulumProcessor::getStateInformation (MemoryBlock& destData)
     state.setProperty ("randMask", randMask.load(), nullptr);
     state.setProperty ("noiseOrder", 2, nullptr);
     state.setProperty ("distOrder", 2, nullptr);
+    state.setProperty ("modeOrder", 2, nullptr);
+    state.setProperty ("randOrder", 2, nullptr);
     state.setProperty ("oscFold", String ((int) uiFold[0]) + String ((int) uiFold[1]) + String ((int) uiFold[2]), nullptr);
     state.setProperty ("pluginVersion", GRAINFORM_VERSION, nullptr);
     state.setProperty ("grainMask", (int) grainMask.load(), nullptr);
@@ -2086,6 +2143,11 @@ void GranulumProcessor::setStateInformation (const void* data, int sizeInBytes)
                     child.setProperty ("value", oldToNew[o], nullptr);
                 }
     }
+    // 0.99.6: OSC 1 mode lost MIX (0.99.5 had ADDITIVE MIX WAVE): anything but ADDITIVE becomes WAVE
+    if (! state.hasProperty ("modeOrder"))
+        for (auto child : state)
+            if (child.getProperty ("id").toString() == ParamID::osc1Mode && (double) child.getProperty ("value") > 0.5)
+                child.setProperty ("value", 1, nullptr);
     // 0.99.5: BITCRUSH is gone -> HARD CLIP (its place in the menu is now SQUARE; newer states carry distOrder)
     if (! state.hasProperty ("distOrder"))
         for (auto child : state)
@@ -2108,7 +2170,12 @@ void GranulumProcessor::setStateInformation (const void* data, int sizeInBytes)
     for (int l = 0; l < kNumLfos; ++l) shapes[(size_t) l] = state.getProperty ("lfoShape" + String (l + 1)).toString();
     const String pn = state.getProperty ("presetName", "INIT").toString();
     const String pf = state.getProperty ("presetFolder", "").toString();
-    if (state.hasProperty ("randMask")) randMask.store ((int) state.getProperty ("randMask"));
+    if (state.hasProperty ("randMask"))
+    {
+        int rm = (int) state.getProperty ("randMask");
+        if (! state.hasProperty ("randOrder") && (rm & rndFiltersBit)) rm |= rndFilter2Bit;   // 0.99.5 had one FILTERS tick
+        randMask.store (rm);
+    }
     {
         const String fo = state.getProperty ("oscFold", "000").toString();
         for (int i = 0; i < 3; ++i) uiFold[i] = fo.length() > i && fo[i] == '1';

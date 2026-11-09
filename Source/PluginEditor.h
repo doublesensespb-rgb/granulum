@@ -678,8 +678,8 @@ class Osc1ModeSwitch final : public juce::Component, public juce::SettableToolti
 public:
     explicit Osc1ModeSwitch (GranulumProcessor& p) : proc (p)
     {
-        setTooltip ("OSC 1: ADD = build the sound from 16 sticks.  WAVE = one full waveform (SINE / SAW / SQUARE / TRIANGLE) "
-                    "with all its harmonics.  MIX = both, the WAVE amount is on the screen. The grains work in all three.");
+        setTooltip ("OSC 1: ADDITIVE = build the sound from 16 sticks.  WAVE = one full waveform (SINE / SAW / SQUARE / TRIANGLE) "
+                    "with all its harmonics. The grains work in both.");
         setRepaintsOnMouseActivity (true);
     }
     void paint (juce::Graphics&) override;
@@ -841,7 +841,20 @@ private:
     juce::Rectangle<int> foldText[3];            // folded strip: where the sound name is written (SAMPLE, NOISE)
     int foldSig = -1;
     void setFold (int i, bool f);
-    juce::TextButton randomMenuButton { juce::String::fromUTF8 ("\xe2\x96\xbe") };   // small down arrow next to RANDOM ALL
+    // small down arrow next to RANDOM ALL, drawn (not a font glyph) so it sits exactly in the middle
+    struct ArrowButton final : public juce::TextButton
+    {
+        void paintButton (juce::Graphics& g, bool over, bool down) override
+        {
+            getLookAndFeel().drawButtonBackground (g, *this, findColour (juce::TextButton::buttonColourId), over, down);
+            const auto c = getLocalBounds().toFloat().getCentre();
+            const float w = juce::jmin ((float) getWidth(), (float) getHeight()) * 0.16f;
+            juce::Path p;
+            p.addTriangle (c.x - w, c.y - w * 0.55f, c.x + w, c.y - w * 0.55f, c.x, c.y + w * 0.75f);
+            g.setColour (findColour (juce::TextButton::textColourOffId).withAlpha (over ? 1.0f : 0.8f));
+            g.fillPath (p);
+        }
+    } randomMenuButton;
     void showRandomMenu();
     Lamp osc1Lamp { "OSC 1", "ADDITIVE" }, osc2Lamp { "OSC 3", "SAMPLE" }, osc3Lamp { "OSC 4", "NOISE" }, osc4Lamp { "OSC 2", "SUB" };   // shown order (0.99): ADDITIVE, SUB, SAMPLE, NOISE
     SubBars subBars { proc };

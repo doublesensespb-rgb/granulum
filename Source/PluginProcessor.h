@@ -345,8 +345,9 @@ public:
     void resetToInit();
     void randomize();
     // 0.99.5: what RANDOM ALL may touch (ticks in its menu); kept with the project
-    enum { rndSticksBit = 1, rndGrainsBit = 2, rndFiltersBit = 4, rndDistBit = 8, rndDelayBit = 16, rndReverbBit = 32 };
-    std::atomic<int> randMask { 63 };
+    enum { rndSticksBit = 1, rndGrainsBit = 2, rndFiltersBit = 4, rndDistBit = 8, rndDelayBit = 16, rndReverbBit = 32,
+           rndFilter2Bit = 64, rndLfo1Bit = 128, rndLfo2Bit = 256, rndLfo3Bit = 512 };   // rndFiltersBit = FILTER 1
+    std::atomic<int> randMask { 1023 };
     void randomizeSection (int section); // 0 granular, 1 filter, 2 effects, 3 additive bars
 
     // ---- chords ----
@@ -470,6 +471,7 @@ private:
 
     std::array<FxChain, kNumOscs> chains;
     FxChain subChain;   // the SUB's own effect chain (it only goes through blocks whose "2" digit is lit)
+    juce::dsp::Oversampling<float> outClipOS { 2, 2, juce::dsp::Oversampling<float>::filterHalfBandPolyphaseIIR, true };   // CLIP (0.99.6)
     FxChain distBusChain;   // 0.99.5: the shared DIST (+ the delay / reverb that follow it for the distorted mix)
     juce::AudioBuffer<float> distBuf;
     juce::SmoothedValue<float> outGain;

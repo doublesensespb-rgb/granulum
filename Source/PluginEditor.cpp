@@ -1620,9 +1620,9 @@ void SubBars::mouseUp (const MouseEvent&)
 // ============================================================================
 // OSC 1 waveforms
 
-static int  osc1ModeIndex (GranulumProcessor& p) { return juce::jlimit (0, 2, (int) p.apvts.getRawParameterValue (ParamID::osc1Mode)->load()); }   // 0 ADD 1 MIX 2 WAVE
-static bool osc1WaveMode (GranulumProcessor& p) { return osc1ModeIndex (p) == 2; }      // the sticks are hidden
-static bool osc1UsesWave (GranulumProcessor& p) { return osc1ModeIndex (p) >= 1; }      // the wave buttons pick the full wave
+static int  osc1ModeIndex (GranulumProcessor& p) { return juce::jlimit (0, 1, (int) p.apvts.getRawParameterValue (ParamID::osc1Mode)->load()); }   // 0 ADD 1 WAVE
+static bool osc1WaveMode (GranulumProcessor& p) { return osc1ModeIndex (p) == 1; }      // the sticks are hidden
+static bool osc1UsesWave (GranulumProcessor& p) { return osc1ModeIndex (p) == 1; }      // the wave buttons pick the full wave
 static int  osc1WaveIndex (GranulumProcessor& p) { return juce::jlimit (0, 3, (int) p.apvts.getRawParameterValue (ParamID::osc1Wave)->load()); }
 
 std::array<float, granulum::kNumHarmonics> WavePicker::shape (int i)
@@ -1716,9 +1716,9 @@ void Osc1ModeSwitch::paint (Graphics& g)
     g.setColour (Palette::field);
     g.fillRoundedRectangle (r, 6.0f);
     const int mode = osc1ModeIndex (proc);
-    const char* names[3] = { "ADD", "MIX", "WAVE" };
-    const float w = r.getWidth() / 3.0f;
-    for (int i = 0; i < 3; ++i)
+    const char* names[2] = { "ADDITIVE", "WAVE" };
+    const float w = r.getWidth() / 2.0f;
+    for (int i = 0; i < 2; ++i)
     {
         auto seg = Rectangle<float> (r.getX() + w * (float) i, r.getY(), w, r.getHeight()).reduced (2.0f);
         const bool on = i == mode;
@@ -1743,7 +1743,7 @@ void Osc1ModeSwitch::mouseDown (const MouseEvent& e)
     if (auto* m = proc.apvts.getParameter (ParamID::osc1Mode))
     {
         m->beginChangeGesture();
-        m->setValueNotifyingHost (m->convertTo0to1 ((float) jlimit (0, 2, (int) (e.position.x / jmax (1.0f, (float) getWidth() / 3.0f)))));
+        m->setValueNotifyingHost (e.position.x > (float) getWidth() * 0.5f ? 1.0f : 0.0f);
         m->endChangeGesture();
     }
     repaint();
@@ -2032,13 +2032,7 @@ void HarmonicEditor::mouseMove (const MouseEvent& e)
 void HarmonicEditor::mouseDown (const MouseEvent& e)
 {
     if (osc1WaveMode (proc)) return;   // WAVE mode: nothing to draw here
-    if (osc1ModeIndex (proc) == 1 && mixPill().contains (e.position))
-    {
-        mixDrag = true;
-        if (auto* m = proc.apvts.getParameter (ParamID::osc1WaveMix)) m->beginChangeGesture();
-        mouseDrag (e);
-        return;
-    }
+
     if (const auto c = chipAt (e.position); c.harm >= 0)
     {
         if (e.mods.isPopupMenu()) { proc.removeModulation (kHarmTarget0 + c.harm, c.lfo); repaint(); return; }
@@ -2100,28 +2094,7 @@ Rectangle<float> HarmonicEditor::mixPill() const
 void HarmonicEditor::paintOverChildren (Graphics& g)
 {
     if (osc1WaveMode (proc)) return;
-    if (osc1ModeIndex (proc) == 1)
-    {
-        // MIX: how much full wave goes in with the sticks
-        const auto r = mixPill();
-        const float v = proc.apvts.getRawParameterValue (ParamID::osc1WaveMix)->load();
-        g.setColour (Palette::screen.withAlpha (0.92f));
-        g.fillRoundedRectangle (r, r.getHeight() * 0.5f);
-        g.setColour (Palette::accent.withAlpha (0.6f));
-        g.drawRoundedRectangle (r.reduced (0.5f), r.getHeight() * 0.5f, 1.0f);
-        auto in = r.reduced (7.0f, 0.0f);
-        g.setFont (uiFont (8.5f, true, 0.1f));
-        g.setColour (Palette::textDim);
-        g.drawText ("WAVE", in.removeFromLeft (30.0f), Justification::centredLeft, false);
-        g.setColour (Palette::text);
-        g.drawText (String (roundToInt (v * 100.0f)) + "%", in.removeFromRight (30.0f), Justification::centredRight, false);
-        auto tr = in.reduced (3.0f, 0.0f).withSizeKeepingCentre (in.getWidth() - 6.0f, 3.0f);
-        g.setColour (Palette::field);
-        g.fillRoundedRectangle (tr, 1.5f);
-        g.setColour (Palette::accent);
-        g.fillRoundedRectangle (tr.withWidth (tr.getWidth() * v), 1.5f);
-        g.fillEllipse (Rectangle<float> (8.0f, 8.0f).withCentre ({ tr.getX() + tr.getWidth() * v, tr.getCentreY() }));
-    }
+
     // harmonic numbers (0.99.2): quiet, the stick under the mouse lights up
     if (numStyle > 0)
     {
@@ -2920,11 +2893,12 @@ void PeakMeter::paint (Graphics& g)
     // CLIP: the whole box is the button (0.99.2). On = the whole box glows copper. Flashes red when the signal hits 0 dB.
     const bool clipOn = proc.apvts.getRawParameterValue (ParamID::clipOn)->load() > 0.5f;
     const bool hover  = isMouseOver() && getMouseXYRelative().x > getWidth() - 38;
-    g.setColour (clipShown ? Palette::clip : clipOn ? Palette::clip.withAlpha (hover ? 0.42f : 0.32f) : Palette::button.brighter (hover ? 0.25f : 0.0f));
+    // 0.99.6: CLIP is just a switch (lit copper = on); it no longer flashes red as a clip light
+    g.setColour (clipOn ? Palette::accent.withAlpha (hover ? 0.95f : 0.85f) : Palette::button.brighter (hover ? 0.25f : 0.0f));
     g.fillRoundedRectangle (clipBox, 4.0f);
-    g.setColour (clipShown ? Palette::clip : clipOn ? Palette::clip.withAlpha (0.9f) : Palette::edge.withMultipliedAlpha (hover ? 3.0f : 2.0f));
+    g.setColour (clipOn ? Palette::accent.brighter (0.2f) : Palette::edge.withMultipliedAlpha (hover ? 3.0f : 2.0f));
     g.drawRoundedRectangle (clipBox.reduced (0.5f), 4.0f, 1.0f);
-    g.setColour (clipShown || clipOn ? Colours::white.withAlpha (clipShown ? 1.0f : 0.92f) : Palette::textDim.withAlpha (hover ? 0.9f : 0.6f));
+    g.setColour (clipOn ? Colours::white : Palette::textDim.withAlpha (hover ? 0.9f : 0.6f));
     g.setFont (uiFont (8.5f, true, 0.08f));
     g.drawText ("CLIP", clipBox, Justification::centred, false);
 }
@@ -5120,8 +5094,10 @@ void GranulumEditor::showRandomMenu()
     PopupMenu menu;
     menu.addSectionHeader ("RANDOM ALL changes:");
     const std::pair<int, const char*> items[] = { { GranulumProcessor::rndSticksBit, "Harmonics (sticks)" }, { GranulumProcessor::rndGrainsBit, "Grains" },
-                                                  { GranulumProcessor::rndFiltersBit, "Filters" }, { GranulumProcessor::rndDistBit, "Distortion" },
-                                                  { GranulumProcessor::rndDelayBit, "Delay" }, { GranulumProcessor::rndReverbBit, "Reverb" } };
+                                                  { GranulumProcessor::rndFiltersBit, "Filter 1" }, { GranulumProcessor::rndFilter2Bit, "Filter 2" },
+                                                  { GranulumProcessor::rndDistBit, "Distortion" }, { GranulumProcessor::rndDelayBit, "Delay" },
+                                                  { GranulumProcessor::rndReverbBit, "Reverb" }, { GranulumProcessor::rndLfo1Bit, "LFO 1" },
+                                                  { GranulumProcessor::rndLfo2Bit, "LFO 2" }, { GranulumProcessor::rndLfo3Bit, "LFO 3" } };
     for (auto& it : items) menu.addItem (it.first, it.second, true, (m & it.first) != 0);
     Component::SafePointer<GranulumEditor> safe (this);
     menu.showMenuAsync (PopupMenu::Options().withTargetComponent (&randomMenuButton), [safe] (int res)
@@ -5760,9 +5736,10 @@ void GranulumEditor::resized()
         h1.removeFromRight (S (6));
         chordButton.setBounds (h1.removeFromRight (S (112)).reduced (0, S (1)));
         h1.removeFromRight (S (6));
-        wavePicker.setBounds (h1.removeFromRight (S (88)).reduced (0, S (1)));
-        h1.removeFromRight (S (4));
-        osc1Mode.setBounds (h1.removeFromRight (S (122)).reduced (0, S (1)));   // ADD | MIX | WAVE
+        // 0.99.6: the wave buttons only exist in WAVE mode
+        wavePicker.setVisible (osc1WaveMode (proc));
+        if (osc1WaveMode (proc)) { wavePicker.setBounds (h1.removeFromRight (S (88)).reduced (0, S (1))); h1.removeFromRight (S (4)); }
+        osc1Mode.setBounds (h1.removeFromRight (S (122)).reduced (0, S (1)));   // ADDITIVE | WAVE
         osc1Lamp.sub = {};                         // the ADDITIVE | WAVE switch says what OSC 1 is
         osc1Lamp.setBounds (h1);
         rndBars.setVisible (! osc1WaveMode (proc));   // RANDOM sticks: only in ADDITIVE
