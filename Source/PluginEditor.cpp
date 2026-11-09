@@ -1518,7 +1518,10 @@ void SubBars::paint (Graphics& g)
     }
     for (int i = 0; i < kN; ++i)
     {
-        const float v = param (i)->getValue();
+        // 0.99.5: a stick with an LFO moves with it (the LFO range is still shown next to it)
+        bool modded = false;
+        for (int l = 0; l < kNumLfos; ++l) modded = modded || proc.hasModulation (mtSubH1 + i, l);
+        const float v = modded ? jlimit (0.0f, 1.0f, proc.modNorm[(size_t) (mtSubH1 + i)].load (std::memory_order_relaxed)) : param (i)->getValue();
         const float x = pl.getX() + colW * ((float) i + 0.5f);
         const float yTop = pl.getBottom() - v * (pl.getHeight() - 6.0f);
         // faint full-height guide
@@ -2248,7 +2251,10 @@ void HarmonicEditor::paint (Graphics& g)
             g.setColour (shattered ? Palette::track.interpolatedWith (Colour (0xffc9ae84), 0.16f) : Palette::track.withAlpha (0.85f));
             g.fillRoundedRectangle (slot, 3.0f);
         }
-        const float v = h[(size_t) k];
+        // 0.99.5: a stick with an LFO moves with it (the LFO range is still drawn over it)
+        bool modded = false;
+        for (int l = 0; l < kNumLfos; ++l) modded = modded || proc.hasModulation (kHarmTarget0 + k, l);
+        const float v = modded ? jlimit (0.0f, 1.0f, proc.harmLive[(size_t) k].load (std::memory_order_relaxed)) : h[(size_t) k];
         if (v <= 0.001f) continue;
         auto bar = slot.withTop (slot.getBottom() - slot.getHeight() * v);
         const auto col = active ? Palette::accent : Palette::accentSoft.withAlpha (0.35f);
