@@ -892,7 +892,16 @@ private:
     std::unique_ptr<ButtonAtt> osc4LampA;
     std::unique_ptr<ButtonAtt> osc1LampA, osc2LampA, osc3LampA;
 
-    juce::TextButton undoButton { "UNDO" }, initButton { "INIT" }, randomButton { "RANDOM ALL" }, loadButton { juce::String::fromUTF8 ("SOUNDS \xe2\x96\xbe") }, chordButton { "CHORD: OFF" };
+    // TEST: INIT takes a right click (menu: save the current sound as INIT / back to the factory INIT)
+    struct InitButton final : juce::TextButton
+    {
+        using juce::TextButton::TextButton;
+        std::function<void()> onRightClick;
+        void mouseDown (const juce::MouseEvent& e) override { if (e.mods.isPopupMenu()) { if (onRightClick) onRightClick(); return; } juce::TextButton::mouseDown (e); }
+        void mouseUp (const juce::MouseEvent& e) override   { if (e.mods.isPopupMenu()) return; juce::TextButton::mouseUp (e); }
+    };
+    InitButton initButton { "INIT" };
+    juce::TextButton undoButton { "UNDO" }, randomButton { "RANDOM ALL" }, loadButton { juce::String::fromUTF8 ("SOUNDS \xe2\x96\xbe") }, chordButton { "CHORD: OFF" };
     juce::TextButton rndGrains { "RANDOM" }, rndFx { "RANDOM" }, rndBars { "RANDOM" };
     juce::TextButton osc1Grain { "GRAIN" }, osc2Grain { "GRAIN" }, osc3Grain { "GRAIN" };
     juce::TextButton polyButton { "POLY" }, monoButton { "MONO" };

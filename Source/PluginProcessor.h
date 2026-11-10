@@ -353,7 +353,12 @@ public:
     void rebuildNow() { timerCallback(); }
 
     // ---- presets / random ----
-    void resetToInit();
+    void resetToInit();          // the user's own INIT if saved (TEST), otherwise the factory one
+    void resetToFactoryInit();
+    static juce::File userInitFile();
+    bool hasUserInit() const { return userInitFile().existsAsFile(); }
+    bool saveUserInit();
+    void clearUserInit() { userInitFile().deleteFile(); }
     void randomize();
     // 0.99.5: what RANDOM ALL may touch (ticks in its menu); kept with the project
     enum { rndSticksBit = 1, rndGrainsBit = 2, rndFiltersBit = 4, rndDistBit = 8, rndDelayBit = 16, rndReverbBit = 32,

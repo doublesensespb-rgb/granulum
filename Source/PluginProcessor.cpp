@@ -813,7 +813,37 @@ void GranulumProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
 // ===========================================================================
 // INIT preset
 
+// TEST: the user's own INIT lives next to the presets folder (Documents/GRAIN FORM/User INIT.gpreset)
+File GranulumProcessor::userInitFile()
+{
+    return File::getSpecialLocation (File::userDocumentsDirectory).getChildFile ("GRAIN FORM").getChildFile ("User INIT.gpreset");
+}
+
+bool GranulumProcessor::saveUserInit()
+{
+    const auto f = userInitFile();
+    f.getParentDirectory().createDirectory();
+    const auto keepName = presetName, keepSub = presetSub;
+    presetName = "INIT"; presetSub = {};
+    MemoryBlock mb;
+    getStateInformation (mb);
+    presetName = keepName; presetSub = keepSub;
+    if (auto xml = getXmlFromBinary (mb.getData(), (int) mb.getSize()))
+        return xml->writeTo (f);
+    return false;
+}
+
 void GranulumProcessor::resetToInit()
+{
+    resetToFactoryInit();
+    if (hasUserInit() && loadPreset (userInitFile()))
+    {
+        presetName = "INIT";
+        presetSub = {};
+    }
+}
+
+void GranulumProcessor::resetToFactoryInit()
 {
     for (auto* p : getParameters())
         if (auto* rp = dynamic_cast<RangedAudioParameter*> (p))

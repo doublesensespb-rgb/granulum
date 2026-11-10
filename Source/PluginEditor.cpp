@@ -4932,7 +4932,7 @@ GranulumEditor::GranulumEditor (GranulumProcessor& p)
     addAndMakeVisible (presetBar);
     presetBar.onLoaded = [this] { lfoEditor.setLfo (selectedLfo); };
 
-    for (auto* b : { &rndGrains, &rndFx, &rndBars, &randomButton, &initButton, &loadButton, &chordButton, &undoButton }) addAndMakeVisible (*b);
+    for (juce::TextButton* b : { &rndGrains, &rndFx, &rndBars, &randomButton, static_cast<juce::TextButton*> (&initButton), &loadButton, &chordButton, &undoButton }) addAndMakeVisible (*b);
     undoButton.onClick = [this] { proc.undoManager.undo(); };
     undoButton.setTooltip ("Undo the last change (Ctrl+Z). Ctrl+Shift+Z = redo");
     addMouseListener (this, true);   // every click starts a new undo step
@@ -4947,6 +4947,17 @@ GranulumEditor::GranulumEditor (GranulumProcessor& p)
     randomMenuButton.setTooltip ("What RANDOM ALL may change");
     randomMenuButton.onClick = [this] { showRandomMenu(); };
     initButton.onClick   = [this] { proc.resetToInit(); lfoEditor.setLfo (selectedLfo); };
+    initButton.onRightClick = [this]
+    {
+        PopupMenu m;
+        m.addItem (1, "Save this sound as INIT");
+        if (proc.hasUserInit()) m.addItem (2, "Back to the factory INIT");
+        m.showMenuAsync (PopupMenu::Options().withTargetComponent (&initButton), [this] (int r)
+        {
+            if (r == 1) proc.saveUserInit();
+            if (r == 2) { proc.clearUserInit(); proc.resetToInit(); lfoEditor.setLfo (selectedLfo); }
+        });
+    };
     loadButton.onClick   = [this] { toggleSampleMenu (! sampleMenu.isVisible()); };
     loadButton.setTooltip ("Factory sounds, or load your own file");
     loadButton.getProperties().set ("sounds", soundsStyle);
@@ -4966,7 +4977,7 @@ GranulumEditor::GranulumEditor (GranulumProcessor& p)
     samplePrev.setTooltip ("Previous factory sample");
     sampleNext.setTooltip ("Next factory sample. Or drop your own WAV here.");
     chordButton.onClick  = [this] { showChordPicker(); };
-    initButton.setTooltip ("Start from scratch: one sine harmonic, everything else off");
+    initButton.setTooltip ("Start from scratch. Right click: save the current sound as your own INIT (or go back to the factory one)");
     chordButton.setTooltip ("Play a chord or interval from every note (OSC 1)");
 
     // LFO strip
