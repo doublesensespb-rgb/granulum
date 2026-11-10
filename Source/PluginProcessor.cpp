@@ -39,7 +39,8 @@ namespace
         ParamID::subH1, ParamID::subH2, ParamID::subH3, ParamID::subH4, ParamID::subH5,
         ParamID::peakQ, ParamID::peakQ2,
         ParamID::subSemi,
-        ParamID::osc1Tune, ParamID::osc2Tune, ParamID::pitch, ParamID::osc1WaveMix
+        ParamID::osc1Tune, ParamID::osc2Tune, ParamID::pitch, ParamID::osc1WaveMix,
+        ParamID::osc1Air, ParamID::gshape
     };
 
     String hzWithNote (float hz)
@@ -102,26 +103,46 @@ void Distortion::process (float* L, float* R, int n, int type, float drive, floa
     const float a = std::exp (-MathConstants<float>::twoPi * jmin (fc, (float) sr * 0.45f) / (float) osr);
     const float dcK = (float) std::exp (-MathConstants<double>::twoPi * 8.0 / osr);          // ~8 Hz DC blocker
     const float envK = 1.0f - (float) std::exp (-1.0 / (0.12 * osr));                         // ~120 ms level followers
+    // TEST: DRIVE / MIX glide per sample (~6 ms), the auto level glides too (~40 ms): no zipper, no clicks
+    const float smK  = 1.0f - (float) std::exp (-1.0 / (0.006 * osr));
+    const float agcK = 1.0f - (float) std::exp (-1.0 / (0.04 * osr));
     static constexpr int menuToShape[4] = { 2, 0, 1, 4 };
     const int shp = menuToShape[jlimit (0, 3, type)];
+    if (lastShp < 0) lastShp = shp;
+    if (shp != lastShp)
+    {
+        // TYPE changed: ~15 ms crossfade from the old curve to the new one
+        prevShp = lastShp; lastShp = shp;
+        xfadeLen = xfadeLeft = jmax (1, (int) (0.015 * osr));
+    }
+    if (driveSm < 0.0f) driveSm = drive;
+    if (mixSm < 0.0f)   mixSm = mix;
 
     float* chans[2] = { L, R };
     juce::dsp::AudioBlock<float> block (chans, 2, (size_t) n);
     auto up = os.processSamplesUp (block);
     const int m = (int) up.getNumSamples();
-    for (int c = 0; c < 2; ++c)
+    float* x0 = up.getChannelPointer (0);
+    float* x1 = up.getChannelPointer (1);
+    for (int i = 0; i < m; ++i)
     {
-        float* x = up.getChannelPointer ((size_t) c);
-        for (int i = 0; i < m; ++i)
+        driveSm += (drive - driveSm) * smK;
+        mixSm   += (mix - mixSm) * smK;
+        agcSm   += (agc - agcSm) * agcK;
+        float xf = 1.0f;
+        if (xfadeLeft > 0) { xf = 1.0f - (float) xfadeLeft / (float) xfadeLen; --xfadeLeft; }
+        for (int c = 0; c < 2; ++c)
         {
+            float* x = c == 0 ? x0 : x1;
             const float in = x[i];
-            const float y = shape (shp, in, drive, c);   // symmetric, full band (like Serum): crisp crackle, no mud
+            float y = shape (shp, in, driveSm, c);   // symmetric, full band (like Serum): crisp crackle, no mud
+            if (xf < 1.0f) y = y * xf + shape (prevShp, in, driveSm, c) * (1.0f - xf);
             const float d = y - dcX[c] + dcK * dcY[c];
             dcX[c] = y; dcY[c] = d;
             lp[c] = (1.0f - a) * d + a * lp[c];
             envIn[c]  += (in * in - envIn[c]) * envK;
             envWet[c] += (lp[c] * lp[c] - envWet[c]) * envK;
-            x[i] = in * (1.0f - mix) + lp[c] * mix * agc;
+            x[i] = in * (1.0f - mixSm) + lp[c] * mixSm * agcSm;
         }
     }
     // auto level: the distorted signal follows the level of what came in (-24 .. +6 dB), smoothly
@@ -503,6 +524,7 @@ AudioProcessorValueTreeState::ParameterLayout GranulumProcessor::createLayout()
         {
             ps.push_back (std::make_unique<juce::AudioParameterChoice> (ParameterID { ParamID::osc1Mode, 1 }, "OSC 1 Mode", StringArray { "ADDITIVE", "WAVE" }, 0));   // 0.99.6: MIX removed
             ps.push_back (std::make_unique<P> (ParameterID { ParamID::osc1WaveMix, 1 }, "OSC 1 Mix Wave", NormalisableRange<float> (0.0f, 1.0f), 0.0f, pct));
+            ps.push_back (std::make_unique<P> (ParameterID { ParamID::osc1Air, 1 }, "OSC 1 Air", NormalisableRange<float> (0.0f, 1.0f), 0.0f, pct));
             ps.push_back (std::make_unique<juce::AudioParameterChoice> (ParameterID { ParamID::osc1Wave, 1 }, "OSC 1 Wave", StringArray { "SINE", "SAW", "SQUARE", "TRIANGLE" }, 1));
         }
         ps.push_back (std::make_unique<P> (ParameterID { o == 1 ? ParamID::osc1Tune : ParamID::osc2Tune, 1 }, n + "Tune", NormalisableRange<float> (-48.0f, 48.0f, 0.0f), 0.0f,
@@ -541,6 +563,10 @@ AudioProcessorValueTreeState::ParameterLayout GranulumProcessor::createLayout()
                                        A().withStringFromValueFunction ([] (float v, int) { return fmt (3.0f * std::pow (60.0f, v), 0, " /s"); })));
     ps.push_back (std::make_unique<P> (ParameterID { ParamID::gmix, 1 },    "Grain Mix", NormalisableRange<float> (0.0f, 1.0f), 1.0f, pct));
     ps.push_back (std::make_unique<P> (ParameterID { ParamID::chime, 1 },   "Chime",   NormalisableRange<float> (0.0f, 1.0f), 0.0f, pct));
+    ps.push_back (std::make_unique<P> (ParameterID { ParamID::gshape, 1 },  "Grain Shape", NormalisableRange<float> (0.0f, 1.0f), 0.5f,
+                                       A().withStringFromValueFunction ([] (float v, int) { return v < 0.45f ? String ("SOFT ") + String (juce::roundToInt ((0.5f - v) * 200.0f)) : v > 0.55f ? String ("DROP ") + String (juce::roundToInt ((v - 0.5f) * 200.0f)) : String ("CLASSIC"); })));
+    ps.push_back (std::make_unique<B> (ParameterID { ParamID::freeze, 1 }, "Freeze", false));
+    ps.push_back (std::make_unique<AudioParameterChoice> (ParameterID { ParamID::shimmerMode, 1 }, "Shimmer Intervals", StringArray { "FREE", "5TH", "OCT" }, 0));
 
     // FILTER (key-tracked from C3 under the hood)
     ps.push_back (std::make_unique<B> (ParameterID { ParamID::filterOn, 1 }, "Filter On", false));
@@ -936,13 +962,20 @@ void GranulumProcessor::computeModulated (float* v)
     }
     for (int k = 0; k < granulum::kNumHarmonics; ++k)
         harmLive[(size_t) k].store (jlimit (0.0f, 1.0f, harmNow[(size_t) k].load (std::memory_order_relaxed) + harmOff[(size_t) k]), std::memory_order_relaxed);
+    // TEST: every modulated value glides (~4 ms): LFO shapes with vertical edges and fast hand moves no longer click
+    // (filters, DRIVE, grains, volume); one chunk is 32 samples, so this is a few chunks
+    const double srNow = getSampleRate() > 0 ? getSampleRate() : 44100.0;
+    const float slew = (float) (1.0 - std::exp (-(double) kChunk / (0.004 * srNow)));
     for (int t = 0; t < kNumModTargets; ++t)
     {
         auto* p = modParams[(size_t) t];
         const float norm = jlimit (0.0f, 1.0f, p->getValue() + off[t]);
-        v[t] = p->convertFrom0to1 (norm);   // not snapped: Oct/Semi glide smoothly under modulation
+        float& sm = normSm[(size_t) t];
+        sm = normSmInit ? sm + (norm - sm) * slew : norm;
+        v[t] = p->convertFrom0to1 (sm);   // not snapped: Oct/Semi glide smoothly under modulation
         modNorm[(size_t) t].store (norm, std::memory_order_relaxed);
     }
+    normSmInit = true;
 }
 
 void GranulumProcessor::advanceLfos (int endSample, int len, const float* v)
@@ -1001,6 +1034,12 @@ granulum::Params GranulumProcessor::voiceParams (const float* v, int osc) const
     p.position = v[mtPosition];
     p.density  = v[mtDensity];
     p.mix      = v[mtGmix];
+    p.shape    = v[mtShape];
+    p.freeze   = apvts.getRawParameterValue (ParamID::freeze)->load() > 0.5f;
+    {
+        const int sm = (int) apvts.getRawParameterValue (ParamID::shimmerMode)->load();
+        p.shimmerMode = sm == 2 ? 1 : sm == 1 ? 2 : 0;   // menu FREE / 5TH / OCT -> engine 0 / 2 / 1
+    }
     p.evolve   = 0.0f;   // EVOLVE knob removed
     p.mono     = pMono->load() > 0.5f;
     p.portaMs  = v[mtPorta];
@@ -1102,6 +1141,7 @@ void GranulumProcessor::processBlock (AudioBuffer<float>& buffer, MidiBuffer& mi
     addSlot.swapOnAudioThread();
     addCleanSlot.swapOnAudioThread();
     waveSlot.swapOnAudioThread();
+    airSlot.swapOnAudioThread();
     smpSlot.swapOnAudioThread();
     noiseSlot.swapOnAudioThread();
     subSlot.swapOnAudioThread();
@@ -1121,6 +1161,8 @@ void GranulumProcessor::processBlock (AudioBuffer<float>& buffer, MidiBuffer& mi
         }
         colorLp[0] = colorLp[1] = colorHp[0] = colorHp[1] = 0.0f;
         sinceTrigger = 1.0e9;
+        normSmInit = false;   // a new preset starts on its own values, without gliding from the old ones
+        distGate = pDistOn->load() > 0.5f ? 1.0f : 0.0f;
     }
 
     if (work.getNumSamples() < numSamples)
@@ -1284,6 +1326,7 @@ void GranulumProcessor::processChunk (int from, int len)
         const float waveAmt = o1mode == 1 ? 1.0f : 0.0f;                     // the WAVE engine
         const float addAmt  = o1mode == 1 ? 0.0f : 1.0f - 0.5f * mixW;       // keeps the loudness about even while mixing
         const float ovAmt   = mixW;                                         // the wave inside the additive grains
+        const float airAmt  = o1mode == 0 ? jlimit (0.0f, 1.0f, v[mtOsc1Air]) : 0.0f;   // TEST: AIR
         // a part of OSC 1 that is fully off (ADD in WAVE mode, WAVE in ADD mode) is not computed at all
         const bool addIdle  = o == 0 && addAmt <= 0.0f && lastAddAmt <= 0.0f;
         const bool waveIdle = o == 0 && waveAmt <= 0.0f && lastWaveAmt <= 0.0f;
@@ -1308,6 +1351,13 @@ void GranulumProcessor::processChunk (int from, int len)
                     vp.overlay = waveSlot.active.get();
                     vp.overlayGain     = ovAmt / std::max (0.05f, addAmt);
                     vp.overlayGainPrev = lastOvAmt / std::max (0.05f, lastAddAmt > 0.01f ? lastAddAmt : addAmt);
+                }
+                // TEST: AIR rides on the same grains (relative gain like MIX WAVE)
+                if ((airAmt > 0.0f || lastAirAmt > 0.0f) && audible)
+                {
+                    vp.overlay2 = airSlot.active.get();
+                    vp.overlay2Gain     = airAmt / std::max (0.05f, addAmt);
+                    vp.overlay2GainPrev = lastAirAmt / std::max (0.05f, lastAddAmt > 0.01f ? lastAddAmt : addAmt);
                 }
             }
         }
@@ -1342,6 +1392,7 @@ void GranulumProcessor::processChunk (int from, int len)
             lastAddAmt = addAmt;
             lastWaveAmt = waveAmt;
             lastOvAmt = ovAmt;
+            lastAirAmt = airAmt;
         }
         if (o == 0) harmGainPrev = vp.harmGain;
         if (! vp.volInGrains) ramp (L, R);
@@ -1386,7 +1437,15 @@ void GranulumProcessor::processChunk (int from, int len)
     viewPeakQ2.store (v[mtPeakQ2], std::memory_order_relaxed);
     const bool filter2On = pFilter2On->load() > 0.5f;
     const int ft2 = (int) pFtype2->load();
-    const bool filterOn = pFilterOn->load() > 0.5f, distOn = pDistOn->load() > 0.5f && v[mtDistMix] > 0.001f;
+    const bool filterOn = pFilterOn->load() > 0.5f;
+    // TEST: DIST on/off crossfades over ~20 ms (the sources move between their own path and the DIST bus smoothly);
+    // MIX at 0 no longer re-routes (that switch clicked when an LFO swept MIX through zero)
+    const float distG0 = distGate;
+    const float distG1 = pDistOn->load() > 0.5f ? jmin (1.0f, distG0 + (float) len / (0.02f * (float) sr))
+                                                 : jmax (0.0f, distG0 - (float) len / (0.02f * (float) sr));
+    distGate = distG1;
+    const bool distOn = distG0 > 0.0f || distG1 > 0.0f;
+    const bool distFull = distG0 >= 1.0f && distG1 >= 1.0f;
     const bool delayOn = pDelayOn->load() > 0.5f, revOn = pRevOn->load() > 0.5f;
     const int ft = (int) pFtype->load();
     const float delayMs = pDelaySync->load() > 0.5f ? (float) (divisionBeats ((int) pDelayDiv->load()) * 60000.0 / hostBpm)
@@ -1494,12 +1553,22 @@ void GranulumProcessor::processChunk (int from, int len)
         if (distOn && routed (1))
         {
             // into the shared DIST: its own delay / reverb are not used, the mix decides after DIST
-            FloatVectorOperations::add (DL, L, len);
-            FloatVectorOperations::add (DR, R, len);
             distAny = true;
             distToDelay  = distToDelay  || (delayOn && routed (2));
             distToReverb = distToReverb || (revOn && routed (3));
-            continue;
+            if (distFull)
+            {
+                FloatVectorOperations::add (DL, L, len);
+                FloatVectorOperations::add (DR, R, len);
+                continue;
+            }
+            // switching: part goes into DIST, the rest keeps its own path, the two fade over
+            for (int i = 0; i < len; ++i)
+            {
+                const float g = distG0 + (distG1 - distG0) * (float) (i + 1) / (float) len;
+                DL[i] += L[i] * g; DR[i] += R[i] * g;
+                L[i] *= 1.0f - g;  R[i] *= 1.0f - g;
+            }
         }
         if (delayOn && routed (2))
             c.delay.process (L, R, len, delayMs, v[mtDelayFb], v[mtDelayTone], v[mtDelayMix], pDelayPing->load() > 0.5f);
@@ -1738,6 +1807,16 @@ void GranulumProcessor::timerCallback()
         {
             builtWave = wv; builtWaveRate = rate;
             waveSlot.push (std::make_shared<granulum::SampleData> (granulum::renderWaveMips (wv, rate)));
+        }
+    }
+    airSlot.collect();
+    {
+        // TEST: AIR mips (fixed spectrum), built once per sample rate when AIR is used
+        const double rate = getSampleRate() > 0.0 ? getSampleRate() : 44100.0;
+        if (apvts.getRawParameterValue (ParamID::osc1Air)->load() > 0.0001f && rate != builtAirRate)
+        {
+            builtAirRate = rate;
+            airSlot.push (std::make_shared<granulum::SampleData> (granulum::renderAirMips (rate)));
         }
     }
     subSlot.collect();

@@ -1632,7 +1632,9 @@ static bool osc1WaveMode (GranulumProcessor& p) { return osc1ModeIndex (p) == 1;
 static bool osc1UsesWave (GranulumProcessor& p) { return osc1ModeIndex (p) == 1; }      // the wave buttons pick the full wave
 static int  osc1WaveIndex (GranulumProcessor& p) { return juce::jlimit (0, 3, (int) p.apvts.getRawParameterValue (ParamID::osc1Wave)->load()); }
 // parts of the MIX WAVE pill: [MIX WAVE] [track] [ 28%]  (the wave itself is picked by the buttons of WAVE mode)
-static Rectangle<float> pillTrack (Rectangle<float> r) { return r.withTrimmedLeft (70.0f).withTrimmedRight (38.0f); }
+static Rectangle<float> pillTrack (Rectangle<float> r, int k = 0) { return r.withTrimmedLeft (k == 0 ? 70.0f : 36.0f).withTrimmedRight (38.0f); }
+static const char* pillParam (int k)  { return k == 0 ? ParamID::osc1WaveMix : ParamID::osc1Air; }
+static int         pillTarget (int k) { return k == 0 ? mtOsc1WaveMix : mtOsc1Air; }
 
 std::array<float, granulum::kNumHarmonics> WavePicker::shape (int i)
 {
@@ -1760,6 +1762,69 @@ void Osc1ModeSwitch::mouseDown (const MouseEvent& e)
 }
 
 // ============================================================================
+// TEST: FREEZE / SHIMMER intervals switches
+
+int GrainSwitch::value() const { return (int) std::round (proc.apvts.getRawParameterValue (id)->load()); }
+
+void GrainSwitch::paint (Graphics& g)
+{
+    auto r = getLocalBounds().toFloat();
+    const int v = value();
+    if (labels.size() == 1)
+    {
+        const bool on = v > 0;
+        g.setColour (on ? Palette::accent : Palette::field);
+        g.fillRoundedRectangle (r.reduced (1.0f), 6.0f);
+        g.setColour (on ? Palette::onAccent() : Palette::textDim);
+        g.setFont (uiFont (9.5f, true, 0.12f));
+        g.drawText (labels[0], r, Justification::centred, false);
+        return;
+    }
+    if (prefix.isNotEmpty())
+    {
+        g.setColour (Palette::textDim);
+        g.setFont (uiFont (8.5f, true, 0.1f));
+        g.drawText (prefix, r.removeFromLeft (56.0f), Justification::centredRight, false);
+        r.removeFromLeft (5.0f);
+    }
+    g.setColour (Palette::field);
+    g.fillRoundedRectangle (r, 6.0f);
+    const float w = r.getWidth() / (float) labels.size();
+    for (int i = 0; i < labels.size(); ++i)
+    {
+        auto seg = Rectangle<float> (r.getX() + w * (float) i, r.getY(), w, r.getHeight());
+        if (i == v)
+        {
+            g.setColour (i == 0 ? Palette::buttonHi.withAlpha (0.6f) : Palette::accent);
+            g.fillRoundedRectangle (seg.reduced (2.0f), 5.0f);
+        }
+        g.setColour (i == v ? (i == 0 ? Palette::text : Palette::onAccent()) : Palette::textDim);
+        g.setFont (uiFont (9.0f, i == v, 0.1f));
+        g.drawText (labels[i], seg, Justification::centred, false);
+    }
+}
+
+void GrainSwitch::mouseDown (const MouseEvent& e)
+{
+    auto* p = proc.apvts.getParameter (id);
+    if (p == nullptr) return;
+    float x = e.position.x;
+    int idx = 0;
+    if (labels.size() == 1) idx = value() > 0 ? 0 : 1;
+    else
+    {
+        const float left = prefix.isNotEmpty() ? 61.0f : 0.0f;
+        const float w = ((float) getWidth() - left) / (float) labels.size();
+        if (x < left) return;
+        idx = jlimit (0, labels.size() - 1, (int) ((x - left) / w));
+    }
+    p->beginChangeGesture();
+    p->setValueNotifyingHost (p->convertTo0to1 ((float) idx));
+    p->endChangeGesture();
+    repaint();
+}
+
+// ============================================================================
 // LOOP mode selector
 
 int LoopModeBar::mode() const { return (int) proc.apvts.getRawParameterValue (ParamID::loopMode)->load(); }
@@ -1873,7 +1938,9 @@ void HarmonicEditor::timerCallback()
     for (int k = 0; k < granulum::kNumHarmonics && ! lfoOnSticks; ++k)
         for (int l = 0; l < kNumLfos; ++l) if (proc.hasModulation (kHarmTarget0 + k, l)) { lfoOnSticks = true; break; }
     const bool animating = (grainsActive() && mask != 0) || ! crystals.empty() || lfoOnSticks || showHint || introT < 2.0f
-                        || editing || isMouseOverOrDragging() || lfoDropBar >= 0;
+                        || editing || isMouseOverOrDragging() || lfoDropBar >= 0 || pillDrop >= 0
+                        || proc.hasModulation (mtOsc1WaveMix, 0) || proc.hasModulation (mtOsc1WaveMix, 1) || proc.hasModulation (mtOsc1WaveMix, 2)
+                        || proc.hasModulation (mtOsc1Air, 0) || proc.hasModulation (mtOsc1Air, 1) || proc.hasModulation (mtOsc1Air, 2);
     if (animating || changed || ++idleTicks > 15) { idleTicks = 0; repaint(); }
 }
 
@@ -1945,10 +2012,31 @@ void HarmonicEditor::applyPill (int bar)
 
 // ---- LFO on a stick ----
 bool HarmonicEditor::isInterestedInDragSource (const SourceDetails& s) { return s.description.toString().startsWith ("lfo:"); }
-void HarmonicEditor::itemDragMove (const SourceDetails& s) { lfoDropBar = barAt ((float) s.localPosition.x); repaint(); }
-void HarmonicEditor::itemDragExit (const SourceDetails&) { lfoDropBar = -1; repaint(); }
+void HarmonicEditor::itemDragMove (const SourceDetails& s)
+{
+    pillDrop = osc1WaveMode (proc) ? -1 : pillAt (s.localPosition.toFloat());
+    lfoDropBar = pillDrop >= 0 ? -1 : barAt ((float) s.localPosition.x);
+    repaint();
+}
+void HarmonicEditor::itemDragExit (const SourceDetails&) { lfoDropBar = -1; pillDrop = -1; repaint(); }
 void HarmonicEditor::itemDropped (const SourceDetails& s)
 {
+    if (const int pk = osc1WaveMode (proc) ? -1 : pillAt (s.localPosition.toFloat()); pk >= 0)
+    {
+        // TEST: an LFO on MIX WAVE / AIR (one per pill); wheel = depth, right click = remove
+        const int l = s.description.toString().fromFirstOccurrenceOf ("lfo:", false, false).getIntValue();
+        const int t = pillTarget (pk);
+        for (int o = 0; o < kNumLfos; ++o) if (o != l && proc.hasModulation (t, o)) proc.removeModulation (t, o);
+        if (! proc.hasModulation (t, l))
+        {
+            const float v = proc.apvts.getParameter (pillParam (pk))->getValue();
+            proc.setModulation (t, l, v > 0.5f ? -0.4f : 0.4f);
+        }
+        pillDrop = -1; lfoDropBar = -1;
+        repaint();
+        return;
+    }
+    pillDrop = -1;
     const int k = barAt ((float) s.localPosition.x);
     const int l = s.description.toString().fromFirstOccurrenceOf ("lfo:", false, false).getIntValue();
     lfoDropBar = -1;
@@ -1991,6 +2079,17 @@ HarmonicEditor::ChipHit HarmonicEditor::chipAt (Point<float> pos) const
 // mouse wheel over a stick that has an LFO: deeper / shallower
 void HarmonicEditor::mouseWheelMove (const MouseEvent& e, const MouseWheelDetails& w)
 {
+    if (const int pk = osc1WaveMode (proc) ? -1 : pillAt (e.position); pk >= 0)
+    {
+        for (int l = 0; l < kNumLfos; ++l)
+            if (proc.hasModulation (pillTarget (pk), l))
+            {
+                proc.setModulation (pillTarget (pk), l, wheelDepth (proc.getModulationDepth (pillTarget (pk), l), w, e.mods.isShiftDown()));
+                repaint();
+                return;
+            }
+        return;
+    }
     if (e.position.y >= pillRow().getY() - 3.0f) return;
     const int k = barAt (e.position.x);
     for (int l = 0; l < kNumLfos; ++l)
@@ -2041,18 +2140,25 @@ void HarmonicEditor::mouseMove (const MouseEvent& e)
 void HarmonicEditor::mouseDown (const MouseEvent& e)
 {
     if (osc1WaveMode (proc)) return;   // WAVE mode: nothing to draw here
-    if (mixPill().contains (e.position))
+    if (const int pk = pillAt (e.position); pk >= 0)
     {
+        if (e.mods.isPopupMenu())
+        {
+            // right click: take the LFO off this pill
+            for (int l = 0; l < kNumLfos; ++l) if (proc.hasModulation (pillTarget (pk), l)) proc.removeModulation (pillTarget (pk), l);
+            repaint();
+            return;
+        }
         if (e.getNumberOfClicks() > 1)
         {
             // double click: back to 0 % (the default)
-            if (auto* m = proc.apvts.getParameter (ParamID::osc1WaveMix))
+            if (auto* m = proc.apvts.getParameter (pillParam (pk)))
             { m->beginChangeGesture(); m->setValueNotifyingHost (m->getDefaultValue()); m->endChangeGesture(); }
             repaint();
             return;
         }
-        mixDrag = true;
-        if (auto* m = proc.apvts.getParameter (ParamID::osc1WaveMix)) m->beginChangeGesture();
+        pillDrag = pk;
+        if (auto* m = proc.apvts.getParameter (pillParam (pk))) m->beginChangeGesture();
         mouseDrag (e);
         return;
     }
@@ -2085,10 +2191,10 @@ void HarmonicEditor::mouseDown (const MouseEvent& e)
 
 void HarmonicEditor::mouseDrag (const MouseEvent& e)
 {
-    if (mixDrag)
+    if (pillDrag >= 0)
     {
-        const auto r = pillTrack (mixPill());
-        if (auto* m = proc.apvts.getParameter (ParamID::osc1WaveMix))
+        const auto r = pillTrack (pillRect (pillDrag), pillDrag);
+        if (auto* m = proc.apvts.getParameter (pillParam (pillDrag)))
             m->setValueNotifyingHost (jlimit (0.0f, 1.0f, (e.position.x - r.getX()) / jmax (1.0f, r.getWidth())));
         repaint();
         return;
@@ -2108,37 +2214,62 @@ void HarmonicEditor::mouseDrag (const MouseEvent& e)
 
 void HarmonicEditor::mouseExit (const MouseEvent&) { hoverBar = -1; if (readout.hold && chipDrag.harm < 0) readout.release(); }
 
-void HarmonicEditor::mouseUp (const MouseEvent&) { if (mixDrag) { mixDrag = false; if (auto* m = proc.apvts.getParameter (ParamID::osc1WaveMix)) m->endChangeGesture(); } if (chipDrag.harm >= 0) readout.release(); chipDrag = {}; editing = false; lastBar = -1; lastPill = -1; pillMode = false; }
+void HarmonicEditor::mouseUp (const MouseEvent&) { if (pillDrag >= 0) { if (auto* m = proc.apvts.getParameter (pillParam (pillDrag))) m->endChangeGesture(); pillDrag = -1; } if (chipDrag.harm >= 0) readout.release(); chipDrag = {}; editing = false; lastBar = -1; lastPill = -1; pillMode = false; }
 
-Rectangle<float> HarmonicEditor::mixPill() const
+Rectangle<float> HarmonicEditor::pillRect (int k) const
 {
-    return getLocalBounds().toFloat().removeFromTop (22.0f).removeFromRight (176.0f).reduced (6.0f, 4.0f);
+    auto top = getLocalBounds().toFloat().removeFromTop (22.0f);
+    auto mix = top.removeFromRight (176.0f);
+    if (k == 0) return mix.reduced (6.0f, 4.0f);
+    return top.removeFromRight (140.0f).reduced (2.0f, 4.0f).withTrimmedRight (-4.0f);
+}
+
+int HarmonicEditor::pillAt (Point<float> p) const
+{
+    for (int k = 0; k < 2; ++k) if (pillRect (k).expanded (2.0f).contains (p)) return k;
+    return -1;
 }
 
 
 void HarmonicEditor::paintOverChildren (Graphics& g)
 {
     if (osc1WaveMode (proc)) return;
+    for (int k = 0; k < 2; ++k)
     {
-        // 0.99.6 ADDITIVE: MIX WAVE = how much full wave is mixed in with the sticks; the little wave picks which one
-        const auto r = mixPill();
-        const float v = proc.apvts.getRawParameterValue (ParamID::osc1WaveMix)->load();
-        const bool on = v > 0.001f;
+        // ADDITIVE: MIX WAVE = how much full wave rides on the sticks; AIR (TEST) = harmonics above the 16 sticks.
+        // An LFO on a pill shows as a band in its colour over the track (its reach) and a live dot.
+        const auto r = pillRect (k);
+        const float v = proc.apvts.getParameter (pillParam (k))->getValue();
+        const float live = proc.modNorm[(size_t) pillTarget (k)].load (std::memory_order_relaxed);
+        int lfo = -1;
+        for (int l = 0; l < kNumLfos; ++l) if (proc.hasModulation (pillTarget (k), l)) { lfo = l; break; }
+        const bool on = v > 0.001f || lfo >= 0;
         g.setColour (Palette::screen.withAlpha (0.92f));
         g.fillRoundedRectangle (r, r.getHeight() * 0.5f);
-        g.setColour (Palette::accent.withAlpha (on ? 0.7f : 0.3f));
-        g.drawRoundedRectangle (r.reduced (0.5f), r.getHeight() * 0.5f, 1.0f);
+        g.setColour (pillDrop == k ? Palette::text : Palette::accent.withAlpha (on ? 0.7f : 0.3f));
+        g.drawRoundedRectangle (r.reduced (0.5f), r.getHeight() * 0.5f, pillDrop == k ? 1.6f : 1.0f);
         g.setFont (uiFont (8.5f, true, 0.08f));
         g.setColour (on ? Palette::text : Palette::textDim);
-        g.drawText ("MIX WAVE", r.withTrimmedLeft (9.0f).withWidth (56.0f), Justification::centredLeft, false);
-        auto tr = pillTrack (r).withSizeKeepingCentre (pillTrack (r).getWidth(), 3.0f);
+        g.drawText (k == 0 ? "MIX WAVE" : "AIR", r.withTrimmedLeft (9.0f).withWidth (k == 0 ? 56.0f : 26.0f), Justification::centredLeft, false);
+        auto tr = pillTrack (r, k).withSizeKeepingCentre (pillTrack (r, k).getWidth(), 3.0f);
         g.setColour (Palette::field);
         g.fillRoundedRectangle (tr, 1.5f);
         g.setColour (Palette::accent);
         g.fillRoundedRectangle (tr.withWidth (tr.getWidth() * v), 1.5f);
+        if (lfo >= 0)
+        {
+            const auto col = Palette::lfo (lfo).withMultipliedAlpha (proc.isLfoOn (lfo) ? 1.0f : 0.4f);
+            const float d = proc.getModulationDepth (pillTarget (k), lfo);
+            const float a0 = jlimit (0.0f, 1.0f, jmin (v, v + d)), a1 = jlimit (0.0f, 1.0f, jmax (v, v + d));
+            g.setColour (col.withAlpha (0.55f));
+            g.fillRoundedRectangle (Rectangle<float> (tr.getX() + tr.getWidth() * a0, tr.getCentreY() - 3.0f, jmax (2.0f, tr.getWidth() * (a1 - a0)), 6.0f), 2.0f);
+            g.setColour (col);
+            g.fillEllipse (Rectangle<float> (5.0f, 5.0f).withCentre ({ tr.getX() + tr.getWidth() * live, tr.getCentreY() }));
+        }
+        g.setColour (Palette::accent);
         g.fillEllipse (Rectangle<float> (8.0f, 8.0f).withCentre ({ tr.getX() + tr.getWidth() * v, tr.getCentreY() }));
         g.setColour (on ? Palette::text : Palette::textDim);
-        g.drawText (String (roundToInt (v * 100.0f)) + "%", r.withTrimmedRight (8.0f).removeFromRight (30.0f), Justification::centredRight, false);
+        g.drawText (String (roundToInt ((lfo >= 0 ? live : v) * 100.0f)) + "%", r.withTrimmedRight (8.0f).removeFromRight (30.0f), Justification::centredRight, false);
     }
 
     // harmonic numbers (0.99.2): quiet, the stick under the mouse lights up
@@ -4650,6 +4781,7 @@ GranulumEditor::GranulumEditor (GranulumProcessor& p)
     add (smallKnobs, ParamID::density,  "Density",  Knob::Size::Small);
     add (smallKnobs, ParamID::spread,   "Spread",   Knob::Size::Small);
     add (smallKnobs, ParamID::gmix,     "Mix",      Knob::Size::Small);
+    add (smallKnobs, ParamID::gshape,   "Shape",    Knob::Size::Small);   // TEST
 
     add (osc1Knobs, ParamID::osc1Vol,  "Vol",  Knob::Size::Small);
     add (osc1Knobs, ParamID::osc1Oct,  "Oct",  Knob::Size::Small);
@@ -4707,6 +4839,7 @@ GranulumEditor::GranulumEditor (GranulumProcessor& p)
     for (auto* k : { osc1Knobs.back().get(), osc2Knobs.back().get(), osc3Knobs.back().get() })
         k->slider.setTooltip ("PAN: where this oscillator sits left / right. Double-click = centre");
     smallKnobs[4]->slider.setTooltip ("SPREAD: stereo width of the grains. 0 = all in the centre, 100 = wide (grains always take turns left / right)");
+    smallKnobs[6]->slider.setTooltip ("SHAPE: the form of each grain. Left = soft round clouds, middle = classic, right = sharp drops (fast attack, falling tail)");
     for (auto& k : osc2Knobs) k->setCompact (true);
     for (auto& k : subKnobs)  k->setCompact (true);
 
@@ -4819,6 +4952,8 @@ GranulumEditor::GranulumEditor (GranulumProcessor& p)
     loadButton.getProperties().set ("sounds", soundsStyle);
     addChildComponent (sampleMenu);
     addAndMakeVisible (loopBar);
+    addAndMakeVisible (freezeSwitch);
+    addAndMakeVisible (shimmerSwitch);
     addAndMakeVisible (wavePicker);
     sampleMenu.onPick = [this] (const File& f)
     {
@@ -5894,6 +6029,9 @@ void GranulumEditor::resized()
 
     rndGrains.setBounds (grainArea.getRight() - S (74), grainArea.getY(), S (74), S (26));
     grainLabel = { grainArea.getX(), grainArea.getY(), grainArea.getWidth() - S (80), S (26) };
+    // TEST: GRANULAR  [FREEZE]   SHIMMER [FREE|5TH|OCT]   [RANDOM]
+    freezeSwitch.setBounds (grainArea.getX() + S (96), grainArea.getY() + S (2), S (62), S (22));
+    shimmerSwitch.setBounds (rndGrains.getX() - S (8) - S (186), grainArea.getY() + S (2), S (186), S (22));
     {
         auto tabs = filterArea.withHeight (S (30));
         const int tw = tabs.getWidth() / 2;

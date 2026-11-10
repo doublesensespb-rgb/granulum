@@ -348,8 +348,11 @@ public:
     void frame() { timerCallback(); if (readout.expire()) repaint(); }   // driven by the editor's single 30 fps tick (one repaint pass per frame)
     DepthReadout readout;
     void paintOverChildren (juce::Graphics&) override;
-    juce::Rectangle<float> mixPill() const;   // MIX mode: the WAVE amount control, top right of the sticks screen
-    bool mixDrag = false;
+    juce::Rectangle<float> mixPill() const { return pillRect (0); }
+    // TEST: two pills at the top of the sticks screen (ADDITIVE): 0 MIX WAVE (right), 1 AIR (left of it); both take LFOs
+    juce::Rectangle<float> pillRect (int k) const;
+    int pillAt (juce::Point<float>) const;
+    int pillDrag = -1, pillDrop = -1;
     explicit HarmonicEditor (GranulumProcessor&);
     void paint (juce::Graphics&) override;
     void mouseMove (const juce::MouseEvent&) override;
@@ -690,6 +693,29 @@ private:
     GranulumProcessor& proc;
 };
 
+// TEST: small controls in the GRANULAR title row: FREEZE (on / off) and the SHIMMER intervals (FREE | 5TH | OCT)
+class GrainSwitch final : public juce::Component, public juce::SettableTooltipClient, private juce::Timer
+{
+public:
+    // labels.size() == 1: a toggle (bool parameter); more: a segmented choice
+    GrainSwitch (GranulumProcessor& p, const char* paramId, juce::StringArray labelsIn, juce::String prefixIn, const juce::String& tip)
+        : proc (p), id (paramId), labels (std::move (labelsIn)), prefix (std::move (prefixIn))
+    {
+        setTooltip (tip);
+        startTimerHz (10);
+    }
+    void paint (juce::Graphics&) override;
+    void mouseDown (const juce::MouseEvent&) override;
+private:
+    void timerCallback() override { const int v = value(); if (v != shown) { shown = v; repaint(); } }
+    int value() const;
+    GranulumProcessor& proc;
+    const char* id;
+    juce::StringArray labels;
+    juce::String prefix;
+    int shown = -1;
+};
+
 // LOOP mode selector in the GRAIN FIELD title row: OFF | LOOP | PING-PONG | ONE-SHOT
 class LoopModeBar final : public juce::Component, public juce::SettableTooltipClient, private juce::Timer
 {
@@ -830,6 +856,10 @@ private:
     FilterScope filterScope { proc };
     SampleMenu sampleMenu { proc };
     LoopModeBar loopBar { proc };
+    GrainSwitch freezeSwitch { proc, ParamID::freeze, { "FREEZE" }, {},
+                               "FREEZE: the grains stay on one spot of the sound (SPEED is ignored) while you play with the rest." };
+    GrainSwitch shimmerSwitch { proc, ParamID::shimmerMode, { "FREE", "5TH", "OCT" }, "SHIMMER",
+                                "SHIMMER intervals: FREE = octaves, fifths and thirds (as before), 5TH = octaves and fifths, OCT = only octaves." };
     WavePicker wavePicker { proc };
     Osc1ModeSwitch osc1Mode { proc };
     void toggleSampleMenu (bool show);

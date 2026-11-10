@@ -169,6 +169,8 @@ int main (int argc, char** argv)
         setP (ParamID::osc2On, 1.0f); setP (ParamID::osc2Grain, 1.0f);
         setP (ParamID::osc3On, 1.0f); setP (ParamID::osc3Grain, 1.0f);
         setP (ParamID::density, 0.7f);
+        setP (ParamID::osc1Air, 0.45f); setP (ParamID::osc1WaveMix, 0.3f); setP (ParamID::freeze, 1.0f); setP (ParamID::shimmerMode, 1.0f);
+        p.setModulation (mtOsc1Air, 1, 0.35f);
         p.keyboardState.noteOn (1, 48, 0.9f);
         run (p, ed, 50);
         save (*base, outDir, "grains3.png");

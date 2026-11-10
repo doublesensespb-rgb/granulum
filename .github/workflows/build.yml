@@ -46,13 +46,13 @@ jobs:
           New-Item -ItemType Directory -Force out | Out-Null
           Copy-Item -Recurse "build/Granulum_artefacts/Release/VST3/GRAIN FORM.vst3" out/
           Copy-Item "build/Granulum_artefacts/Release/Standalone/GRAIN FORM.exe" out/
-          Compress-Archive -Path out/* -DestinationPath GRAIN-FORM-Windows.zip -Force
+          Compress-Archive -Path out/* -DestinationPath GRAIN-FORM-TEST-Windows.zip -Force
 
       - uses: actions/upload-artifact@v4
         with:
           name: win
           path: |
-            GRAIN-FORM-Windows.zip
+            GRAIN-FORM-TEST-Windows.zip
             shots/*.png
 
   mac:
@@ -87,12 +87,12 @@ jobs:
              sudo xattr -dr com.apple.quarantine "/Library/Audio/Plug-Ins/VST3/GRAIN FORM.vst3" "/Library/Audio/Plug-Ins/Components/GRAIN FORM.component"
           3. Rescan plugins in your DAW.
           TXT
-          ditto -c -k --sequesterRsrc out GRAIN-FORM-macOS.zip
+          ditto -c -k --sequesterRsrc out GRAIN-FORM-TEST-macOS.zip
 
       - uses: actions/upload-artifact@v4
         with:
           name: mac
-          path: GRAIN-FORM-macOS.zip
+          path: GRAIN-FORM-TEST-macOS.zip
 
   publish:
     needs: [windows, mac]

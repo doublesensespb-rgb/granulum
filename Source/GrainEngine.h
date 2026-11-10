@@ -167,6 +167,47 @@ inline SampleData renderWaveMips (int wave, double outSampleRate)
     return d;
 }
 
+// TEST: AIR - the harmonics 17..512 above the 16 sticks, falling like a soft saw (1/k^1.1), scattered phases (no buzz).
+// One cycle per mip (only read through Params::overlay2), the mips cut the top for higher notes WITHOUT turning the
+// rest up: on high notes the air thins out and finally stops, as it should.
+inline SampleData renderAirMips (double outSampleRate)
+{
+    constexpr int period = 1024;
+    constexpr double c4 = 261.6255653;
+    SampleData d;
+    d.sampleRate = period * c4;
+    std::vector<double> ph (513);
+    uint32_t seed = 0x9e3779b9u;
+    for (auto& x : ph) { seed = seed * 1664525u + 1013904223u; x = 2.0 * kPi * (double) (seed >> 8) / 16777216.0; }
+    std::vector<double> cyc ((size_t) period);
+    double g = 0.0;
+    for (int top = period / 2; top >= 1; top /= 2)
+    {
+        std::fill (cyc.begin(), cyc.end(), 0.0);
+        for (int k = 17; k <= top; ++k)
+        {
+            const double a = std::pow (17.0 / (double) k, 1.1);
+            for (int i = 0; i < period; ++i) cyc[(size_t) i] += a * std::sin (2.0 * kPi * (double) k * i / period + ph[(size_t) k]);
+        }
+        if (g == 0.0)
+        {
+            double peak = 0.0;
+            for (double v : cyc) peak = std::max (peak, std::abs (v));
+            g = peak > 1.0e-9 ? 0.5 / peak : 0.0;      // the full air peaks at 0.5 (sticks: up to 0.7)
+        }
+        std::vector<float> buf ((size_t) period);
+        for (int i = 0; i < period; ++i) buf[(size_t) i] = (float) (cyc[(size_t) i] * g);
+        d.mips.push_back (std::move (buf));
+        d.mipTop.push_back (top);
+        if (top <= 16) break;                          // nothing above the sticks left: this last mip is silence
+    }
+    d.channels.assign (1, d.mips.front());
+    d.mipLimit = 19000.0 * period / outSampleRate;
+    d.mipPeriod = period;
+    d.level = 0.5f;
+    return d;
+}
+
 inline SampleData renderAdditive (const std::array<float, kNumHarmonics>& amps)
 {
     return renderAdditiveSplit (amps, 0xffffu).first;
@@ -211,6 +252,14 @@ struct Params
     // playback, added at overlayGain (ramped from overlayGainPrev over the chunk). One grain cloud instead of two engines.
     const SampleData* overlay = nullptr;
     float overlayGain = 0.0f, overlayGainPrev = 0.0f;
+    // TEST: AIR - the harmonics above the 16 sticks (17..512, band-limited mips), read the same way
+    const SampleData* overlay2 = nullptr;
+    float overlay2Gain = 0.0f, overlay2GainPrev = 0.0f;
+    // TEST: grain SHAPE (0 soft cloud .. 0.5 as before .. 1 sharp drops), FREEZE (the read head stops),
+    // SHIMMER intervals (0 FREE as before, 1 OCT only octaves, 2 5TH octaves + fifths)
+    float shape = 0.5f;
+    bool  freeze = false;
+    int   shimmerMode = 0;
 
     // oscillator
     float transpose = 0.0f;  // semitones
@@ -242,7 +291,7 @@ private:
 };
 
 // which band-limited copy a read uses, remembered for the read speed it was picked for (a grain keeps its speed)
-struct MipCache { double step = -1.0; int m = 0, o = 0; bool oSet = false; };
+struct MipCache { double step = -1.0; int m = 0, o = 0, o2 = 0; bool oSet = false, o2Set = false; };
 
 struct Grain
 {
@@ -251,6 +300,10 @@ struct Grain
     double inc = 1.0;
     int    length = 1;
     int    fade = 1;
+    int    fadeR = 1;      // TEST: release fade (SHAPE), the attack uses fade
+    float  tailCurve = 1.0f;   // TEST: >1 = the release falls faster at first (SHAPE towards "drops")
+    float  tilt = 1.0f;    // TEST: grain colour (DRIFT): >1 brighter, <1 darker than the source
+    float  lpL = 0.0f, lpR = 0.0f;
     int    age = 0;
     float  gainL = 0.7f, gainR = 0.7f;
     float  pan = 0.0f;
@@ -301,6 +354,9 @@ public:
     {
         sr = hostSampleRate > 0 ? hostSampleRate : 44100.0;
         driftCoef = 1.0 - std::exp (-1.0 / (0.6 * sr));
+        colourK = (float) (1.0 - std::exp (-2.0 * kPi * 1200.0 / sr));
+        normK = (float) (1.0 - std::exp (-1.0 / (0.006 * sr)));
+        strikeK = (float) (1.0 - std::exp (-2.0 * kPi * 2500.0 / sr));
         reset();
     }
 
@@ -323,7 +379,7 @@ public:
         ++heldCount;
         lastNote.store ((float) note, std::memory_order_relaxed);
         const int n = std::clamp (p.chordSize, 1, 5);
-        const float chordGain = std::pow ((float) n, -0.8f);   // 0.99.6: was 1/sqrt(n); big chords peaked well over 0 dB
+        const float chordGain = std::pow ((float) n, -0.6f);   // TEST: -0.6 (0.99.6 had -0.8: chords came out too quiet; 1/sqrt peaked over)
         const bool porta = p.portaMs > 0.5f && lastPitch >= 0.0 && overlap;
 
         if (p.mono)
@@ -443,6 +499,14 @@ public:
         const int    mipP    = (nMips > 0 && sample->mipPeriod > 0 && (sample->mipPeriod & (sample->mipPeriod - 1)) == 0) ? sample->mipPeriod : 0;
         const double mipInvP = mipP > 0 ? 1.0 / (double) mipP : 0.0;
         const double ovScale = ov ? ov->sampleRate / sample->sampleRate : 1.0;
+        const SampleData* ov2 = (hasSample && p.overlay2 != nullptr && ! p.overlay2->mips.empty()
+                                 && p.overlay2->mipPeriod > 0 && (p.overlay2->mipPeriod & (p.overlay2->mipPeriod - 1)) == 0
+                                 && (p.overlay2Gain > 0.0f || p.overlay2GainPrev > 0.0f)) ? p.overlay2 : nullptr;
+        const int    ov2N     = ov2 ? ov2->mipPeriod : 1;
+        const double ov2InvN  = 1.0 / (double) ov2N;
+        const double ov2Scale = ov2 ? ov2->sampleRate / sample->sampleRate : 1.0;
+        const float  ov2G0    = p.overlay2GainPrev;
+        const float  ov2GStep = (p.overlay2Gain - p.overlay2GainPrev) / (float) std::max (1, numSamples);
         const float  ovG0    = p.overlayGainPrev;
         const float  ovGStep = (p.overlayGain - p.overlayGainPrev) / (float) std::max (1, numSamples);
         const double ovInvN = 1.0 / (double) ovN;
@@ -453,6 +517,8 @@ public:
             if (nMips > 0) c.m = pickMip (*sample, step);
             c.oSet = ov != nullptr;
             if (ov != nullptr) c.o = pickMip (*ov, step * ovScale);
+            c.o2Set = ov2 != nullptr;
+            if (ov2 != nullptr) c.o2 = pickMip (*ov2, step * ov2Scale);
         };
         // pos mod n without a library call (x >= 0 after one fix-up)
         auto modP = [] (double x, double n, double invN) { x -= n * (double) (int64_t) (x * invN); return x < 0.0 ? x + n : x; };
@@ -474,6 +540,15 @@ public:
                 const float* mp = ov->mips[(size_t) std::min (c.o, (int) ov->mips.size() - 1)].data();
                 float w = readCycle (mp, ovN - 1, q);
                 w *= ovG0 + ovGStep * (float) (i + 1);
+                l += w; r += w;
+            }
+            if (ov2 != nullptr)
+            {
+                const double q = modP (pos * ov2Scale, (double) ov2N, ov2InvN);
+                if (step != c.step || ! c.o2Set) pick (c, step);
+                const float* mp = ov2->mips[(size_t) std::min (c.o2, (int) ov2->mips.size() - 1)].data();
+                float w = readCycle (mp, ov2N - 1, q);
+                w *= ov2G0 + ov2GStep * (float) (i + 1);
                 l += w; r += w;
             }
             if (M == 0) return;
@@ -641,7 +716,7 @@ public:
                     double spacing = sr / dens * budgetStretch;
                     spawnGrain (v, p, *sample, ratio, spacing, fileRate, bloom);
                     const double loopLen = p.loopMode == 0 ? 1.0 : std::max (0.005, (double) (p.loopB - p.loopA));
-                    v.travel += (double) p.speed * spacing * fileRate / (double) N / loopLen;   // speed stays "seconds of audio"
+                    if (! p.freeze) v.travel += (double) p.speed * spacing * fileRate / (double) N / loopLen;   // speed stays "seconds of audio"; FREEZE: stays put
                     if (p.loopMode == 3) v.travel = std::clamp (v.travel, -1.0, 1.0);           // ONE-SHOT: stops at the end
                     else if (p.loopMode == 2) v.travel -= 2.0 * std::floor (v.travel * 0.5);
                     else v.travel -= std::floor (v.travel);
@@ -661,9 +736,17 @@ public:
                 for (auto& g : v.grains)
                 {
                     if (! g.active) continue;
-                    const float w = g.perc ? percWindow (g.age, g.length) * 1.6f : window (g.age, g.length, g.fade);
+                    const float w = g.perc ? percWindow (g.age, g.length) * 1.6f : window2 (g.age, g.length, g.fade, g.fadeR, g.tailCurve);
                     float l, r;
                     readAll (g.pos, i, l, r, g.mc, g.inc);
+                    if (g.tilt != 1.0f)
+                    {
+                        // grain colour: each grain a little brighter or darker (tilt around ~1.2 kHz)
+                        g.lpL += (l - g.lpL) * colourK;
+                        g.lpR += (r - g.lpR) * colourK;
+                        l = g.lpL + g.tilt * (l - g.lpL);
+                        r = g.lpR + g.tilt * (r - g.lpR);
+                    }
                     float gv = 1.0f;
                     if (p.volInGrains)
                     {
@@ -690,12 +773,16 @@ public:
                 }
 
                 const float wet = p.mix * ev * ev;
-                const float ga = v.norm * 1.2f;
+                // TEST: the cloud loudness glides (~6 ms) instead of jumping at every new grain (sparse clouds clicked)
+                v.normSm = v.normSm < 0.0f ? v.norm : v.normSm + (v.norm - v.normSm) * normK;
+                const float ga = v.normSm * 1.2f;
                 float gl = sumL * ga, gr = sumR * ga;
                 if (chimeOn)
                 {
                     // hammer: a 1-2 ms noise click that rings the resonators even on smooth pads
-                    const float strikeNow = v.strike * rng.bipolar() * (0.4f + 1.6f * p.chime);
+                    // TEST: the hammer is a soft mallet (noise through ~2.5 kHz), the bells no longer start with a tick
+                    v.strikeLp += (v.strike * rng.bipolar() * (0.4f + 1.6f * p.chime) * 1.8f - v.strikeLp) * strikeK;
+                    const float strikeNow = v.strikeLp;
                     v.strike *= strikeDecay;
                     float rl = 0.0f, rr = 0.0f;
                     for (int m = 0; m < kChimeModes; ++m)
@@ -736,9 +823,21 @@ public:
     // percussive grain: 2 ms attack, exponential decay over the grain
     inline float percWindow (int age, int length) const
     {
-        const float att = std::min (1.0f, (float) (age + 1) / (float) (0.002 * sr));
+        float att = std::min (1.0f, (float) (age + 1) / (float) (0.004 * sr));   // TEST: 4 ms smooth attack (was 2 ms linear)
+        att = att * att * (3.0f - 2.0f * att);
         const float t = (float) age / (float) std::max (1, length);
         return att * std::exp (-5.0f * t) * std::min (1.0f, (float) (length - age) / 64.0f);
+    }
+
+    // TEST: separate attack / release fades; tailCurve > 1 makes the release fall faster at first (a "drop")
+    static inline float window2 (int age, int length, int fadeA, int fadeR, float tailCurve)
+    {
+        float a = std::min (1.0f, (float) (age + 1) / (float) fadeA);
+        float b = std::min (1.0f, (float) (length - age) / (float) fadeR);
+        a = a * a * (3.0f - 2.0f * a);
+        b = b * b * (3.0f - 2.0f * b);
+        if (tailCurve != 1.0f) b = std::pow (b, tailCurve);
+        return std::min (a, b);
     }
 
     static inline float window (int age, int length, int fade)
@@ -764,12 +863,13 @@ private:
         // while the new note fades in, instead of jumping (mono retrigger / voice steal)
         float    lastL = 0.0f, lastR = 0.0f, tailL = 0.0f, tailR = 0.0f;
         int      tailN = 0, tailLen = 1;
-        float    norm = 1.0f;
+        float    norm = 1.0f, normSm = -1.0f;
         double   curNote = 60.0, glideFrom = 60.0, glideTarget = 60.0;
         int      glideLen = 0, glideAge = 0;
         double   travel = 0.0;
         double   nextGrainIn = 0.0;
         float    strike = 0.0f;       // CHIME hammer: a short click every time a grain is born
+        float    strikeLp = 0.0f;
         double   playPos = 0.0;
         int      playDir = 1;            // PING-PONG direction of the plain playback
         bool     playDone = false;       // ONE-SHOT plain playback reached the end
@@ -796,7 +896,7 @@ private:
         v.active = true; v.note = note; v.velocity = velocity;
         v.curNote = v.glideFrom = v.glideTarget = note; v.glideLen = v.glideAge = 0;
         v.stage = Stage::Attack; v.startStamp = ++stamp;
-        v.travel = 0.0; v.nextGrainIn = 0.0; v.age = 0;
+        v.travel = 0.0; v.nextGrainIn = 0.0; v.age = 0; v.normSm = -1.0f;
         v.playPos = loopHead ((double) std::clamp (p.position, 0.0f, 0.9999f), p) * (double) lastNumFrames;
         v.playDir = 1; v.playDone = false;
         if (p.randomStart)
@@ -938,7 +1038,20 @@ private:
         {
             // more SHIMMER = higher, glassier jumps (always in key: octaves, fifths, a third)
             const float hi = p.shimmer, u = rng.uni();
-            if      (u < 0.06f * hi)        cents -= 1200.0;                 // rare low drop
+            if (p.shimmerMode == 1)          // OCT: only octaves
+            {
+                if      (u < 0.05f * hi) cents -= 1200.0;
+                else if (u < 0.70f)      cents += 1200.0;
+                else                     cents += 2400.0;
+            }
+            else if (p.shimmerMode == 2)     // 5TH: octaves and fifths
+            {
+                if      (u < 0.40f - 0.10f * hi) cents += 1200.0;
+                else if (u < 0.65f)              cents += 1900.0;
+                else if (u < 0.88f)              cents += 2400.0;
+                else                             cents += 3100.0;
+            }
+            else if (u < 0.06f * hi)        cents -= 1200.0;                 // FREE (as before): rare low drop
             else if (u < 0.40f - 0.15f * hi) cents += 1200.0;
             else if (u < 0.62f - 0.10f * hi) cents += 1900.0;
             else if (u < 0.85f)              cents += 2400.0;
@@ -971,6 +1084,28 @@ private:
         g->age = 0;
         g->length = length;
         g->fade = std::max (8, (int) (soft * (float) length * 0.5f));
+        g->fadeR = g->fade;
+        g->tailCurve = 1.0f;
+        {
+            // SHAPE: 0.5 = as before; down to 0 = round, cloud-like grains; up to 1 = fast attack, falling tail
+            const float sh = std::clamp (p.shape, 0.0f, 1.0f);
+            if (sh < 0.5f)
+            {
+                const float t = (0.5f - sh) * 2.0f;
+                g->fade = g->fadeR = std::max (8, (int) ((float) g->fade + ((float) length * 0.5f - (float) g->fade) * t));
+            }
+            else if (sh > 0.5f)
+            {
+                const float t = (sh - 0.5f) * 2.0f;
+                const float fastA = (float) std::max (16.0, 0.0025 * sr);
+                g->fade  = std::max (8, (int) ((float) g->fade + (fastA - (float) g->fade) * t));
+                g->fadeR = std::max (8, (int) ((float) g->fadeR + ((float) length * 0.95f - (float) g->fadeR) * t));
+                g->tailCurve = 1.0f + 2.0f * t;
+            }
+        }
+        // grain colour (DRIFT): every grain slightly brighter or darker - a living, less flat cloud
+        g->tilt = drift > 0.001f ? 1.0f + 0.9f * drift * rng.bipolar() : 1.0f;
+        g->lpL = g->lpR = 0.0f;
         g->inc = reverse ? -ratio : ratio;
         g->mc = {};
         g->pos = reverse ? start + ratio * (double) length : start;
@@ -1049,6 +1184,9 @@ private:
     }
 
     double sr = 44100.0, driftCoef = 0.0001;
+    float colourK = 0.15f;   // TEST: grain colour tilt filter (~1.2 kHz)
+    float normK = 0.004f;    // TEST: cloud loudness glide
+    float strikeK = 0.3f;    // TEST: soft CHIME mallet
     std::array<Voice, kMaxVoices> voices {};
     std::array<int, 32> noteStack {};
     int stackSize = 0, heldCount = 0, lastNumFrames = 1;

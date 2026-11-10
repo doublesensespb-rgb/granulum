@@ -93,6 +93,10 @@ namespace ParamID
     inline constexpr const char* osc1Mode  = "osc1Mode";    // 0.99.5: 0 ADDITIVE (sticks), 1 WAVE (a full waveform)
     inline constexpr const char* osc1Wave  = "osc1Wave";    // SINE SAW SQUARE TRIANGLE (WAVE mode)
     inline constexpr const char* osc1WaveMix = "osc1WaveMix"; // MIX mode: 0 = sticks only .. 1 = wave only
+    inline constexpr const char* osc1Air   = "osc1Air";     // TEST: harmonics above the 16 sticks (ADDITIVE)
+    inline constexpr const char* gshape    = "gshape";      // TEST: grain SHAPE 0 soft .. 0.5 classic .. 1 drops
+    inline constexpr const char* freeze    = "freeze";      // TEST: FREEZE - the grains stay where they are
+    inline constexpr const char* shimmerMode = "shimmerMode"; // TEST: FREE / 5TH / OCT
     inline constexpr const char* pitch     = "pitch";       // master pitch of the whole synth, -24..+24 semitones, smooth (0.99.3)
     inline constexpr const char* osc1Pan   = "osc1Pan";
     inline constexpr const char* osc2Pan   = "osc2Pan";
@@ -140,6 +144,7 @@ enum ModTarget
     mtPeakQ, mtPeakQ2,
     mtSubSemi,
     mtOsc1Tune, mtOsc2Tune, mtPitch, mtOsc1WaveMix,
+    mtOsc1Air, mtShape,
     kNumModTargets
 };
 
@@ -195,7 +200,7 @@ public:
     void reset()
     {
         for (int c = 0; c < 2; ++c) { lp[c] = dcX[c] = dcY[c] = hold[c] = pre[c] = 0.0f; count[c] = 0; envIn[c] = envWet[c] = 0.0f; }
-        agc = 1.0f;
+        agc = 1.0f; agcSm = 1.0f; driveSm = mixSm = -1.0f; lastShp = prevShp = -1; xfadeLeft = 0;
         os.reset();
     }
     void process (float* L, float* R, int n, int type, float drive, float tone, float mix);
@@ -206,6 +211,9 @@ private:
     float lp[2] {}, dcX[2] {}, dcY[2] {}, hold[2] {};
     int count[2] {};
     float envIn[2] {}, envWet[2] {}, agc = 1.0f;
+    // TEST: per-sample smoothing (no zipper / clicks when DRIVE or MIX move), AGC glides, type changes crossfade
+    float driveSm = -1.0f, mixSm = -1.0f, agcSm = 1.0f;
+    int lastShp = -1, prevShp = -1, xfadeLeft = 0, xfadeLen = 1;
     float pre[2] {};   // gentle top cut before the shaper: noise crackles warm instead of fizzing
     juce::dsp::Oversampling<float> os { 2, 2, juce::dsp::Oversampling<float>::filterHalfBandPolyphaseIIR, true };
 };
@@ -420,7 +428,12 @@ private:
 
     juce::AudioFormatManager formatManager;
 
-    SourceSlot addSlot, addCleanSlot, smpSlot, noiseSlot, subSlot, waveSlot;
+    SourceSlot addSlot, addCleanSlot, smpSlot, noiseSlot, subSlot, waveSlot, airSlot;
+    double builtAirRate = 0.0;
+    float lastAirAmt = 0.0f;
+    std::array<float, kNumModTargets> normSm {};   // TEST: smoothed (slewed) modulated values, normalised
+    bool normSmInit = false;
+    float distGate = 0.0f;                          // TEST: DIST on/off crossfade (0 = own path, 1 = into DIST)
     static constexpr int kSubHarms = 5;   // SUB sticks: root, octave, octave + fifth, 2 octaves, 2 octaves + third
     std::array<float, 5> subShown { -1.0f, -1.0f, -1.0f, -1.0f, -1.0f };
     float lastGSub = 0.0f;

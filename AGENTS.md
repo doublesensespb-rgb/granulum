@@ -1,7 +1,7 @@
 # GRAIN FORM (repo: granulum) — guide for AI agents and developers
 
 Read this whole file before changing anything. It describes the product, the code, the build
-pipeline and how the owner wants to work. Current version: **0.99.6** (`project(... VERSION 0.9.9)` + display label `set(GRAINFORM_LABEL "0.99.6")` in CMakeLists.txt).
+pipeline and how the owner wants to work. Current version: **0.99.6** (test build 0.99.7-test on branch `test`) (`project(... VERSION 0.9.9)` + display label `set(GRAINFORM_LABEL "0.99.6")` in CMakeLists.txt).
 The UI shows the version on a small plate next to the title (taken from CMake `GRAINFORM_VERSION`, "0.9.8" -> "v0.98").
 
 ## 1. Product
@@ -162,6 +162,14 @@ layered), OCT -3..+1, SEMI; GRAIN switches row (`HarmonicEditor::rowStyle = 11`)
 virtual mod targets `harm1..16` (kHarmTarget0 = 1000) and mtSubH1..5, one LFO per stick, wheel = depth, look = style B
 (`lfoStickStyle = 1`); a stick with an LFO is rendered as its own layer (`SampleData::layers`, gain ramped per chunk in the
 engine); PEAK Q (peakQ/peakQ2) + gain ±36 dB, filter view 0 dB centred; no hand cursors anywhere; UI idle optimisations.
+v0.99.7-test (branch `test`, CI zips named GRAIN-FORM-TEST-*): anti-click - computeModulated slews every normalised mod value
+(~4 ms, `normSm`, reset on soundReset); Distortion smooths drive/mix per oversampled sample, AGC glides (`agcSm`), type change
+crossfades 15 ms; DIST on/off crossfades 20 ms (`distGate`, sources split between own path and the DIST bus; MIX 0 no longer
+re-routes); grain cloud norm glides (`Voice::normSm`); CHIME strike low-passed (~2.5 kHz); perc grains 4 ms smoothstep attack.
+New: `osc1Air` (mod target mtOsc1Air; `renderAirMips` = harmonics 17..512, read as Params::overlay2 inside engineAdd),
+`gshape` (mtShape; Grain fadeR/tailCurve, window2), `freeze` (travel stops), `shimmerMode` FREE/5TH/OCT, grain colour tilt from
+DRIFT (Grain::tilt, ~1.2 kHz one-pole). HarmonicEditor pills: pillRect(0) MIX WAVE, pillRect(1) AIR, both accept LFO drops.
+GrainSwitch (GRANULAR title row): FREEZE toggle, SHIMMER intervals. chordGain n^-0.6.
 v0.99.6: `osc1Mode` = ADDITIVE|WAVE (2 choices; states without `modeOrder` map old MIX -> ADD keeping osc1WaveMix, old WAVE -> 1).
 MIX WAVE (osc1WaveMix, default 0) only in ADD: drawn as a pill in HarmonicEditor::paintOverChildren (drag, double click = 0); the wave
 is read INSIDE engineAdd as `Params::overlay` (same grains, phase mapped by ovScale = wave sr / add sr, one 1024-sample cycle per
