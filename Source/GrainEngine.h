@@ -12,6 +12,12 @@
 #include <utility>
 #include <vector>
 
+#if defined(_MSC_VER)
+ #define GF_FORCE_INLINE __forceinline
+#else
+ #define GF_FORCE_INLINE inline __attribute__((always_inline))
+#endif
+
 namespace granulum
 {
 
@@ -874,7 +880,7 @@ private:
     }
 
     // 0.99.6: one cycle of a mip (power-of-two length), q in [0, n): no wrap branches, always inlined
-    static inline __attribute__((always_inline)) float readCycle (const float* c, int mask, double q)
+    static GF_FORCE_INLINE float readCycle (const float* c, int mask, double q)
     {
         const int   i1 = (int) q;
         const float f  = (float) (q - (double) i1);
@@ -885,7 +891,7 @@ private:
         return ((c3 * f + c2) * f + c1) * f + y1;
     }
 
-    static inline __attribute__((always_inline)) void readHermite (const float* L, const float* R, int N, double pos, float& outL, float& outR)
+    static GF_FORCE_INLINE void readHermite (const float* L, const float* R, int N, double pos, float& outL, float& outR)
     {
         if (pos < 0.0 || pos >= (double) N) pos = wrap (pos, (double) N);   // fast path: almost always inside already
         const int   i1 = std::min (N - 1, (int) pos);
