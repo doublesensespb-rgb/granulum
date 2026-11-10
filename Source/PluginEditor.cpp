@@ -4401,14 +4401,23 @@ PresetSaveWindow::PresetSaveWindow (GranulumProcessor& p, bool browseMode) : bro
         nameEdit.setVisible (false);
         saveBtn.setVisible (false);
         cancelBtn.setButtonText ("CLOSE");
-        for (auto* b : { &initBtn, &openDirBtn, &saveAsBtn }) addAndMakeVisible (*b);
+        for (auto* b : { &initBtn, &openDirBtn, &saveAsBtn, &deleteBtn, &renameBtn }) addAndMakeVisible (*b);
+        deleteBtn.onClick = [this] { if (presetRows.selected >= 0) askDeletePreset (presetRows.selected); };
+        renameBtn.onClick = [this] { if (presetRows.selected >= 0) startPresetRename (presetRows.selected); };
+        deleteBtn.setTooltip ("Delete the selected preset (asks first)");
+        renameBtn.setTooltip ("Rename the selected preset");
+        openDirBtn.setTooltip ("Open this folder on your computer");
         initBtn.onClick = [this] { proc.resetToInit(); presetRows.selected = -1; presetRows.repaint(); if (onLoaded) onLoaded(); };
         openDirBtn.onClick = [this] { folderFile (folderRows.selected).startAsProcess(); };
         saveAsBtn.onClick = [this] { if (onSaved) onSaved(); };
         initBtn.setTooltip ("Start from a clean sound");
     }
     addChildComponent (folderEdit);
-    for (auto* te : { &nameEdit, &folderEdit })
+    addChildComponent (presetEdit);
+    presetEdit.onReturnKey = [this] { finishPresetRename (true); };
+    presetEdit.onEscapeKey = [this] { finishPresetRename (false); };
+    presetEdit.onFocusLost = [this] { finishPresetRename (true); };
+    for (auto* te : { &nameEdit, &folderEdit, &presetEdit })
     {
         te->setFont (uiFont (13.0f, false, 0.02f));
         te->setJustification (Justification::centredLeft);
@@ -4456,16 +4465,16 @@ PresetSaveWindow::PresetSaveWindow (GranulumProcessor& p, bool browseMode) : bro
     presetRows.onDoubleClick = [this] (int i) { if (browse) { loadRow (i); if (onClose) onClose(); } };
     presetRows.onRightClick = [this] (int i)
     {
+        presetRows.selected = i; presetRows.repaint();
         PopupMenu m;
-        m.addItem (1, "Delete preset \"" + presetRows.items[i] + "\"");
+        m.addItem (2, "Rename");
+        m.addItem (1, "Delete");
         Component::SafePointer<PresetSaveWindow> safe (this);
         m.showMenuAsync (PopupMenu::Options(), [safe, i] (int res)
         {
-            if (safe == nullptr || res != 1) return;
-            auto f = safe->folderFile (safe->folderRows.selected).getChildFile (safe->presetRows.items[i] + ".gpreset");
-            if (! f.moveToTrash()) f.deleteFile();
-            safe->refreshPresets();
-            safe->updateSaveLabel();
+            if (safe == nullptr) return;
+            if (res == 1) safe->askDeletePreset (i);
+            if (res == 2) safe->startPresetRename (i);
         });
     };
 }
@@ -4569,6 +4578,65 @@ void PresetSaveWindow::finishFolderEdit (bool accept)
     nameEdit.grabKeyboardFocus();
 }
 
+// TEST: delete asks first (a small menu right at the button: Delete "name" / Cancel); the file goes to the bin when it can
+void PresetSaveWindow::askDeletePreset (int i)
+{
+    if (i < 0 || i >= presetRows.items.size()) return;
+    PopupMenu m;
+    m.addSectionHeader ("Delete \"" + presetRows.items[i] + "\"?");
+    m.addItem (1, "Delete");
+    m.addItem (2, "Cancel");
+    Component::SafePointer<PresetSaveWindow> safe (this);
+    m.showMenuAsync (PopupMenu::Options().withTargetComponent (&deleteBtn), [safe, i] (int res)
+    {
+        if (safe == nullptr || res != 1 || i >= safe->presetRows.items.size()) return;
+        auto f = safe->folderFile (safe->folderRows.selected).getChildFile (safe->presetRows.items[i] + ".gpreset");
+        if (! f.moveToTrash()) f.deleteFile();
+        safe->presetRows.selected = -1;
+        safe->refreshPresets();
+        safe->updateSaveLabel();
+    });
+}
+
+void PresetSaveWindow::startPresetRename (int i)
+{
+    if (i < 0 || i >= presetRows.items.size()) return;
+    presetRenaming = i;
+    presetEdit.setText (presetRows.items[i], false);
+    presetEdit.setVisible (true);
+    resized();
+    presetEdit.grabKeyboardFocus();
+    presetEdit.selectAll();
+}
+
+void PresetSaveWindow::finishPresetRename (bool accept)
+{
+    if (presetRenaming < 0) return;
+    const int i = presetRenaming;
+    presetRenaming = -1;
+    presetEdit.setVisible (false);
+    resized();
+    if (! accept || i >= presetRows.items.size()) return;
+    const auto from = presetRows.items[i];
+    const auto to = File::createLegalFileName (presetEdit.getText().trim());
+    if (to.isEmpty() || to == from) return;
+    const auto dir = folderFile (folderRows.selected);
+    const auto target = dir.getChildFile (to + ".gpreset");
+    if (target.exists())
+    {
+        PopupMenu m;
+        m.addSectionHeader ("\"" + to + "\" already exists");
+        m.addItem (1, "OK");
+        m.showMenuAsync (PopupMenu::Options().withTargetComponent (&renameBtn), [] (int) {});
+        return;
+    }
+    if (dir.getChildFile (from + ".gpreset").moveFileTo (target))
+        proc.presetRenamed (folderRows.selected > 0 ? dir.getFileName() : String(), from, to);
+    refreshPresets();
+    for (int k = 0; k < presetRows.items.size(); ++k) if (presetRows.items[k] == to) presetRows.selected = k;
+    presetRows.repaint();
+}
+
 void PresetSaveWindow::doSave()
 {
     const auto name = nameEdit.getText().trim();
@@ -4601,6 +4669,7 @@ void PresetSaveWindow::resized()
     folderRows.setSize (left.getWidth() - (folderRows.getHeight() > left.getHeight() ? 8 : 0), folderRows.getHeight());
     // right: presets of that folder
     r.removeFromTop (18);
+    if (presetEdit.isVisible()) { presetEdit.setBounds (r.removeFromBottom (26)); r.removeFromBottom (4); }
     presetView.setBounds (r);
     presetRows.setSize (r.getWidth() - (presetRows.getHeight() > r.getHeight() ? 8 : 0), presetRows.getHeight());
     if (browse)
@@ -4609,9 +4678,13 @@ void PresetSaveWindow::resized()
         bottom.removeFromRight (8);
         saveAsBtn.setBounds (bottom.removeFromRight (96));
         bottom.removeFromRight (8);
-        openDirBtn.setBounds (bottom.removeFromLeft (110));
+        initBtn.setBounds (bottom.removeFromLeft (62));
         bottom.removeFromLeft (8);
-        initBtn.setBounds (bottom.removeFromLeft (70));
+        openDirBtn.setBounds (bottom.removeFromLeft (72));
+        bottom.removeFromLeft (8);
+        deleteBtn.setBounds (bottom.removeFromLeft (72));
+        bottom.removeFromLeft (8);
+        renameBtn.setBounds (bottom.removeFromLeft (76));
         return;
     }
     // bottom: name, CANCEL, SAVE

@@ -590,9 +590,14 @@ private:
     GranulumProcessor& proc;
     Rows folderRows, presetRows;
     juce::Viewport folderView, presetView;
-    juce::TextEditor nameEdit, folderEdit;
+    juce::TextEditor nameEdit, folderEdit, presetEdit;
+    void startPresetRename (int i);
+    void finishPresetRename (bool accept);
+    void askDeletePreset (int i);
+    int presetRenaming = -1;                     // TEST: index of the preset being renamed
     juce::TextButton newFolder { "+ FOLDER" }, saveBtn { "SAVE" }, cancelBtn { "CANCEL" };
-    juce::TextButton initBtn { "INIT" }, openDirBtn { "OPEN FOLDER" }, saveAsBtn { "SAVE AS..." };   // browse mode
+    juce::TextButton initBtn { "INIT" }, openDirBtn { "FOLDER" }, saveAsBtn { "SAVE AS..." };   // browse mode
+    juce::TextButton deleteBtn { "DELETE" }, renameBtn { "RENAME" };                                // TEST, browse mode
     void loadRow (int i);
     juce::Array<juce::File> folders;             // index 0 = root
     int renaming = -2;                           // -2 = not editing, -1 = new folder, >= 1 = rename that folder

@@ -343,6 +343,8 @@ public:
     juce::String getPresetFolderName() const { return presetSub; }   // "" = root
     bool uiFold[3] {};        // 0.99.3: OSC 2 SUB / OSC 3 SAMPLE / OSC 4 NOISE folded into a strip (saved with the state)
     void presetFolderRenamed (const juce::String& from, const juce::String& to) { if (presetSub == from) presetSub = to; }
+    // TEST: a preset file was renamed in the browser: if it is the one loaded, the bar shows the new name
+    void presetRenamed (const juce::String& sub, const juce::String& from, const juce::String& to) { if (presetSub == sub && presetName == from) presetName = to; }
     juce::File currentPresetFile() const;
 
     std::array<float, granulum::kNumHarmonics> getHarmonics() const { return harmonics; }
