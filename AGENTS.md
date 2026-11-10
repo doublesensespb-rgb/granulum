@@ -1,7 +1,7 @@
 # GRAIN FORM (repo: granulum) — guide for AI agents and developers
 
 Read this whole file before changing anything. It describes the product, the code, the build
-pipeline and how the owner wants to work. Current version: **0.99.5** (`project(... VERSION 0.9.9)` + display label `set(GRAINFORM_LABEL "0.99.5")` in CMakeLists.txt).
+pipeline and how the owner wants to work. Current version: **0.99.6** (`project(... VERSION 0.9.9)` + display label `set(GRAINFORM_LABEL "0.99.6")` in CMakeLists.txt).
 The UI shows the version on a small plate next to the title (taken from CMake `GRAINFORM_VERSION`, "0.9.8" -> "v0.98").
 
 ## 1. Product
@@ -162,6 +162,15 @@ layered), OCT -3..+1, SEMI; GRAIN switches row (`HarmonicEditor::rowStyle = 11`)
 virtual mod targets `harm1..16` (kHarmTarget0 = 1000) and mtSubH1..5, one LFO per stick, wheel = depth, look = style B
 (`lfoStickStyle = 1`); a stick with an LFO is rendered as its own layer (`SampleData::layers`, gain ramped per chunk in the
 engine); PEAK Q (peakQ/peakQ2) + gain ±36 dB, filter view 0 dB centred; no hand cursors anywhere; UI idle optimisations.
+v0.99.6: `osc1Mode` = ADDITIVE|WAVE (2 choices; states without `modeOrder` map old MIX -> ADD keeping osc1WaveMix, old WAVE -> 1).
+MIX WAVE (osc1WaveMix, default 0) only in ADD: drawn as a pill in HarmonicEditor::paintOverChildren (drag, double click = 0); the wave
+is read INSIDE engineAdd as `Params::overlay` (same grains, phase mapped by ovScale = wave sr / add sr, one 1024-sample cycle per
+mip via readCycle, per-grain MipCache). engineWave only runs in WAVE mode. Grain budget `kGrainBudget = 200` live grains per engine
+stretches spacing (anti-crackle). Output CLIP = 4x oversampled soft knee clipper (t 0.708, ceil 0.985), no latch indicator.
+OUTPUT -36..+24 dB. randMask bits: filter2 64, lfo1..3 128/256/512 (`randOrder` 2). VOWEL norm 2.4/fq, FilterUnit::resoComp,
+chordGain n^-0.8. Noises: 12 files (01_WHITE..12_BUBBLES), `noiseOrder` 3; states with noiseOrder 2 are remapped by name via
+noiseIndexFor (removed: BROWN, AC HUM, BUZZ, TRANSFORMER, AIR, LEAVES); noiseOffsetSemis: PINK +5 st. osc3Color range -1..2
+(= -12..+24 st). GrainField reads events from engineAdd, engineWave, engineSmp, engineNoise (Shard::src 0/1/2).
 v0.99.5: OSC 1 `osc1Mode` ADD|MIX|WAVE + `osc1Wave` + `osc1WaveMix` (mod target mtOsc1WaveMix); WAVE = `engineWave` playing
 `renderWaveMips` (period 1024, 512 harmonics, octave mips, per-read mip pick by step -> no aliasing); idle OSC 1 parts are not
 rendered. Distortion 4x oversampled (dsp::Oversampling IIR) with auto level (AGC -24..+6 dB) and gentler drive curves. RANDOM ALL

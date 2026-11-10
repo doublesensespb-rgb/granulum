@@ -161,6 +161,19 @@ int main (int argc, char** argv)
     save (*base, outDir, "ui-playing.png");
 
     // design preview: "Snapshot <dir> sampler <wav>" -> OSC 2 with factory samples, then a dropped user sample
+    if (argc > 2 && String (argv[2]) == "grains3")
+    {
+        // 0.99.6: grains of OSC 1, the SAMPLE and the NOISE all on the screen
+        setP (ParamID::osc1On, 1.0f); setP (ParamID::osc1Grain, 1.0f);
+        String err; p.loadSample (makeTestSample(), err);
+        setP (ParamID::osc2On, 1.0f); setP (ParamID::osc2Grain, 1.0f);
+        setP (ParamID::osc3On, 1.0f); setP (ParamID::osc3Grain, 1.0f);
+        setP (ParamID::density, 0.7f);
+        p.keyboardState.noteOn (1, 48, 0.9f);
+        run (p, ed, 50);
+        save (*base, outDir, "grains3.png");
+        return 0;
+    }
     if (argc > 3 && String (argv[2]) == "sampler")
     {
         auto dir = GranulumProcessor::factorySampleDir();

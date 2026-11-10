@@ -514,8 +514,8 @@ AudioProcessorValueTreeState::ParameterLayout GranulumProcessor::createLayout()
     ps.push_back (std::make_unique<B> (ParameterID { ParamID::osc3On, 1 }, "Osc 3 On", false));
     ps.push_back (std::make_unique<P> (ParameterID { ParamID::osc3Vol, 1 }, "Osc 3 Volume", NormalisableRange<float> (0.0f, 1.0f), 0.5f, pct));
     ps.push_back (std::make_unique<AudioParameterChoice> (ParameterID { ParamID::osc3Type, 1 }, "Osc 3 Noise", noiseNames(), 0));
-    // OSC 3 PITCH (the old COLOR id is kept so projects load): -1..1 = -12..+12 semitones
-    ps.push_back (std::make_unique<P> (ParameterID { ParamID::osc3Color, 1 }, "Osc 3 Pitch", NormalisableRange<float> (-1.0f, 1.0f), 0.0f,
+    // OSC 3 PITCH (the old COLOR id is kept so projects load): 1.0 = 12 semitones; 0.99.6: -12..+24
+    ps.push_back (std::make_unique<P> (ParameterID { ParamID::osc3Color, 1 }, "Osc 3 Pitch", NormalisableRange<float> (-1.0f, 2.0f), 0.0f,
                                        A().withStringFromValueFunction ([] (float v, int) { const float st = v * 12.0f;
                                            return std::abs (st) < 0.05f ? String ("0 st") : (st > 0 ? "+" : "") + String (st, 1) + " st"; })));
     ps.push_back (std::make_unique<B> (ParameterID { ParamID::osc3Grain, 1 }, "Osc 3 Granular", false));
@@ -638,7 +638,7 @@ AudioProcessorValueTreeState::ParameterLayout GranulumProcessor::createLayout()
     ps.push_back (std::make_unique<P> (ParameterID { ParamID::subH5, 1 }, "Sub Harmonic 5", NormalisableRange<float> (0.0f, 1.0f), 0.0f, pct));
     ps.push_back (std::make_unique<P> (ParameterID { ParamID::pitch, 1 }, "Pitch", NormalisableRange<float> (-24.0f, 24.0f, 0.0f), 0.0f,
                                        A().withStringFromValueFunction ([] (float v, int) { return (v > 0.05f ? "+" : "") + String (v, 1) + " st"; })));   // 0.99.3: +-2 oct, smooth
-    ps.push_back (std::make_unique<P> (ParameterID { ParamID::output, 1 }, "Output", NormalisableRange<float> (-36.0f, 12.0f, 0.1f), 0.0f,
+    ps.push_back (std::make_unique<P> (ParameterID { ParamID::output, 1 }, "Output", NormalisableRange<float> (-36.0f, 24.0f, 0.1f), 0.0f,
                                        A().withStringFromValueFunction ([] (float v, int) { return fmt (v, 1, " dB"); })));
 
     // LFOs
@@ -1043,7 +1043,7 @@ granulum::Params GranulumProcessor::voiceParams (const float* v, int osc) const
         p.keyTrack = false;        // noise sounds the same on every note
         p.randomStart = true;      // stacked voices don't phase against each other
         p.portaMs = 0.0f;
-        p.transpose = v[mtOsc3Color] * 12.0f + 3.0f + v[mtPitch];   // OSC 4 NOISE PITCH + master PITCH; 0.99.5: all noises sit 3 semitones higher
+        p.transpose = v[mtOsc3Color] * 12.0f + 3.0f + noiseOffsetSemis ((int) pOsc3Type->load()) + v[mtPitch];   // 0.99.6: PITCH -12..+24   // OSC 4 NOISE PITCH + master PITCH; 0.99.5: all noises sit 3 semitones higher
         p.grainOn = grainBlock && pOsc3Grain->load() > 0.5f;
     }
     return p;
@@ -1824,6 +1824,29 @@ namespace
     }
 }
 
+// a noise by name, with the removed ones sent to their nearest neighbour (0.99.6)
+int GranulumProcessor::noiseIndexFor (const String& name)
+{
+    String n = name;
+    if (n == "BROWN") n = "PINK";
+    else if (n == "AC HUM" || n == "BUZZ" || n == "TRANSFORMER") n = "TAPE HISS";
+    else if (n == "AIR") n = "WHITE";
+    else if (n == "LEAVES") n = "RAIN";
+    return jmax (0, noiseNames().indexOf (n));
+}
+
+// semitones a noise sits above the PITCH knob (0.99.6: PINK +5, it was too dark next to the others)
+float GranulumProcessor::noiseOffsetSemis (int index)
+{
+    static const std::vector<float> offs = []
+    {
+        std::vector<float> o;
+        for (auto& n : noiseNames()) o.push_back (n == "PINK" ? 5.0f : 0.0f);
+        return o;
+    }();
+    return index >= 0 && index < (int) offs.size() ? offs[(size_t) index] : 0.0f;
+}
+
 const StringArray& GranulumProcessor::noiseNames()
 {
     static const StringArray names = []
@@ -2101,7 +2124,7 @@ void GranulumProcessor::getStateInformation (MemoryBlock& destData)
     state.setProperty ("presetName", presetName, nullptr);
     state.setProperty ("presetFolder", presetSub, nullptr);
     state.setProperty ("randMask", randMask.load(), nullptr);
-    state.setProperty ("noiseOrder", 2, nullptr);
+    state.setProperty ("noiseOrder", 3, nullptr);
     state.setProperty ("distOrder", 2, nullptr);
     state.setProperty ("modeOrder", 2, nullptr);
     state.setProperty ("randOrder", 2, nullptr);
@@ -2184,14 +2207,25 @@ void GranulumProcessor::setStateInformation (const void* data, int sizeInBytes)
             if (child.getProperty ("id").toString() == ParamID::distType && (double) child.getProperty ("value") > 2.5)
                 child.setProperty ("value", 2, nullptr);
     // 0.99.5: noise list = WHITE PINK BROWN BLUE first; STATIC / WIND / BREATH removed. Older states keep their noise.
-    if (! state.hasProperty ("noiseOrder"))
+    const bool hadNoiseOrder = state.hasProperty ("noiseOrder");
+    if (! hadNoiseOrder)
         for (auto child : state)
             if (child.getProperty ("id").toString() == ParamID::osc3Type)
             {
                 // old: AIR TAPE HISS VINYL STATIC WIND BREATH PAPER DUST FROST METAL RAIN
                 static const char* const oldNames[10] = { "AIR", "TAPE HISS", "VINYL", "WHITE", "BROWN", "PINK", "PAPER", "DUST", "FROST", "METAL RAIN" };
                 const int o = jlimit (0, 9, (int) std::round ((double) child.getProperty ("value")));
-                child.setProperty ("value", jmax (0, noiseNames().indexOf (oldNames[o])), nullptr);
+                child.setProperty ("value", noiseIndexFor (oldNames[o]), nullptr);
+            }
+    // 0.99.6: BROWN, AC HUM, BUZZ, TRANSFORMER, AIR, LEAVES removed (noiseOrder 2 = the 18-noise list of 0.99.5)
+    if (hadNoiseOrder && (int) state.getProperty ("noiseOrder") == 2)
+        for (auto child : state)
+            if (child.getProperty ("id").toString() == ParamID::osc3Type)
+            {
+                static const char* const names995[18] = { "WHITE", "PINK", "BROWN", "BLUE", "AC HUM", "BUZZ", "TRANSFORMER", "AIR", "TAPE HISS",
+                                                          "VINYL", "PAPER", "DUST", "FROST", "METAL RAIN", "RAIN", "FIRE", "LEAVES", "BUBBLES" };
+                const int o = jlimit (0, 17, (int) std::round ((double) child.getProperty ("value")));
+                child.setProperty ("value", noiseIndexFor (names995[o]), nullptr);
             }
     const String path = state.getProperty ("samplePath").toString();
     const auto hs = StringArray::fromTokens (state.getProperty ("harmonics").toString(), ",", "");

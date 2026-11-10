@@ -917,16 +917,16 @@ void GrainField::simulate (float dt)
     }
 
     // ---- new grains -> shards ----
-    const int which = proc.showingSample() ? 1 : 0;
-    granulum::GrainEngine* engines[2] = { &proc.engineAdd, &proc.engineSmp };
-    for (int e = 0; e < 2; ++e)
+    // 0.99.6: every source that makes grains shows them: OSC 1 (additive or wave), the SAMPLE, the NOISE
+    granulum::GrainEngine* engines[4] = { &proc.engineAdd, &proc.engineWave, &proc.engineSmp, &proc.engineNoise };
+    static constexpr uint8_t srcOf[4] = { 0, 0, 1, 2 };
+    for (int e = 0; e < 4; ++e)
     {
         auto& en = *engines[e];
         const uint32_t w = en.eventWrite.load (std::memory_order_acquire);
         uint32_t r = lastEvent[e];
         if (w - r > (uint32_t) granulum::GrainEngine::kEventRing) r = w - (uint32_t) granulum::GrainEngine::kEventRing;
-        if (e != which) { lastEvent[e] = w; continue; }
-        int budget = 40;
+        int budget = e == 3 ? 14 : 24;
         for (; r != w && budget > 0; ++r, --budget)
         {
             const auto ev = en.events[(size_t) (r % granulum::GrainEngine::kEventRing)];
@@ -945,8 +945,10 @@ void GrainField::simulate (float dt)
             sh.spin  = (rng.nextFloat() - 0.5f) * (1.0f + 6.0f * drift);
             sh.angle = std::atan2 (sh.vy, sh.vx);
             sh.kind  = ev.kind;
+            sh.src   = srcOf[e];
+            if (sh.src == 2) { sh.len *= 0.55f; sh.life *= 0.7f; }   // noise: short, small sparks
             sh.tint  = ev.kind == 1 ? 1.0f : jlimit (0.0f, 0.85f, 0.15f + 0.5f * rng.nextFloat() + 0.25f * shimmer);
-            sh.size  = 0.7f + 0.6f * rng.nextFloat() + 0.5f * bloom;
+            sh.size  = (0.7f + 0.6f * rng.nextFloat() + 0.5f * bloom) * (sh.src == 2 ? 0.6f : 1.0f);
             shards.push_back (sh);
             if (! heat.empty())
             {
@@ -1183,7 +1185,7 @@ void GrainField::paint (Graphics& g)
     for (auto& sh : shards)
     {
         const float lt = sh.age / sh.life;
-        const float fade = jmin (1.0f, sh.age * 14.0f) * (1.0f - lt) * (1.0f - lt * 0.4f);
+        const float fade = jmin (1.0f, sh.age * 14.0f) * (1.0f - lt) * (1.0f - lt * 0.4f) * (sh.src == 2 ? 0.6f : 1.0f);
         if (fade <= 0.01f) continue;
         const auto col = shardColour (sh.tint);
         const auto p = P (sh.x, sh.y);
@@ -1270,6 +1272,11 @@ void GrainField::paint (Graphics& g)
         g.setColour (Colours::white.withAlpha (fade * 0.45f));
         g.fillPath (facet);
 
+        if (sh.src == 1)    // SAMPLE grains: a light outline, so they read apart from OSC 1
+        {
+            g.setColour (Colours::white.withAlpha (fade * 0.55f));
+            g.strokePath (kite, PathStrokeType (0.9f));
+        }
         if (sh.kind == 2)   // reverse grains: a thin ice edge
         {
             g.setColour (Palette::ice.withAlpha (fade * 0.6f));
@@ -1624,9 +1631,8 @@ static int  osc1ModeIndex (GranulumProcessor& p) { return juce::jlimit (0, 1, (i
 static bool osc1WaveMode (GranulumProcessor& p) { return osc1ModeIndex (p) == 1; }      // the sticks are hidden
 static bool osc1UsesWave (GranulumProcessor& p) { return osc1ModeIndex (p) == 1; }      // the wave buttons pick the full wave
 static int  osc1WaveIndex (GranulumProcessor& p) { return juce::jlimit (0, 3, (int) p.apvts.getRawParameterValue (ParamID::osc1Wave)->load()); }
-// parts of the MIX WAVE pill: [MIX WAVE] [wave glyph] [track] [ 28%]
-static Rectangle<float> pillGlyph (Rectangle<float> r) { return r.withTrimmedLeft (62.0f).withWidth (20.0f); }
-static Rectangle<float> pillTrack (Rectangle<float> r) { return r.withTrimmedLeft (88.0f).withTrimmedRight (36.0f); }
+// parts of the MIX WAVE pill: [MIX WAVE] [track] [ 28%]  (the wave itself is picked by the buttons of WAVE mode)
+static Rectangle<float> pillTrack (Rectangle<float> r) { return r.withTrimmedLeft (70.0f).withTrimmedRight (38.0f); }
 
 std::array<float, granulum::kNumHarmonics> WavePicker::shape (int i)
 {
@@ -2037,11 +2043,11 @@ void HarmonicEditor::mouseDown (const MouseEvent& e)
     if (osc1WaveMode (proc)) return;   // WAVE mode: nothing to draw here
     if (mixPill().contains (e.position))
     {
-        if (pillGlyph (mixPill()).contains (e.position))
+        if (e.getNumberOfClicks() > 1)
         {
-            // the little wave: SINE -> SAW -> SQUARE -> TRIANGLE
-            if (auto* w = proc.apvts.getParameter (ParamID::osc1Wave))
-                w->setValueNotifyingHost (w->convertTo0to1 ((float) ((osc1WaveIndex (proc) + 1) % 4)));
+            // double click: back to 0 % (the default)
+            if (auto* m = proc.apvts.getParameter (ParamID::osc1WaveMix))
+            { m->beginChangeGesture(); m->setValueNotifyingHost (m->getDefaultValue()); m->endChangeGesture(); }
             repaint();
             return;
         }
@@ -2110,27 +2116,6 @@ Rectangle<float> HarmonicEditor::mixPill() const
 }
 
 
-static void drawWaveGlyph (Graphics& g, Rectangle<float> b, int wv)
-{
-    Path p;
-    const int n = 24;
-    for (int i = 0; i <= n; ++i)
-    {
-        const float ph = (float) i / (float) n;
-        float v = 0.0f;
-        switch (wv)
-        {
-            case 0:  v = std::sin (MathConstants<float>::twoPi * ph); break;
-            case 1:  v = 1.0f - 2.0f * ph; break;
-            case 2:  v = ph < 0.5f ? 1.0f : -1.0f; break;
-            default: v = ph < 0.5f ? 4.0f * ph - 1.0f : 3.0f - 4.0f * ph; break;
-        }
-        const float x = b.getX() + b.getWidth() * ph, y = b.getCentreY() - v * b.getHeight() * 0.4f;
-        if (i == 0) p.startNewSubPath (x, y); else p.lineTo (x, y);
-    }
-    g.strokePath (p, PathStrokeType (1.3f, PathStrokeType::curved, PathStrokeType::rounded));
-}
-
 void HarmonicEditor::paintOverChildren (Graphics& g)
 {
     if (osc1WaveMode (proc)) return;
@@ -2146,8 +2131,6 @@ void HarmonicEditor::paintOverChildren (Graphics& g)
         g.setFont (uiFont (8.5f, true, 0.08f));
         g.setColour (on ? Palette::text : Palette::textDim);
         g.drawText ("MIX WAVE", r.withTrimmedLeft (9.0f).withWidth (56.0f), Justification::centredLeft, false);
-        g.setColour (on ? Palette::accent.brighter (0.2f) : Palette::textDim);
-        drawWaveGlyph (g, pillGlyph (r).reduced (2.0f, 3.0f), osc1WaveIndex (proc));
         auto tr = pillTrack (r).withSizeKeepingCentre (pillTrack (r).getWidth(), 3.0f);
         g.setColour (Palette::field);
         g.fillRoundedRectangle (tr, 1.5f);

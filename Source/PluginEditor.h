@@ -252,6 +252,7 @@ private:
         float x = 0, y = 0, vx = 0, vy = 0;   // x 0..1, y -1..1
         float age = 0, life = 1, len = 0.03f, width = 0.006f, spin = 0, angle = 0, tint = 0, size = 1;
         uint8_t kind = 0;
+        uint8_t src = 0;                      // 0 OSC 1, 1 SAMPLE, 2 NOISE
         std::array<juce::Point<float>, 7> trail {};
         int trailN = 0;
     };
@@ -264,7 +265,7 @@ private:
     std::vector<float> env;               // smoothed waveform envelope per column
     std::shared_ptr<const WaveformPeaks> lastPeaks;
     std::vector<float> heads;
-    uint32_t lastEvent[2] { 0, 0 };
+    uint32_t lastEvent[4] { 0, 0, 0, 0 };
     juce::Random rng;
     float time = 0.0f, pulse = 0.0f;
     double lastTick = 0.0;

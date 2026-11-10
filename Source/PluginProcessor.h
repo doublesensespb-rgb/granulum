@@ -320,6 +320,8 @@ public:
 
     // ---- OSC 3 noises (built in) ----
     static const juce::StringArray& noiseNames();
+    static int noiseIndexFor (const juce::String& name);
+    static float noiseOffsetSemis (int index);
     std::shared_ptr<const WaveformPeaks> getNoisePeaks (int index) const;
 
     // ---- presets ----
