@@ -97,6 +97,9 @@ namespace ParamID
     inline constexpr const char* gshape    = "gshape";      // TEST: grain SHAPE 0 soft .. 0.5 classic .. 1 drops
     inline constexpr const char* freeze    = "freeze";      // TEST: FREEZE - the grains stay where they are
     inline constexpr const char* shimmerMode = "shimmerMode"; // TEST: FREE / 5TH / OCT
+    inline constexpr const char* subTune   = "subTune";     // TEST: SUB smooth pitch -48..+48
+    inline constexpr const char* bpWidth   = "bpWidth";     // TEST: BAND PASS width in octaves (filter 1 / 2)
+    inline constexpr const char* bpWidth2  = "bpWidth2";
     inline constexpr const char* pitch     = "pitch";       // master pitch of the whole synth, -24..+24 semitones, smooth (0.99.3)
     inline constexpr const char* osc1Pan   = "osc1Pan";
     inline constexpr const char* osc2Pan   = "osc2Pan";
@@ -145,6 +148,9 @@ enum ModTarget
     mtSubSemi,
     mtOsc1Tune, mtOsc2Tune, mtPitch, mtOsc1WaveMix,
     mtOsc1Air, mtShape,
+    mtSubTune, mtBpWidth, mtBpWidth2,
+    mtEq1Freq, mtEq1Gain, mtEq1Q, mtEq2Freq, mtEq2Gain, mtEq2Q, mtEq3Freq, mtEq3Gain, mtEq3Q,
+    mtEq4Freq, mtEq4Gain, mtEq4Q, mtEq5Freq, mtEq5Gain, mtEq5Q,
     kNumModTargets
 };
 
@@ -222,13 +228,14 @@ private:
 class FilterUnit
 {
 public:
-    enum Type { LP12, LP24, HP, BP, Peak, Comb, Vowel };   // PEAK took NOTCH's place (same index)
+    // TEST: menu order LP12 LP24 LP48 HP12 HP24 HP48 BP PEAK COMB VOWEL (states without "filtOrder" are remapped)
+    enum Type { LP12, LP24, LP48, HP12, HP24, HP48, BP, Peak, Comb, Vowel, HP = HP12 };
     static const juce::StringArray& typeNames();
     void prepare (double sampleRate);
     void reset();
-    void process (float* L, float* R, int n, int type, float cutoffHz, float q, float peakGainDb = 0.0f);
+    void process (float* L, float* R, int n, int type, float cutoffHz, float q, float peakGainDb = 0.0f, float widthOct = 1.0f);
     // magnitude (linear) of this filter at frequency hz, for the filter view
-    static float response (int type, float hz, float cutoffHz, float q, double sampleRate, float peakGainDb = 0.0f);
+    static float response (int type, float hz, float cutoffHz, float q, double sampleRate, float peakGainDb = 0.0f, float widthOct = 1.0f);
     static float resoComp (float q);
 private:
     struct Svf
@@ -247,10 +254,36 @@ private:
         }
     };
     double sr = 44100.0;
-    Svf s1[2], s2[2], fm[3][2];
+    Svf s1[2], s2[2], s3[2], s4[2], fm[3][2];
     std::vector<float> comb[2];
     int combW = 0;
     float combLp[2] {};
+};
+
+// TEST: 5-band parametric EQ at the very end (before OUTPUT / CLIP). Simper SVF bands: LOW CUT, LOW SHELF, BELL,
+// NOTCH, HIGH SHELF, HIGH CUT; the cuts can be 12 / 24 / 48 dB per octave. A band at 0 dB (bell / shelf) is skipped;
+// switching a band on / off fades it over ~10 ms.
+class ParamEq
+{
+public:
+    static constexpr int kBands = 5;
+    enum BandType { LowCut, LowShelf, Bell, Notch, HighShelf, HighCut };
+    static const juce::StringArray& typeNames();
+    static const juce::StringArray& slopeNames();
+    struct Band { bool on = true; int type = Bell; float freq = 1000.0f, gainDb = 0.0f, q = 1.0f; int slope = 0; };
+    void prepare (double sampleRate) { sr = sampleRate; reset(); }
+    void reset() { for (auto& b : st) for (auto& s : b) for (auto& c : s) c = {}; for (auto& w : wet) w = 0.0f; }
+    void process (float* L, float* R, int n, const std::array<Band, kBands>& bands);
+    // magnitude in dB of one band at hz (for the screen)
+    static float bandDb (const Band& b, float hz, double sampleRate);
+    static bool bandAudible (const Band& b) { return b.type == LowCut || b.type == HighCut || b.type == Notch || std::abs (b.gainDb) > 0.01f; }
+private:
+    struct St { float ic1 = 0.0f, ic2 = 0.0f; };
+    struct Coef { float a1 = 0, a2 = 0, a3 = 0, m0 = 1, m1 = 0, m2 = 0; };
+    static Coef coef (int type, float fc, float q, float gainDb, double sr);
+    double sr = 44100.0;
+    std::array<std::array<std::array<St, 2>, 4>, kBands> st {};   // band, stage, channel
+    std::array<float, kBands> wet {};
 };
 
 // Stereo delay with tone filter in the feedback loop and optional ping-pong
@@ -441,6 +474,16 @@ private:
     std::array<float, kNumModTargets> normSm {};   // TEST: smoothed (slewed) modulated values, normalised
     bool normSmInit = false;
     float distGate = 0.0f;                          // TEST: DIST on/off crossfade (0 = own path, 1 = into DIST)
+public:
+    // TEST: the master EQ and a tap of the final sound for the EQ screen's spectrum
+    ParamEq masterEq;
+    std::array<float, 4096> eqRing {};               // kScopeSize long
+    std::atomic<int> eqWrite { 0 };
+    std::atomic<bool> eqScopeWanted { false };        // the EQ screen is open: only then the tap is written
+    std::array<ParamEq::Band, ParamEq::kBands> eqBands (const float* v) const;
+    std::array<std::array<std::atomic<float>*, 3>, ParamEq::kBands> eqRaw {};   // On, Type, Slope
+    static juce::String eqId (int band, const char* what) { return "eq" + juce::String (band + 1) + what; }
+private:
     static constexpr int kSubHarms = 5;   // SUB sticks: root, octave, octave + fifth, 2 octaves, 2 octaves + third
     std::array<float, 5> subShown { -1.0f, -1.0f, -1.0f, -1.0f, -1.0f };
     float lastGSub = 0.0f;

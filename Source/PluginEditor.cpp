@@ -3524,6 +3524,8 @@ void FilterScope::paint (Graphics& g)
     const float pk  = modulated (gainId) ? (which == 0 ? proc.viewPeak1 : proc.viewPeak2).load (std::memory_order_relaxed)
                                          : s.getRawParameterValue (gainId)->load();
     const double sr = proc.getSampleRate() > 0 ? proc.getSampleRate() : 44100.0;
+    const float widthNow = proc.apvts.getParameter (which == 0 ? ParamID::bpWidth : ParamID::bpWidth2)
+                               ->convertFrom0to1 (proc.modNorm[(size_t) (which == 0 ? mtBpWidth : mtBpWidth2)].load (std::memory_order_relaxed));
 
     // grid: 100 Hz, 1 kHz, 10 kHz
     g.setColour (Colours::white.withAlpha (0.05f));
@@ -3545,7 +3547,7 @@ void FilterScope::paint (Graphics& g)
     {
         const float x = a.getX() + (float) i;
         const float hz = xToHz ((float) i * (float) getWidth() / (float) n);
-        const float resp = on ? Decibels::gainToDecibels (FilterUnit::response (type, hz, fc, q, sr, pk), -100.0f) : 0.0f;
+        const float resp = on ? Decibels::gainToDecibels (FilterUnit::response (type, hz, fc, q, sr, pk, widthNow), -100.0f) : 0.0f;
         const float sp = specDb[(size_t) jlimit (0, (int) specDb.size() - 1, (int) (x))];
         inSpec.lineTo (x, yOfSpec (sp));
         outSpec.lineTo (x, yOfSpec (sp + resp));
@@ -4869,6 +4871,7 @@ GranulumEditor::GranulumEditor (GranulumProcessor& p)
     add (subKnobs, ParamID::subVol, "Vol", Knob::Size::Small);
     add (subKnobs, ParamID::subOct, "Oct", Knob::Size::Small);
     add (subKnobs, ParamID::subSemi, "Semi", Knob::Size::Small);
+    add (subKnobs, ParamID::subTune, "Tune", Knob::Size::Small);   // TEST
     add (osc3Knobs, ParamID::osc3Vol,   "Vol",   Knob::Size::Small);
     add (osc3Knobs, ParamID::osc3Color, "Pitch", Knob::Size::Small);
     add (osc3Knobs, ParamID::osc3Pan,   "Pan",   Knob::Size::Small);
@@ -4883,6 +4886,9 @@ GranulumEditor::GranulumEditor (GranulumProcessor& p)
     add (peakQKnobs, ParamID::peakQ,  "Q");
     add (peakQKnobs, ParamID::peakQ2, "Q");
     for (auto& k : peakQKnobs) { k->setVisible (false); k->slider.setTooltip ("Q: width of the PEAK. Low = wide and soft, high = narrow and sharp"); }
+    add (widthKnobs, ParamID::bpWidth,  "Width");
+    add (widthKnobs, ParamID::bpWidth2, "Width");
+    for (auto& k : widthKnobs) { k->setVisible (false); k->slider.setTooltip ("WIDTH: how wide the BAND PASS is, in octaves. Small = narrow, telephone-like; big = wide and open"); }
 
     add (distKnobs,  ParamID::distDrive, "Drive",    Knob::Size::Small);
     add (distKnobs,  ParamID::distMix,   "Mix",      Knob::Size::Small);
@@ -4999,6 +5005,21 @@ GranulumEditor::GranulumEditor (GranulumProcessor& p)
     }
 
     addAndMakeVisible (field);
+    addChildComponent (eqView);
+    addAndMakeVisible (viewSwitch);
+    addChildComponent (eqFlat);
+    eqFlat.setTooltip ("Reset the whole EQ (every band back to 0 dB)");
+    eqFlat.onClick = [this] { eqView.flat(); };
+    viewSwitch.onChange = [this] (bool eq)
+    {
+        // TEST: the screen shows the grains or the master EQ
+        eqMode = eq;
+        field.setVisible (! eq);
+        loopBar.setVisible (! eq);
+        eqView.setVisible (eq);
+        eqFlat.setVisible (eq);
+        repaint();
+    };
     addAndMakeVisible (harmonics);
     addAndMakeVisible (noisePicker);
     addAndMakeVisible (meterView);
@@ -5447,6 +5468,8 @@ void GranulumEditor::timerCallback()
         // PEAK shows GAIN where RESO is
         const bool p1 = (int) s.getRawParameterValue (ParamID::ftype)->load() == FilterUnit::Peak;
         const bool p2 = (int) s.getRawParameterValue (ParamID::ftype2)->load() == FilterUnit::Peak;
+        const bool b1 = (int) s.getRawParameterValue (ParamID::ftype)->load() == FilterUnit::BP;
+        const bool b2 = (int) s.getRawParameterValue (ParamID::ftype2)->load() == FilterUnit::BP;
         auto vis = [] (Component& c, bool v) { if (c.isVisible() != v) c.setVisible (v); };
         vis (*filterKnobs[1],  selectedFilter == 0 && ! p1);
         vis (*peakKnobs[0],    selectedFilter == 0 && p1);
@@ -5458,7 +5481,12 @@ void GranulumEditor::timerCallback()
         peakKnobs[1]->setAlpha (f2On ? 1.0f : 0.38f);
         peakQKnobs[0]->setAlpha (fOn ? 1.0f : 0.38f);
         peakQKnobs[1]->setAlpha (f2On ? 1.0f : 0.38f);
-        if (p1 != peakLayout[0] || p2 != peakLayout[1]) { peakLayout[0] = p1; peakLayout[1] = p2; layoutFilterKnobs(); }
+        vis (*widthKnobs[0], selectedFilter == 0 && b1);
+        vis (*widthKnobs[1], selectedFilter == 1 && b2);
+        widthKnobs[0]->setAlpha (fOn ? 1.0f : 0.38f);
+        widthKnobs[1]->setAlpha (f2On ? 1.0f : 0.38f);
+        const int l1 = p1 ? 1 : b1 ? 2 : 0, l2 = p2 ? 1 : b2 ? 2 : 0;
+        if (l1 != filtLayout[0] || l2 != filtLayout[1]) { filtLayout[0] = l1; filtLayout[1] = l2; peakLayout[0] = p1; peakLayout[1] = p2; layoutFilterKnobs(); }
         filterKnobs[0]->slider.setTooltip (p1 ? "PEAK frequency (does not follow the note)" : "Cutoff follows the note you play (set at C3). The readout shows the note where it cuts.");
     }
     dimK (filter2Knobs, f2On); dim ({ &filterType2, routes[4].get() }, f2On);
@@ -5646,7 +5674,7 @@ void GranulumEditor::paint (Graphics& g)
     }
     g.setColour (Palette::label);
     g.setFont (uiFont (13.0f * sc, false, 0.12f));
-    g.drawText ("GRAIN FIELD", screenFrame.getX() + (int) (18 * sc), screenFrame.getY() + (int) (8 * sc), (int) (160 * sc), (int) (26 * sc), Justification::centredLeft);
+    // TEST: the title is the GRAINS | EQ switch now
 
 
     for (auto a : { osc1Area, osc2Area, osc3Area, osc4Area })
@@ -5914,19 +5942,25 @@ void GranulumEditor::paintOverChildren (Graphics& g)
 // FILTER knobs: CUTOFF RESO, or for PEAK three in a row: CUTOFF GAIN Q
 void GranulumEditor::layoutFilterKnobs()
 {
-    if (filterKnobs.size() < 2 || peakQKnobs.size() < 2) return;
-    auto place = [this] (std::vector<std::unique_ptr<Knob>>& ks, Knob& gain, Knob& q, bool peak)
+    if (filterKnobs.size() < 2 || peakQKnobs.size() < 2 || widthKnobs.size() < 2) return;
+    auto place = [this] (std::vector<std::unique_ptr<Knob>>& ks, Knob& gain, Knob& q, Knob& width, int mode)
     {
         auto row = filterRow1;
-        if (! peak) { const int cw = row.getWidth() / 2; ks[0]->setBounds (row.withWidth (cw)); ks[1]->setBounds (row.withTrimmedLeft (cw)); gain.setBounds (ks[1]->getBounds()); q.setBounds (ks[1]->getBounds()); return; }
+        if (mode == 0)
+        {
+            const int cw = row.getWidth() / 2;
+            ks[0]->setBounds (row.withWidth (cw)); ks[1]->setBounds (row.withTrimmedLeft (cw));
+            gain.setBounds (ks[1]->getBounds()); q.setBounds (ks[1]->getBounds()); width.setBounds (ks[1]->getBounds());
+            return;
+        }
         const int w = row.getWidth() / 3;
         ks[0]->setBounds (row.removeFromLeft (w));
-        gain.setBounds (row.removeFromLeft (w));
-        q.setBounds (row);
-        ks[1]->setBounds (gain.getBounds());
+        auto mid = row.removeFromLeft (w);
+        gain.setBounds (mid); ks[1]->setBounds (mid);
+        q.setBounds (row); width.setBounds (row);
     };
-    place (filterKnobs,  *peakKnobs[0], *peakQKnobs[0], peakLayout[0]);
-    place (filter2Knobs, *peakKnobs[1], *peakQKnobs[1], peakLayout[1]);
+    place (filterKnobs,  *peakKnobs[0], *peakQKnobs[0], *widthKnobs[0], filtLayout[0]);
+    place (filter2Knobs, *peakKnobs[1], *peakQKnobs[1], *widthKnobs[1], filtLayout[1]);
 }
 
 void GranulumEditor::resized()
@@ -5980,7 +6014,10 @@ void GranulumEditor::resized()
     oscCol.setTop (screenFrame.getY() + S (8));
     inside.removeFromRight (S (12));
     field.setBounds (inside);
+    eqView.setBounds (inside);
     loopBar.setBounds (screenFrame.getX() + S (150), screenFrame.getY() + S (9), inside.getRight() - screenFrame.getX() - S (150), S (22));
+    viewSwitch.setBounds (screenFrame.getX() + S (14), screenFrame.getY() + S (9), S (124), S (22));
+    eqFlat.setBounds (inside.getRight() - S (60), screenFrame.getY() + S (7), S (60), S (25));
 
     {
         const int rowH = S (52), stripH = S (34), rowGap = S (6);
@@ -6002,9 +6039,10 @@ void GranulumEditor::resized()
         chordButton.setBounds (h1.removeFromRight (S (112)).reduced (0, S (1)));
         h1.removeFromRight (S (6));
         // 0.99.6: the wave buttons only exist in WAVE mode
-        wavePicker.setVisible (osc1WaveMode (proc));
-        if (osc1WaveMode (proc)) { wavePicker.setBounds (h1.removeFromRight (S (88)).reduced (0, S (1))); h1.removeFromRight (S (4)); }
+        // TEST: ADDITIVE | WAVE keeps its place in both modes; the wave buttons appear to its left
         osc1Mode.setBounds (h1.removeFromRight (S (122)).reduced (0, S (1)));   // ADDITIVE | WAVE
+        wavePicker.setVisible (osc1WaveMode (proc));
+        if (osc1WaveMode (proc)) { h1.removeFromRight (S (4)); wavePicker.setBounds (h1.removeFromRight (S (88)).reduced (0, S (1))); }
         osc1Lamp.sub = {};                         // the ADDITIVE | WAVE switch says what OSC 1 is
         osc1Lamp.setBounds (h1);
         rndBars.setVisible (! osc1WaveMode (proc));   // RANDOM sticks: only in ADDITIVE
@@ -6088,10 +6126,10 @@ void GranulumEditor::resized()
         // OSC 2 SUB: [lamp] [5 sticks] [vol oct semi]
         subTag = {};
         if (proc.uiFold[0])
-            foldRow (osc4Area, 0, osc4Lamp, *subKnobs[0], { subKnobs[1].get(), subKnobs[2].get(), &subBars });
+            foldRow (osc4Area, 0, osc4Lamp, *subKnobs[0], { subKnobs[1].get(), subKnobs[2].get(), subKnobs[3].get(), &subBars });
         else
         {
-            showAll ({ subKnobs[1].get(), subKnobs[2].get(), &subBars });
+            showAll ({ subKnobs[1].get(), subKnobs[2].get(), subKnobs[3].get(), &subBars });
             subKnobs[0]->setInline (false);
             foldText[0] = {};
             auto a4 = osc4Area.reduced (S (8), S (4));
@@ -6332,4 +6370,454 @@ void GranulumEditor::filesDropped (const StringArray& files, int, int)
     for (auto& f : files)
         if (GranulumProcessor::isSupportedAudioFile (f)) { openFile (File (f)); break; }
     repaint();
+}
+
+// ============================================================================
+// TEST: master EQ screen
+
+namespace
+{
+    const char* const kEqOnIds[ParamEq::kBands] = { "eq1On", "eq2On", "eq3On", "eq4On", "eq5On" };
+    constexpr float kEqMinHz = 20.0f, kEqMaxHz = 20000.0f, kEqRange = 18.0f;
+}
+
+Colour EqView::bandColour (int b)
+{
+    // the same soft family as the LFOs: sand, sage, ivory, steel blue, mist teal (low -> high)
+    static const Colour c[ParamEq::kBands] = { Colour (0xffd8b394), Colour (0xffa9c79a), Colour (0xffe6dccd), Colour (0xff8fb4d0), Colour (0xff86c2c0) };
+    return c[jlimit (0, ParamEq::kBands - 1, b)];
+}
+
+void ViewSwitch::paint (Graphics& g)
+{
+    auto r = getLocalBounds().toFloat();
+    g.setColour (Palette::field);
+    g.fillRoundedRectangle (r, 7.0f);
+    const char* names[2] = { "GRAINS", "EQ" };
+    for (int i = 0; i < 2; ++i)
+    {
+        auto seg = r.withWidth (r.getWidth() * 0.5f).withX (r.getX() + r.getWidth() * 0.5f * (float) i);
+        const bool on = (i == 1) == eq;
+        if (on) { g.setColour (Palette::accent); g.fillRoundedRectangle (seg.reduced (2.0f), 5.5f); }
+        g.setColour (on ? Palette::onAccent() : Palette::textDim);
+        g.setFont (uiFont (10.0f, on, 0.12f));
+        g.drawText (names[i], seg, Justification::centred, false);
+    }
+}
+
+EqView::EqView (GranulumProcessor& p) : proc (p)
+{
+    for (int b = 0; b < ParamEq::kBands; ++b)
+    {
+        auto& st = strips[(size_t) b];
+        st.onBtn = std::make_unique<GrainSwitch> (proc, kEqOnIds[b], StringArray { "ON" }, String(), "Switch this band on / off");
+        addChildComponent (*st.onBtn);
+        st.type.addItemList (ParamEq::typeNames(), 1);
+        addChildComponent (st.type);
+        st.typeAtt = std::make_unique<AudioProcessorValueTreeState::ComboBoxAttachment> (proc.apvts, GranulumProcessor::eqId (b, "Type"), st.type);
+        st.type.onChange = [this] { repaint(); };
+        const char* what[4] = { "Freq", "Gain", "Q", "Slope" };
+        const char* title[4] = { "Freq", "Gain", "Q", "Slope" };
+        for (int k = 0; k < 4; ++k)
+        {
+            st.knobs.push_back (std::make_unique<Knob> (proc, GranulumProcessor::eqId (b, what[k]), title[k], Knob::Size::Small));
+            addChildComponent (*st.knobs.back());
+        }
+        st.knobs[3]->slider.setTooltip ("SLOPE: how steep LOW CUT / HIGH CUT are (12, 24 or 48 dB per octave)");
+    }
+    setRepaintsOnMouseActivity (false);
+}
+
+EqView::~EqView() { proc.eqScopeWanted.store (false); }
+
+void EqView::visibilityChanged()
+{
+    proc.eqScopeWanted.store (isShowing());
+    if (isShowing()) startTimerHz (30); else stopTimer();
+}
+
+RangedAudioParameter* EqView::par (int b, const char* what) const { return proc.apvts.getParameter (GranulumProcessor::eqId (b, what)); }
+
+ParamEq::Band EqView::baseBand (int b) const
+{
+    ParamEq::Band x;
+    auto& s = proc.apvts;
+    x.on     = s.getRawParameterValue (GranulumProcessor::eqId (b, "On"))->load() > 0.5f;
+    x.type   = (int) s.getRawParameterValue (GranulumProcessor::eqId (b, "Type"))->load();
+    x.slope  = (int) s.getRawParameterValue (GranulumProcessor::eqId (b, "Slope"))->load();
+    x.freq   = s.getRawParameterValue (GranulumProcessor::eqId (b, "Freq"))->load();
+    x.gainDb = s.getRawParameterValue (GranulumProcessor::eqId (b, "Gain"))->load();
+    x.q      = s.getRawParameterValue (GranulumProcessor::eqId (b, "Q"))->load();
+    return x;
+}
+
+// what the audio actually uses right now (LFOs included)
+ParamEq::Band EqView::liveBand (int b) const
+{
+    auto x = baseBand (b);
+    auto live = [this, b] (const char* what, int t, float base)
+    {
+        for (int l = 0; l < kNumLfos; ++l)
+            if (proc.hasModulation (t, l)) return par (b, what)->convertFrom0to1 (proc.modNorm[(size_t) t].load (std::memory_order_relaxed));
+        return base;
+    };
+    x.freq   = live ("Freq", mtEq1Freq + 3 * b, x.freq);
+    x.gainDb = live ("Gain", mtEq1Gain + 3 * b, x.gainDb);
+    x.q      = live ("Q",    mtEq1Q + 3 * b,    x.q);
+    return x;
+}
+
+Rectangle<float> EqView::plot() const
+{
+    auto r = getLocalBounds().toFloat();
+    r.removeFromTop (30.0f);                                   // note + zone rulers
+    if (selected >= 0) r.removeFromBottom (66.0f);             // band controls
+    r.removeFromBottom (14.0f);                                // Hz labels
+    r.removeFromRight (30.0f);                                 // dB labels
+    r.removeFromLeft (8.0f);
+    return r;
+}
+
+float EqView::xOf (float hz) const { const auto p = plot(); return p.getX() + p.getWidth() * std::log (jlimit (kEqMinHz, kEqMaxHz, hz) / kEqMinHz) / std::log (kEqMaxHz / kEqMinHz); }
+float EqView::hzOf (float x) const { const auto p = plot(); return kEqMinHz * std::pow (kEqMaxHz / kEqMinHz, jlimit (0.0f, 1.0f, (x - p.getX()) / jmax (1.0f, p.getWidth()))); }
+float EqView::yOf (float db) const { const auto p = plot(); return p.getY() + p.getHeight() * (kEqRange - jlimit (-kEqRange, kEqRange, db)) / (2.0f * kEqRange); }
+float EqView::dbOf (float y) const { const auto p = plot(); return kEqRange - 2.0f * kEqRange * (y - p.getY()) / jmax (1.0f, p.getHeight()); }
+
+static bool eqHasGain (int type) { return type == ParamEq::Bell || type == ParamEq::LowShelf || type == ParamEq::HighShelf; }
+
+int EqView::bandAt (Point<float> pos) const
+{
+    const double sr = proc.getSampleRate() > 0 ? proc.getSampleRate() : 44100.0;
+    int best = -1; float bd = 11.0f;
+    for (int b = 0; b < ParamEq::kBands; ++b)
+    {
+        const auto x = liveBand (b);
+        float total = 0.0f;
+        for (int k = 0; k < ParamEq::kBands; ++k) total += ParamEq::bandDb (liveBand (k), x.freq, sr);
+        const Point<float> c (xOf (x.freq), yOf (eqHasGain (x.type) ? total : 0.0f));
+        const float d = c.getDistanceFrom (pos);
+        if (d < bd) { bd = d; best = b; }
+    }
+    return best;
+}
+
+void EqView::select (int b)
+{
+    selected = b;
+    for (int i = 0; i < ParamEq::kBands; ++i)
+    {
+        auto& st = strips[(size_t) i];
+        const bool v = i == b;
+        st.onBtn->setVisible (v);
+        st.type.setVisible (v);
+        for (auto& k : st.knobs) k->setVisible (v);
+    }
+    resized();
+    repaint();
+}
+
+void EqView::resized()
+{
+    if (selected < 0) return;
+    auto r = getLocalBounds().removeFromBottom (64).reduced (8, 2);
+    auto& st = strips[(size_t) selected];
+    auto left = r.removeFromLeft (52);
+    st.onBtn->setBounds (left.withTrimmedTop (22).withHeight (22));
+    r.removeFromLeft (6);
+    st.type.setBounds (r.removeFromLeft (96).withTrimmedTop (20).withHeight (24));
+    r.removeFromLeft (6);
+    const int w = r.getWidth() / 4;
+    for (auto& k : st.knobs) k->setBounds (r.removeFromLeft (w));
+}
+
+void EqView::flat()
+{
+    for (int b = 0; b < ParamEq::kBands; ++b)
+        for (auto* what : { "Gain", "Freq", "Q", "Type", "Slope", "On" })
+            if (auto* p = par (b, what)) { p->beginChangeGesture(); p->setValueNotifyingHost (p->getDefaultValue()); p->endChangeGesture(); }
+    repaint();
+}
+
+void EqView::timerCallback()
+{
+    if (selected >= 0)
+    {
+        // SLOPE only means something for LOW CUT / HIGH CUT
+        const int t = baseBand (selected).type;
+        const float a = (t == ParamEq::LowCut || t == ParamEq::HighCut) ? 1.0f : 0.3f;
+        auto& k = strips[(size_t) selected].knobs[3];
+        if (k->getAlpha() != a) k->setAlpha (a);
+    }
+    // spectrum of what comes out of the synth (after the EQ)
+    const int N = 2048;
+    const int w = proc.eqWrite.load (std::memory_order_acquire);
+    float mx = 0.0f;
+    for (int i = 0; i < N; i += 4) mx = jmax (mx, std::abs (proc.eqRing[(size_t) ((w - N + i) & 4095)]));
+    if (mx < 1.0e-5f) { if (++silentFrames > 40) { if (dragging >= 0 || selected >= 0) repaint(); return; } }
+    else silentFrames = 0;
+    for (int i = 0; i < N; ++i)
+    {
+        const float win = 0.5f - 0.5f * std::cos (MathConstants<float>::twoPi * (float) i / (float) (N - 1));
+        fftData[(size_t) i] = proc.eqRing[(size_t) ((w - N + i) & 4095)] * win;
+    }
+    std::fill (fftData.begin() + N, fftData.end(), 0.0f);
+    fft.performFrequencyOnlyForwardTransform (fftData.data());
+    const double sr = proc.getSampleRate() > 0 ? proc.getSampleRate() : 44100.0;
+    const auto p = plot();
+    const int cols = jmax (1, (int) p.getWidth() / 2);
+    if ((int) specDb.size() != cols) specDb.assign ((size_t) cols, -120.0f);
+    for (int c = 0; c < cols; ++c)
+    {
+        const float f0 = hzOf (p.getX() + 2.0f * (float) c), f1 = hzOf (p.getX() + 2.0f * (float) (c + 1));
+        const int b0 = jlimit (1, N / 2 - 1, (int) (f0 / sr * N)), b1 = jlimit (b0, N / 2 - 1, (int) (f1 / sr * N));
+        float m = 0.0f;
+        for (int b = b0; b <= b1; ++b) m = jmax (m, fftData[(size_t) b]);
+        const float db = Decibels::gainToDecibels (m / (float) (N / 4), -120.0f);
+        auto& d = specDb[(size_t) c];
+        d = db > d ? d + (db - d) * 0.6f : jmax (db, d - 1.8f);
+    }
+    repaint();
+}
+
+void EqView::paint (Graphics& g)
+{
+    const double sr = proc.getSampleRate() > 0 ? proc.getSampleRate() : 44100.0;
+    auto all = getLocalBounds().toFloat();
+    g.setColour (Palette::screen);
+    g.fillRoundedRectangle (all, 10.0f);
+    const auto p = plot();
+
+    // rulers: notes and zones
+    g.setFont (uiFont (8.0f, false, 0.04f));
+    g.setColour (Palette::textDim);
+    for (int o = 1; o <= 9; ++o)
+    {
+        const float x = xOf (32.703f * std::exp2 ((float) (o - 1)));
+        g.drawText ("C" + String (o), Rectangle<float> (24.0f, 11.0f).withCentre ({ x, 7.0f }), Justification::centred, false);
+    }
+    struct Z { const char* n; float a, b; };
+    static const Z zones[] = { { "SUB", 20, 60 }, { "BASS", 60, 250 }, { "LOW MID", 250, 500 }, { "MID", 500, 2000 },
+                               { "HIGH MID", 2000, 4000 }, { "PRS", 4000, 6000 }, { "TREBLE", 6000, 20000 } };
+    g.setFont (uiFont (7.5f, true, 0.1f));
+    for (auto& z : zones)
+    {
+        auto zr = Rectangle<float> (xOf (z.a) + 1.0f, 15.0f, xOf (z.b) - xOf (z.a) - 2.0f, 11.0f);
+        g.setColour (Colours::white.withAlpha (0.045f));
+        g.fillRoundedRectangle (zr, 2.0f);
+        g.setColour (Palette::label);
+        g.drawText (z.n, zr, Justification::centred, false);
+    }
+
+    // plot + grid
+    g.setColour (Colours::black.withAlpha (0.35f));
+    g.fillRect (p);
+    for (float f : { 30.f, 40.f, 50.f, 60.f, 70.f, 80.f, 90.f, 200.f, 300.f, 400.f, 500.f, 600.f, 700.f, 800.f, 900.f,
+                     2000.f, 3000.f, 4000.f, 5000.f, 6000.f, 7000.f, 8000.f, 9000.f })
+    { g.setColour (Colours::white.withAlpha (0.035f)); g.drawVerticalLine ((int) xOf (f), p.getY(), p.getBottom()); }
+    for (float f : { 100.f, 1000.f, 10000.f }) { g.setColour (Colours::white.withAlpha (0.09f)); g.drawVerticalLine ((int) xOf (f), p.getY(), p.getBottom()); }
+    for (float d : { -12.f, -6.f, 6.f, 12.f }) { g.setColour (Colours::white.withAlpha (0.05f)); g.drawHorizontalLine ((int) yOf (d), p.getX(), p.getRight()); }
+    g.setColour (Colours::white.withAlpha (0.16f));
+    g.drawHorizontalLine ((int) yOf (0.0f), p.getX(), p.getRight());
+    g.setFont (uiFont (8.0f, false, 0.0f));
+    g.setColour (Palette::textDim);
+    for (int d : { 18, 12, 6, 0, -6, -12, -18 })
+        g.drawText ((d > 0 ? "+" : "") + String (d), Rectangle<float> (28.0f, 10.0f).withPosition (p.getRight() + 4.0f, yOf ((float) d) - 5.0f), Justification::centredLeft, false);
+    for (auto [f, t] : { std::pair<float, const char*> { 50.f, "50" }, { 100.f, "100" }, { 200.f, "200" }, { 500.f, "500" },
+                         { 1000.f, "1k" }, { 2000.f, "2k" }, { 5000.f, "5k" }, { 10000.f, "10k" } })
+        g.drawText (t, Rectangle<float> (30.0f, 11.0f).withCentre ({ xOf (f), p.getBottom() + 7.0f }), Justification::centred, false);
+
+    // spectrum (copper, behind)
+    if (! specDb.empty())
+    {
+        Path sp;
+        sp.startNewSubPath (p.getX(), p.getBottom());
+        for (size_t c = 0; c < specDb.size(); ++c)
+        {
+            const float db = jlimit (-90.0f, 6.0f, specDb[c] + 12.0f);          // -78..+18 shown on the +-18 scale
+            const float y = jlimit (p.getY(), p.getBottom(), p.getY() + p.getHeight() * (1.0f - (db + 78.0f) / 96.0f));
+            sp.lineTo (p.getX() + 2.0f * (float) c, y);
+        }
+        sp.lineTo (p.getRight(), p.getBottom());
+        sp.closeSubPath();
+        g.setGradientFill (ColourGradient (Palette::accent.withAlpha (0.38f), 0, p.getY(), Palette::accent.withAlpha (0.04f), 0, p.getBottom(), false));
+        g.fillPath (sp);
+    }
+
+    // curve (live, with LFOs)
+    std::array<ParamEq::Band, ParamEq::kBands> live;
+    for (int b = 0; b < ParamEq::kBands; ++b) live[(size_t) b] = liveBand (b);
+    auto total = [&] (float hz) { float t = 0.0f; for (auto& x : live) t += ParamEq::bandDb (x, hz, sr); return t; };
+    Path curve;
+    const int steps = jmax (60, (int) p.getWidth() / 2);
+    for (int i = 0; i <= steps; ++i)
+    {
+        const float x = p.getX() + p.getWidth() * (float) i / (float) steps;
+        const float y = jlimit (p.getY(), p.getBottom(), yOf (total (hzOf (x))));
+        if (i == 0) curve.startNewSubPath (x, y); else curve.lineTo (x, y);
+    }
+    {
+        Path fill (curve);
+        fill.lineTo (p.getRight(), yOf (0.0f)); fill.lineTo (p.getX(), yOf (0.0f)); fill.closeSubPath();
+        g.setColour (Palette::text.withAlpha (0.06f));
+        g.fillPath (fill);
+    }
+    g.setColour (Palette::text.withAlpha (0.92f));
+    g.strokePath (curve, PathStrokeType (1.6f, PathStrokeType::curved, PathStrokeType::rounded));
+
+    // points: an LFO leaves a faint "ghost" where the knob is, a thin line in the band colour to where it is now
+    for (int b = 0; b < ParamEq::kBands; ++b)
+    {
+        const auto& x = live[(size_t) b];
+        const auto base = baseBand (b);
+        const auto col = bandColour (b).withMultipliedAlpha (x.on ? 1.0f : 0.35f);
+        const Point<float> c (xOf (x.freq), yOf (eqHasGain (x.type) ? total (x.freq) : 0.0f));
+        bool modded = false;
+        for (int l = 0; l < kNumLfos; ++l)
+            for (int t : { mtEq1Freq + 3 * b, mtEq1Gain + 3 * b })
+                modded = modded || proc.hasModulation (t, l);
+        const Point<float> c0 (xOf (base.freq), yOf (eqHasGain (base.type) ? total (base.freq) - ParamEq::bandDb (x, base.freq, sr) + ParamEq::bandDb (base, base.freq, sr) : 0.0f));
+        if (modded && c0.getDistanceFrom (c) > 2.0f)
+        {
+            g.setColour (col.withAlpha (0.5f));
+            g.drawLine ({ c0, c }, 1.0f);
+            g.setColour (col.withAlpha (0.25f));
+            g.fillEllipse (Rectangle<float> (7.0f, 7.0f).withCentre (c0));
+        }
+        if (b == selected)
+        {
+            g.setColour (col.withAlpha (0.2f));
+            g.fillEllipse (Rectangle<float> (20.0f, 20.0f).withCentre (c));
+            g.setColour (col);
+            g.fillEllipse (Rectangle<float> (10.0f, 10.0f).withCentre (c));
+            g.setColour (Colours::white);
+            g.drawEllipse (Rectangle<float> (10.0f, 10.0f).withCentre (c), 1.3f);
+        }
+        else
+        {
+            g.setColour (col);
+            g.fillEllipse (Rectangle<float> (8.5f, 8.5f).withCentre (c));
+            g.setColour (Palette::screen);
+            g.drawEllipse (Rectangle<float> (8.5f, 8.5f).withCentre (c), 1.2f);
+        }
+        if (b == dragging || b == hover)
+        {
+            const String t = (x.freq < 1000.0f ? String (roundToInt (x.freq)) + " Hz" : String (x.freq / 1000.0f, 2) + " kHz")
+                             + (eqHasGain (x.type) ? "  " + String (x.gainDb > 0 ? "+" : "") + String (x.gainDb, 1) + " dB" : String());
+            g.setFont (uiFont (9.0f, true, 0.02f));
+            auto tr = Rectangle<float> ((float) GlyphArrangement::getStringWidthInt (uiFont (9.0f, true, 0.02f), t) + 12.0f, 16.0f)
+                          .withCentre ({ c.x, c.y - 16.0f }).constrainedWithin (p);
+            g.setColour (Colours::black.withAlpha (0.7f));
+            g.fillRoundedRectangle (tr, 4.0f);
+            g.setColour (col);
+            g.drawText (t, tr, Justification::centred, false);
+        }
+    }
+
+    // band strip
+    if (selected >= 0)
+    {
+        auto sr2 = getLocalBounds().toFloat().removeFromBottom (66.0f);
+        g.setColour (Palette::panel.withAlpha (0.9f));
+        g.fillRect (sr2);
+        g.setColour (Colours::white.withAlpha (0.06f));
+        g.drawHorizontalLine ((int) sr2.getY(), sr2.getX(), sr2.getRight());
+        const auto x = baseBand (selected);
+        const String t = ParamEq::typeNames()[x.type] + String::fromUTF8 (" \xc2\xb7 ") + (x.freq < 1000.0f ? String (roundToInt (x.freq)) : String (x.freq / 1000.0f, 1) + "k");
+        g.setFont (uiFont (8.5f, true, 0.08f));
+        g.setColour (bandColour (selected));
+        g.drawText (t, sr2.reduced (8.0f, 4.0f).withHeight (14.0f).withWidth (150.0f), Justification::centredLeft, false);
+    }
+}
+
+void EqView::mouseDown (const MouseEvent& e)
+{
+    const int b = plot().expanded (6.0f).contains (e.position) ? bandAt (e.position) : -1;
+    if (b < 0)
+    {
+        if (plot().contains (e.position)) select (-1);   // empty spot: hide the band controls
+        return;
+    }
+    if (b != selected) select (b);
+    if (e.mods.isPopupMenu()) { showMenu (b); return; }
+    dragging = b;
+    for (auto* what : { "Freq", "Gain" }) par (b, what)->beginChangeGesture();
+}
+
+void EqView::mouseDrag (const MouseEvent& e)
+{
+    if (dragging < 0) return;
+    const bool fine = e.mods.isShiftDown();
+    auto* fp = par (dragging, "Freq");
+    auto* gp = par (dragging, "Gain");
+    float x = e.position.x, y = e.position.y;
+    if (fine)
+    {
+        // Shift: a quarter of the movement
+        const auto d = e.getOffsetFromDragStart().toFloat() * 0.25f;
+        x = e.mouseDownPosition.x + d.x; y = e.mouseDownPosition.y + d.y;
+    }
+    fp->setValueNotifyingHost (fp->convertTo0to1 (hzOf (x)));
+    if (eqHasGain (baseBand (dragging).type)) gp->setValueNotifyingHost (gp->convertTo0to1 (jlimit (-kEqRange, kEqRange, dbOf (y))));
+    repaint();
+}
+
+void EqView::mouseUp (const MouseEvent&)
+{
+    if (dragging >= 0) for (auto* what : { "Freq", "Gain" }) par (dragging, what)->endChangeGesture();
+    dragging = -1;
+    repaint();
+}
+
+void EqView::mouseMove (const MouseEvent& e)
+{
+    const int b = plot().expanded (6.0f).contains (e.position) ? bandAt (e.position) : -1;
+    if (b != hover) { hover = b; repaint(); }
+}
+
+void EqView::mouseExit (const MouseEvent&) { if (hover >= 0) { hover = -1; repaint(); } }
+
+void EqView::mouseDoubleClick (const MouseEvent& e)
+{
+    const int b = bandAt (e.position);
+    if (b < 0) return;
+    for (auto* what : { "Gain", "Freq", "Q" })
+        if (auto* p = par (b, what)) { p->beginChangeGesture(); p->setValueNotifyingHost (p->getDefaultValue()); p->endChangeGesture(); }
+    repaint();
+}
+
+void EqView::mouseWheelMove (const MouseEvent& e, const MouseWheelDetails& w)
+{
+    const int b = bandAt (e.position);
+    if (b < 0) return;
+    auto* qp = par (b, "Q");
+    const float step = (w.deltaY > 0 ? 1.0f : -1.0f) * (e.mods.isShiftDown() ? 0.01f : 0.04f);
+    qp->beginChangeGesture();
+    qp->setValueNotifyingHost (jlimit (0.0f, 1.0f, qp->getValue() + step));
+    qp->endChangeGesture();
+    if (b != selected) select (b);
+    repaint();
+}
+
+void EqView::showMenu (int b)
+{
+    PopupMenu m;
+    const auto x = baseBand (b);
+    for (int t = 0; t < ParamEq::typeNames().size(); ++t) m.addItem (1 + t, ParamEq::typeNames()[t], true, x.type == t);
+    if (x.type == ParamEq::LowCut || x.type == ParamEq::HighCut)
+    {
+        m.addSeparator();
+        for (int s = 0; s < 3; ++s) m.addItem (20 + s, ParamEq::slopeNames()[s] + " / oct", true, x.slope == s);
+    }
+    m.addSeparator();
+    m.addItem (40, x.on ? "Switch band off" : "Switch band on");
+    Component::SafePointer<EqView> safe (this);
+    m.showMenuAsync (PopupMenu::Options(), [safe, b] (int r)
+    {
+        if (safe == nullptr || r == 0) return;
+        auto set = [&] (const char* what, float v) { if (auto* p = safe->par (b, what)) { p->beginChangeGesture(); p->setValueNotifyingHost (p->convertTo0to1 (v)); p->endChangeGesture(); } };
+        if (r >= 1 && r < 20) set ("Type", (float) (r - 1));
+        else if (r >= 20 && r < 23) set ("Slope", (float) (r - 20));
+        else if (r == 40) set ("On", safe->baseBand (b).on ? 0.0f : 1.0f);
+        safe->repaint();
+    });
 }

@@ -161,6 +161,19 @@ int main (int argc, char** argv)
     save (*base, outDir, "ui-playing.png");
 
     // design preview: "Snapshot <dir> sampler <wav>" -> OSC 2 with factory samples, then a dropped user sample
+    if (argc > 2 && String (argv[2]) == "eq")
+    {
+        // TEST: the EQ screen with a few bands moved and band 4 selected
+        setP (ParamID::osc1On, 1.0f); setP (ParamID::osc1Grain, 1.0f);
+        setP ("eq1Gain", 2.5f); setP ("eq2Freq", 320.0f); setP ("eq2Gain", -4.5f); setP ("eq4Freq", 3200.0f); setP ("eq4Gain", 3.0f);
+        setP ("eq4Q", 0.9f); setP ("eq5Gain", 4.0f);
+        setP (ParamID::ftype, (float) FilterUnit::BP); setP (ParamID::filterOn, 1.0f); setP (ParamID::bpWidth, 1.5f);
+        p.keyboardState.noteOn (1, 48, 0.9f);
+        ed->showEqForTest (3);
+        run (p, ed, 50);
+        save (*base, outDir, "eq.png");
+        return 0;
+    }
     if (argc > 2 && String (argv[2]) == "grains3")
     {
         // 0.99.6: grains of OSC 1, the SAMPLE and the NOISE all on the screen

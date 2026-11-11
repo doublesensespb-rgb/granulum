@@ -806,6 +806,67 @@ public:
     void mouseExit (const juce::MouseEvent&) override { repaint(); }
 };
 
+// TEST: master EQ screen (takes the place of the GRAIN FIELD): note / zone rulers, live spectrum, the curve and
+// 5 coloured points; a click on a point shows its controls in a strip at the bottom
+class EqView final : public juce::Component, private juce::Timer
+{
+public:
+    explicit EqView (GranulumProcessor&);
+    ~EqView() override;
+    void paint (juce::Graphics&) override;
+    void resized() override;
+    void mouseDown (const juce::MouseEvent&) override;
+    void mouseDrag (const juce::MouseEvent&) override;
+    void mouseUp (const juce::MouseEvent&) override;
+    void mouseMove (const juce::MouseEvent&) override;
+    void mouseExit (const juce::MouseEvent&) override;
+    void mouseDoubleClick (const juce::MouseEvent&) override;
+    void mouseWheelMove (const juce::MouseEvent&, const juce::MouseWheelDetails&) override;
+    void visibilityChanged() override;
+    void flat();
+    static juce::Colour bandColour (int b);
+    void selectForTest (int b) { select (b); }
+private:
+    void timerCallback() override;
+    void select (int b);
+    juce::Rectangle<float> plot() const;
+    float xOf (float hz) const;
+    float hzOf (float x) const;
+    float yOf (float db) const;
+    float dbOf (float y) const;
+    int bandAt (juce::Point<float>) const;
+    ParamEq::Band liveBand (int b) const;
+    ParamEq::Band baseBand (int b) const;
+    juce::RangedAudioParameter* par (int b, const char* what) const;
+    void showMenu (int b);
+
+    GranulumProcessor& proc;
+    int selected = -1, dragging = -1, hover = -1;
+    float dragStartGain = 0.0f;
+    juce::dsp::FFT fft { 11 };
+    std::array<float, 4096> fftData {};
+    std::vector<float> specDb;
+    int silentFrames = 0;
+    struct Strip
+    {
+        std::unique_ptr<juce::Component> onBtn;
+        juce::ComboBox type;
+        std::unique_ptr<juce::AudioProcessorValueTreeState::ComboBoxAttachment> typeAtt;
+        std::vector<std::unique_ptr<Knob>> knobs;   // FREQ GAIN Q SLOPE
+    };
+    std::array<Strip, ParamEq::kBands> strips;
+};
+
+// GRAINS | EQ switch in the screen title (an editor setting, not a sound parameter)
+class ViewSwitch final : public juce::Component
+{
+public:
+    std::function<void (bool)> onChange;
+    bool eq = false;
+    void paint (juce::Graphics&) override;
+    void mouseDown (const juce::MouseEvent& e) override { const bool v = e.position.x > (float) getWidth() * 0.5f; if (v != eq) { eq = v; repaint(); if (onChange) onChange (eq); } }
+};
+
 class GranulumEditor final : public juce::AudioProcessorEditor,
                              public juce::DragAndDropContainer,
                              public juce::FileDragAndDropTarget,
@@ -814,6 +875,8 @@ class GranulumEditor final : public juce::AudioProcessorEditor,
 public:
     explicit GranulumEditor (GranulumProcessor&);
     ~GranulumEditor() override;
+    // snapshots / tests: open the EQ screen with one band selected (-1 = none)
+    void showEqForTest (int band) { viewSwitch.eq = true; viewSwitch.repaint(); if (viewSwitch.onChange) viewSwitch.onChange (true); eqView.selectForTest (band); }
 
     void paint (juce::Graphics&) override;
     void paintOverChildren (juce::Graphics&) override;
@@ -850,6 +913,10 @@ private:
     GranulumLook look;
 
     GrainField field;
+    EqView eqView { proc };
+    ViewSwitch viewSwitch;
+    juce::TextButton eqFlat { "FLAT" };
+    bool eqMode = false;
     HarmonicEditor harmonics;
     NoisePicker noisePicker;
     PeakMeter meterView;
@@ -922,6 +989,8 @@ private:
     std::vector<std::unique_ptr<Knob>> peakQKnobs;  // Q (width) for the PEAK filter type
     juce::Rectangle<int> filterRow1;
     bool peakLayout[2] { false, false };
+    std::vector<std::unique_ptr<Knob>> widthKnobs;  // TEST: WIDTH for BAND PASS
+    int  filtLayout[2] { 0, 0 };                    // 0 = 2 knobs, 1 = PEAK (cutoff gain q), 2 = BP (cutoff reso width)
     void layoutFilterKnobs();
     std::vector<std::unique_ptr<Knob>> subKnobs;   // OSC 4 SUB: VOL, OCT
     std::vector<std::unique_ptr<Knob>> heroKnobs, smallKnobs, osc1Knobs, osc2Knobs, osc3Knobs, filterKnobs, filter2Knobs,

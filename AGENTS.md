@@ -170,6 +170,11 @@ New: `osc1Air` (mod target mtOsc1Air; `renderAirMips` = harmonics 17..512, read 
 `gshape` (mtShape; Grain fadeR/tailCurve, window2), `freeze` (travel stops), `shimmerMode` FREE/5TH/OCT, grain colour tilt from
 DRIFT (Grain::tilt, ~1.2 kHz one-pole). HarmonicEditor pills: pillRect(0) MIX WAVE, pillRect(1) AIR, both accept LFO drops.
 GrainSwitch (GRANULAR title row): FREEZE toggle, SHIMMER intervals. chordGain n^-0.6.
+Later on `test`: user INIT (`userInitFile`, InitButton right-click menu), preset browser DELETE / RENAME;
+master EQ `ParamEq` (5 Simper-SVF bands, params eq{1..5}{On,Type,Freq,Gain,Q,Slope}, mod targets mtEq1Freq.. (Freq/Gain/Q
+per band), processed in processChunk before OUTPUT/CLIP; `eqRing` tap only while EqView is showing); EqView + ViewSwitch
+(GRAINS | EQ) replace the GRAIN FIELD title; filter types reordered LP12 LP24 LP48 HP12 HP24 HP48 BP PEAK COMB VOWEL
+(`filtOrder` 2, older states remapped), BP = HP+LP pair with `bpWidth`/`bpWidth2` (mtBpWidth*), `subTune` (mtSubTune).
 v0.99.6: `osc1Mode` = ADDITIVE|WAVE (2 choices; states without `modeOrder` map old MIX -> ADD keeping osc1WaveMix, old WAVE -> 1).
 MIX WAVE (osc1WaveMix, default 0) only in ADD: drawn as a pill in HarmonicEditor::paintOverChildren (drag, double click = 0); the wave
 is read INSIDE engineAdd as `Params::overlay` (same grains, phase mapped by ovScale = wave sr / add sr, one 1024-sample cycle per

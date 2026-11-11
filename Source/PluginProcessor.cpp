@@ -40,7 +40,10 @@ namespace
         ParamID::peakQ, ParamID::peakQ2,
         ParamID::subSemi,
         ParamID::osc1Tune, ParamID::osc2Tune, ParamID::pitch, ParamID::osc1WaveMix,
-        ParamID::osc1Air, ParamID::gshape
+        ParamID::osc1Air, ParamID::gshape,
+        ParamID::subTune, ParamID::bpWidth, ParamID::bpWidth2,
+        "eq1Freq", "eq1Gain", "eq1Q", "eq2Freq", "eq2Gain", "eq2Q", "eq3Freq", "eq3Gain", "eq3Q",
+        "eq4Freq", "eq4Gain", "eq4Q", "eq5Freq", "eq5Gain", "eq5Q"
     };
 
     String hzWithNote (float hz)
@@ -160,7 +163,8 @@ void Distortion::process (float* L, float* R, int n, int type, float drive, floa
 
 const StringArray& FilterUnit::typeNames()
 {
-    static const StringArray s { "LOW PASS 12", "LOW PASS 24", "HIGH PASS", "BAND PASS", "PEAK", "COMB", "VOWEL" };
+    static const StringArray s { "LOW PASS 12", "LOW PASS 24", "LOW PASS 48", "HIGH PASS 12", "HIGH PASS 24", "HIGH PASS 48",
+                                 "BAND PASS", "PEAK", "COMB", "VOWEL" };
     return s;
 }
 
@@ -182,13 +186,25 @@ void FilterUnit::prepare (double sampleRate)
 
 void FilterUnit::reset()
 {
-    for (auto* arr : { s1, s2 }) for (int c = 0; c < 2; ++c) { arr[c].ic1 = arr[c].ic2 = 0.0f; }
+    for (auto* arr : { s1, s2, s3, s4 }) for (int c = 0; c < 2; ++c) { arr[c].ic1 = arr[c].ic2 = 0.0f; }
     for (auto& f : fm) for (auto& c : f) c.ic1 = c.ic2 = 0.0f;
     for (auto& c : comb) std::fill (c.begin(), c.end(), 0.0f);
     combW = 0; combLp[0] = combLp[1] = 0.0f;
 }
 
-float FilterUnit::response (int type, float hz, float fc, float q, double sr, float peakGainDb)
+// TEST: BAND PASS = a high pass a half WIDTH below CUTOFF and a low pass a half WIDTH above it (both with RESO);
+// this gain keeps the middle of the band at about 0 dB however narrow it is
+static float bpMakeup (float widthOct, float q)
+{
+    const double r = std::exp2 (0.5 * jlimit (0.1, 6.0, (double) widthOct));   // cutoff / high-pass corner
+    const double Q = jmax (0.3, (double) q);
+    const double hp = (r * r) / std::sqrt ((1.0 - r * r) * (1.0 - r * r) + (r / Q) * (r / Q));
+    const double ri = 1.0 / r;
+    const double lp = 1.0 / std::sqrt ((1.0 - ri * ri) * (1.0 - ri * ri) + (ri / Q) * (ri / Q));
+    return (float) jlimit (0.25, 4.0, 1.0 / jmax (1.0e-3, hp * lp));
+}
+
+float FilterUnit::response (int type, float hz, float fc, float q, double sr, float peakGainDb, float widthOct)
 {
     using C = std::complex<double>;
     const double fcl = jlimit (10.0, sr * 0.45, (double) fc);
@@ -202,8 +218,15 @@ float FilterUnit::response (int type, float hz, float fc, float q, double sr, fl
     switch (type)
     {
         case LP12:  return (float) std::abs (svf (hz, fcl, q, 0)) * resoComp (q);
-        case HP:    return (float) std::abs (svf (hz, fcl, q, 1)) * resoComp (q);
-        case BP:    return (float) std::abs (svf (hz, fcl, q, 2));
+        case HP12:  return (float) std::abs (svf (hz, fcl, q, 1)) * resoComp (q);
+        case LP48:  return (float) (std::pow (std::abs (svf (hz, fcl, 0.54, 0)), 3.0) * std::abs (svf (hz, fcl, q * 1.3, 0))) * resoComp (q * 1.3f);
+        case HP24:  return (float) (std::abs (svf (hz, fcl, 0.54, 1)) * std::abs (svf (hz, fcl, q * 1.3, 1))) * resoComp (q * 1.3f);
+        case HP48:  return (float) (std::pow (std::abs (svf (hz, fcl, 0.54, 1)), 3.0) * std::abs (svf (hz, fcl, q * 1.3, 1))) * resoComp (q * 1.3f);
+        case BP:
+        {
+            const double half = std::exp2 (0.5 * jlimit (0.1, 6.0, (double) widthOct));
+            return (float) (std::abs (svf (hz, jmax (10.0, fcl / half), q, 1)) * std::abs (svf (hz, jmin (sr * 0.45, fcl * half), q, 0))) * bpMakeup (widthOct, q) * resoComp (q);
+        }
         case Peak:  { const double a2m1 = std::pow (10.0, peakGainDb / 20.0) - 1.0; return (float) std::abs (1.0 + a2m1 * svf (hz, fcl, jlimit (0.3, 16.0, (double) q), 2)); }
         case LP24:  return (float) (std::abs (svf (hz, fcl, 0.54, 0)) * std::abs (svf (hz, fcl, q * 1.3, 0))) * resoComp (q * 1.3f);
         case Comb:
@@ -236,21 +259,189 @@ float FilterUnit::response (int type, float hz, float fc, float q, double sr, fl
 // without pushing the sound over 0 dB (Q 10 used to peak ~+8 dB)
 float FilterUnit::resoComp (float q) { return std::pow (jmax (1.0f, q / 0.707f), -0.35f); }
 
-void FilterUnit::process (float* L, float* R, int n, int type, float fc, float q, float peakGainDb)
+// ===========================================================================
+// TEST: master EQ
+
+const StringArray& ParamEq::typeNames()
+{
+    static const StringArray s { "LOW CUT", "LOW SHELF", "BELL", "NOTCH", "HIGH SHELF", "HIGH CUT" };
+    return s;
+}
+const StringArray& ParamEq::slopeNames()
+{
+    static const StringArray s { "12 dB", "24 dB", "48 dB" };
+    return s;
+}
+
+ParamEq::Coef ParamEq::coef (int type, float fc, float q, float gainDb, double sr)
+{
+    Coef c;
+    const float A = std::pow (10.0f, gainDb / 40.0f);
+    float g = std::tan (MathConstants<float>::pi * jlimit (10.0f, (float) sr * 0.45f, fc) / (float) sr);
+    float k = 1.0f / jmax (0.1f, q);
+    switch (type)
+    {
+        case Bell:      k = 1.0f / (jmax (0.1f, q) * A); c.m0 = 1.0f; c.m1 = k * (A * A - 1.0f); c.m2 = 0.0f; break;
+        case LowShelf:  g /= std::sqrt (A); c.m0 = 1.0f; c.m1 = k * (A - 1.0f); c.m2 = A * A - 1.0f; break;
+        case HighShelf: g *= std::sqrt (A); c.m0 = A * A; c.m1 = k * (1.0f - A) * A; c.m2 = 1.0f - A * A; break;
+        case Notch:     c.m0 = 1.0f; c.m1 = -k; c.m2 = 0.0f; break;
+        case HighCut:   c.m0 = 0.0f; c.m1 = 0.0f; c.m2 = 1.0f; break;
+        default:        c.m0 = 1.0f; c.m1 = -k; c.m2 = -1.0f; break;   // LOW CUT
+    }
+    c.a1 = 1.0f / (1.0f + g * (g + k));
+    c.a2 = g * c.a1;
+    c.a3 = g * c.a2;
+    return c;
+}
+
+// cut filters: Butterworth stage Qs; the knob's Q (0.707 = flat) scales the last stage (resonance)
+static int eqStages (const ParamEq::Band& b) { return (b.type == ParamEq::LowCut || b.type == ParamEq::HighCut) ? (b.slope == 2 ? 4 : b.slope == 1 ? 2 : 1) : 1; }
+static float eqStageQ (const ParamEq::Band& b, int stage, int n)
+{
+    static const float q2[2] = { 0.5412f, 1.3066f };
+    static const float q4[4] = { 0.5098f, 0.6013f, 0.9000f, 2.5629f };
+    const float user = jmax (0.1f, b.q) / 0.7071f;
+    if (n == 1) return b.q;
+    const float base = n == 2 ? q2[stage] : q4[stage];
+    return stage == n - 1 ? base * user : base;
+}
+
+void ParamEq::process (float* L, float* R, int n, const std::array<Band, kBands>& bands)
+{
+    // called per chunk (n <= 64)
+    float* ch[2] = { L, R };
+    const float fadeStep = (float) n / (float) jmax (1.0, 0.01 * sr);
+    float dry[64];
+    for (int b = 0; b < kBands; ++b)
+    {
+        const auto& band = bands[(size_t) b];
+        const bool want = band.on && bandAudible (band);
+        float& w = wet[(size_t) b];
+        const float w0 = w;
+        w = want ? jmin (1.0f, w + fadeStep) : jmax (0.0f, w - fadeStep);
+        if (w0 <= 0.0f && w <= 0.0f)
+        {
+            for (auto& s : st[(size_t) b]) for (auto& c : s) c = {};
+            continue;
+        }
+        const bool fading = w0 < 1.0f || w < 1.0f;
+        const int ns = eqStages (band);
+        Coef cf[4];
+        for (int stage = 0; stage < ns; ++stage) cf[stage] = coef (band.type, band.freq, eqStageQ (band, stage, ns), band.gainDb, sr);
+        for (int c = 0; c < 2; ++c)
+        {
+            float* x = ch[c];
+            if (fading) std::copy (x, x + jmin (n, 64), dry);
+            for (int stage = 0; stage < ns; ++stage)
+            {
+                const auto& k = cf[stage];
+                auto& z = st[(size_t) b][(size_t) stage][(size_t) c];
+                for (int i = 0; i < n; ++i)
+                {
+                    const float v0 = x[i];
+                    const float v3 = v0 - z.ic2;
+                    const float v1 = k.a1 * z.ic1 + k.a2 * v3;
+                    const float v2 = z.ic2 + k.a2 * z.ic1 + k.a3 * v3;
+                    z.ic1 = 2.0f * v1 - z.ic1;
+                    z.ic2 = 2.0f * v2 - z.ic2;
+                    x[i] = k.m0 * v0 + k.m1 * v1 + k.m2 * v2;
+                }
+            }
+            if (fading)
+                for (int i = 0; i < jmin (n, 64); ++i)
+                {
+                    const float t = w0 + (w - w0) * (float) (i + 1) / (float) n;
+                    x[i] = dry[i] + (x[i] - dry[i]) * t;
+                }
+        }
+    }
+}
+
+float ParamEq::bandDb (const Band& b, float hz, double sr)
+{
+    if (! b.on) return 0.0f;
+    using C = std::complex<double>;
+    const int ns = eqStages (b);
+    C h (1.0);
+    const double A = std::pow (10.0, b.gainDb / 40.0);
+    const double fc = jlimit (10.0, sr * 0.45, (double) b.freq);
+    for (int stage = 0; stage < ns; ++stage)
+    {
+        const double q = jmax (0.1, (double) eqStageQ (b, stage, ns));
+        const C s (0.0, hz / fc);
+        C num, den;
+        switch (b.type)
+        {
+            case Bell:      den = s * s + s / (q * A) + 1.0; num = s * s + s * A / q + 1.0; break;
+            case LowShelf:  den = A * s * s + std::sqrt (A) / q * s + 1.0; num = A * (s * s + std::sqrt (A) / q * s + A); break;
+            case HighShelf: den = s * s + std::sqrt (A) / q * s + A; num = A * (A * s * s + std::sqrt (A) / q * s + 1.0); break;
+            case Notch:     den = s * s + s / q + 1.0; num = s * s + 1.0; break;
+            case HighCut:   den = s * s + s / q + 1.0; num = 1.0; break;
+            default:        den = s * s + s / q + 1.0; num = s * s; break;
+        }
+        h *= num / den;
+    }
+    return (float) (20.0 * std::log10 (jmax (1.0e-6, std::abs (h))));
+}
+
+void FilterUnit::process (float* L, float* R, int n, int type, float fc, float q, float peakGainDb, float widthOct)
 {
     float* ch[2] = { L, R };
     switch (type)
     {
-        case LP12: case HP: case BP:
+        case LP12: case HP12:
         {
             for (auto& s : s1) s.set (fc, q, sr);
-            const float rc = type == BP ? 1.0f : resoComp (q);
+            const float rc = resoComp (q);
             for (int c = 0; c < 2; ++c)
                 for (int i = 0; i < n; ++i)
                 {
                     float lp, bp, hp;
                     s1[c].tick (ch[c][i], lp, bp, hp);
-                    ch[c][i] = (type == LP12 ? lp : type == HP ? hp : bp * s1[c].k) * rc;
+                    ch[c][i] = (type == LP12 ? lp : hp) * rc;
+                }
+            break;
+        }
+        case BP:
+        {
+            // TEST: CUTOFF = the middle, WIDTH = how many octaves wide, RESO = a peak on both edges
+            const float half = std::exp2 (0.5f * jlimit (0.1f, 6.0f, widthOct));
+            for (auto& s : s1) s.set (fc / half, q, sr);
+            for (auto& s : s2) s.set (fc * half, q, sr);
+            const float g = bpMakeup (widthOct, q) * resoComp (q);
+            for (int c = 0; c < 2; ++c)
+                for (int i = 0; i < n; ++i)
+                {
+                    float lp, bp, hp, lp2;
+                    s1[c].tick (ch[c][i], lp, bp, hp);
+                    s2[c].tick (hp, lp2, bp, lp);
+                    ch[c][i] = lp2 * g;
+                }
+            break;
+        }
+        case HP24: case LP48: case HP48:
+        {
+            // TEST: steeper slopes - gentle first stages, the resonance sits on the last one
+            const bool high = type != LP48;
+            const bool four = type != HP24;
+            for (auto& s : s1) s.set (fc, 0.54f, sr);
+            for (auto& s : s2) s.set (fc, four ? 0.54f : q * 1.3f, sr);
+            for (auto& s : s3) s.set (fc, 0.54f, sr);
+            for (auto& s : s4) s.set (fc, q * 1.3f, sr);
+            const float rc = resoComp (q * 1.3f);
+            for (int c = 0; c < 2; ++c)
+                for (int i = 0; i < n; ++i)
+                {
+                    float lp, bp, hp;
+                    float x = ch[c][i];
+                    s1[c].tick (x, lp, bp, hp); x = high ? hp : lp;
+                    s2[c].tick (x, lp, bp, hp); x = high ? hp : lp;
+                    if (four)
+                    {
+                        s3[c].tick (x, lp, bp, hp); x = high ? hp : lp;
+                        s4[c].tick (x, lp, bp, hp); x = high ? hp : lp;
+                    }
+                    ch[c][i] = x * rc;
                 }
             break;
         }
@@ -568,6 +759,26 @@ AudioProcessorValueTreeState::ParameterLayout GranulumProcessor::createLayout()
     ps.push_back (std::make_unique<B> (ParameterID { ParamID::freeze, 1 }, "Freeze", false));
     ps.push_back (std::make_unique<AudioParameterChoice> (ParameterID { ParamID::shimmerMode, 1 }, "Shimmer Intervals", StringArray { "FREE", "5TH", "OCT" }, 0));
 
+    // TEST: master EQ, 5 bands (flat by default: every band at 0 dB)
+    {
+        static const int   defType[5] = { ParamEq::LowShelf, ParamEq::Bell, ParamEq::Bell, ParamEq::Bell, ParamEq::HighShelf };
+        static const float defFreq[5] = { 80.0f, 250.0f, 1000.0f, 3500.0f, 10000.0f };
+        static const float defQ[5]    = { 0.71f, 1.0f, 1.0f, 1.0f, 0.71f };
+        auto hzFmt = A().withStringFromValueFunction ([] (float v, int) { return v < 1000.0f ? fmt (v, 0, " Hz") : fmt (v / 1000.0f, 2, " kHz"); });
+        auto dbFmt = A().withStringFromValueFunction ([] (float v, int) { return (v > 0.05f ? "+" : "") + String (v, 1) + " dB"; });
+        auto qFmtE = A().withStringFromValueFunction ([] (float v, int) { return fmt (v, 2, ""); });
+        for (int b = 0; b < ParamEq::kBands; ++b)
+        {
+            const String n = "EQ " + String (b + 1) + " ";
+            ps.push_back (std::make_unique<B> (ParameterID { eqId (b, "On"), 1 }, n + "On", true));
+            ps.push_back (std::make_unique<AudioParameterChoice> (ParameterID { eqId (b, "Type"), 1 }, n + "Type", ParamEq::typeNames(), defType[b]));
+            ps.push_back (std::make_unique<P> (ParameterID { eqId (b, "Freq"), 1 }, n + "Freq", skewed (20.0f, 20000.0f, 1000.0f), defFreq[b], hzFmt));
+            ps.push_back (std::make_unique<P> (ParameterID { eqId (b, "Gain"), 1 }, n + "Gain", NormalisableRange<float> (-18.0f, 18.0f), 0.0f, dbFmt));
+            ps.push_back (std::make_unique<P> (ParameterID { eqId (b, "Q"), 1 }, n + "Q", skewed (0.1f, 18.0f, 1.0f), defQ[b], qFmtE));
+            ps.push_back (std::make_unique<AudioParameterChoice> (ParameterID { eqId (b, "Slope"), 1 }, n + "Slope", ParamEq::slopeNames(), 0));
+        }
+    }
+
     // FILTER (key-tracked from C3 under the hood)
     ps.push_back (std::make_unique<B> (ParameterID { ParamID::filterOn, 1 }, "Filter On", false));
     ps.push_back (std::make_unique<P> (ParameterID { ParamID::cutoff, 1 }, "Cutoff", skewed (20.0f, 20000.0f, 1000.0f), 2000.0f,
@@ -575,6 +786,11 @@ AudioProcessorValueTreeState::ParameterLayout GranulumProcessor::createLayout()
     ps.push_back (std::make_unique<P> (ParameterID { ParamID::reso, 1 }, "Resonance", skewed (0.5f, 10.0f, 1.5f), 0.707f,
                                        A().withStringFromValueFunction ([] (float v, int) { return fmt (v, 2, ""); })));
     ps.push_back (std::make_unique<AudioParameterChoice> (ParameterID { ParamID::ftype, 1 }, "Filter Type", FilterUnit::typeNames(), 0));
+    {
+        auto octFmtW = A().withStringFromValueFunction ([] (float v, int) { return fmt (v, 1, " oct"); });
+        ps.push_back (std::make_unique<P> (ParameterID { ParamID::bpWidth, 1 },  "Filter Width",   skewed (0.1f, 5.0f, 1.0f), 1.0f, octFmtW));
+        ps.push_back (std::make_unique<P> (ParameterID { ParamID::bpWidth2, 1 }, "Filter 2 Width", skewed (0.1f, 5.0f, 1.0f), 1.0f, octFmtW));
+    }
     ps.push_back (std::make_unique<P> (ParameterID { ParamID::peakGain, 1 }, "Filter Peak Gain", NormalisableRange<float> (-36.0f, 36.0f), 0.0f,
                                        A().withStringFromValueFunction ([] (float v, int) { return (v > 0.05f ? "+" : "") + String (v, 1) + " dB"; })));
 
@@ -589,7 +805,7 @@ AudioProcessorValueTreeState::ParameterLayout GranulumProcessor::createLayout()
                                        A().withStringFromValueFunction ([] (float v, int) { return hzWithNote (v); })));
     ps.push_back (std::make_unique<P> (ParameterID { ParamID::reso2, 1 }, "Resonance 2", skewed (0.5f, 10.0f, 1.5f), 0.707f,
                                        A().withStringFromValueFunction ([] (float v, int) { return fmt (v, 2, ""); })));
-    ps.push_back (std::make_unique<AudioParameterChoice> (ParameterID { ParamID::ftype2, 1 }, "Filter 2 Type", FilterUnit::typeNames(), 6));
+    ps.push_back (std::make_unique<AudioParameterChoice> (ParameterID { ParamID::ftype2, 1 }, "Filter 2 Type", FilterUnit::typeNames(), FilterUnit::Vowel));
     ps.push_back (std::make_unique<P> (ParameterID { ParamID::peakGain2, 1 }, "Filter 2 Peak Gain", NormalisableRange<float> (-36.0f, 36.0f), 0.0f,
                                        A().withStringFromValueFunction ([] (float v, int) { return (v > 0.05f ? "+" : "") + String (v, 1) + " dB"; })));
 
@@ -657,6 +873,8 @@ AudioProcessorValueTreeState::ParameterLayout GranulumProcessor::createLayout()
                                        A().withStringFromValueFunction ([] (float v, int) { return String (roundToInt (v)) + " oct"; })));
     ps.push_back (std::make_unique<P> (ParameterID { ParamID::subSemi, 1 }, "Sub Semitones", NormalisableRange<float> (-12.0f, 12.0f, 1.0f), 0.0f,
                                        A().withStringFromValueFunction ([] (float v, int) { const int n = roundToInt (v); return (n > 0 ? "+" : "") + String (n) + " st"; })));
+    ps.push_back (std::make_unique<P> (ParameterID { ParamID::subTune, 1 }, "Sub Tune", NormalisableRange<float> (-48.0f, 48.0f, 0.0f), 0.0f,
+                                       A().withStringFromValueFunction ([] (float v, int) { return (v > 0.05f ? "+" : "") + String (v, 1) + " st"; })));
     ps.push_back (std::make_unique<P> (ParameterID { ParamID::subH1, 1 }, "Sub Harmonic 1", NormalisableRange<float> (0.0f, 1.0f), 1.0f, pct));
     ps.push_back (std::make_unique<P> (ParameterID { ParamID::subH2, 1 }, "Sub Harmonic 2", NormalisableRange<float> (0.0f, 1.0f), 0.0f, pct));
     ps.push_back (std::make_unique<P> (ParameterID { ParamID::subH3, 1 }, "Sub Harmonic 3", NormalisableRange<float> (0.0f, 1.0f), 0.0f, pct));
@@ -709,6 +927,8 @@ GranulumProcessor::GranulumProcessor()
     pFtype     = apvts.getRawParameterValue (ParamID::ftype);
     pFilter2On = apvts.getRawParameterValue (ParamID::filter2On);
     pFtype2    = apvts.getRawParameterValue (ParamID::ftype2);
+    for (int k = 0; k < ParamEq::kBands; ++k)
+        eqRaw[(size_t) k] = { apvts.getRawParameterValue (eqId (k, "On")), apvts.getRawParameterValue (eqId (k, "Type")), apvts.getRawParameterValue (eqId (k, "Slope")) };
     pDistOn    = apvts.getRawParameterValue (ParamID::distOn);
     pDistType  = apvts.getRawParameterValue (ParamID::distType);
     pRevOn     = apvts.getRawParameterValue (ParamID::revOn);
@@ -797,6 +1017,7 @@ void GranulumProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
     }
 
     outClipOS.initProcessing ((size_t) kChunk);
+    masterEq.prepare (sampleRate);
     outClipOS.reset();
     outGain.reset (sampleRate, 0.05);
     outGain.setCurrentAndTargetValue (Decibels::decibelsToGain (apvts.getRawParameterValue (ParamID::output)->load()));
@@ -812,6 +1033,22 @@ void GranulumProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
 
 // ===========================================================================
 // INIT preset
+
+std::array<ParamEq::Band, ParamEq::kBands> GranulumProcessor::eqBands (const float* v) const
+{
+    std::array<ParamEq::Band, ParamEq::kBands> b {};
+    for (int k = 0; k < ParamEq::kBands; ++k)
+    {
+        auto& x = b[(size_t) k];
+        x.on     = eqRaw[(size_t) k][0]->load() > 0.5f;
+        x.type   = (int) eqRaw[(size_t) k][1]->load();
+        x.slope  = (int) eqRaw[(size_t) k][2]->load();
+        x.freq   = v[mtEq1Freq + 3 * k];
+        x.gainDb = v[mtEq1Gain + 3 * k];
+        x.q      = v[mtEq1Q + 3 * k];
+    }
+    return b;
+}
 
 // TEST: the user's own INIT lives next to the presets folder (Documents/GRAIN FORM/User INIT.gpreset)
 File GranulumProcessor::userInitFile()
@@ -1126,7 +1363,7 @@ granulum::Params GranulumProcessor::subParams (const float* v) const
     p.chordSize = 1;
     p.chord = { 0, 0, 0, 0, 0 };
     p.chime = 0.0f;
-    p.transpose = std::round (pSubOct->load()) * 12.0f + v[mtSubSemi] + v[mtPitch];   // OCT + SEMI (SEMI glides under an LFO)
+    p.transpose = std::round (pSubOct->load()) * 12.0f + v[mtSubSemi] + v[mtSubTune] + v[mtPitch];   // OCT + SEMI (SEMI glides under an LFO)
     // the 3 sticks are layers: their level (incl. LFO) moves at play time
     for (int k = 0; k < kSubHarms; ++k) { p.harmGain[(size_t) k] = jlimit (0.0f, 1.0f, v[mtSubH1 + k]); p.harmGainPrev[(size_t) k] = subGainPrev[(size_t) k]; }
     return p;
@@ -1193,6 +1430,7 @@ void GranulumProcessor::processBlock (AudioBuffer<float>& buffer, MidiBuffer& mi
         sinceTrigger = 1.0e9;
         normSmInit = false;   // a new preset starts on its own values, without gliding from the old ones
         distGate = pDistOn->load() > 0.5f ? 1.0f : 0.0f;
+        masterEq.reset();
     }
 
     if (work.getNumSamples() < numSamples)
@@ -1577,9 +1815,9 @@ void GranulumProcessor::processChunk (int from, int len)
         auto routed = [this, o, isSub] (int block) { return (isSub ? pRouteSub[(size_t) block] : pRoute[(size_t) block][(size_t) o])->load() > 0.5f; };
 
         if (filterOn && routed (0))
-            c.filter.process (L, R, len, ft, ft == FilterUnit::Peak ? jlimit (20.0f, (float) (sr * 0.45), v[mtCutoff]) : cut, ft == FilterUnit::Peak ? v[mtPeakQ] : v[mtReso], v[mtPeakGain]);
+            c.filter.process (L, R, len, ft, ft == FilterUnit::Peak ? jlimit (20.0f, (float) (sr * 0.45), v[mtCutoff]) : cut, ft == FilterUnit::Peak ? v[mtPeakQ] : v[mtReso], v[mtPeakGain], v[mtBpWidth]);
         if (filter2On && routed (4))
-            c.filter2.process (L, R, len, ft2, ft2 == FilterUnit::Peak ? jlimit (20.0f, (float) (sr * 0.45), v[mtCutoff2]) : cut2, ft2 == FilterUnit::Peak ? v[mtPeakQ2] : v[mtReso2], v[mtPeakGain2]);
+            c.filter2.process (L, R, len, ft2, ft2 == FilterUnit::Peak ? jlimit (20.0f, (float) (sr * 0.45), v[mtCutoff2]) : cut2, ft2 == FilterUnit::Peak ? v[mtPeakQ2] : v[mtReso2], v[mtPeakGain2], v[mtBpWidth2]);
         if (distOn && routed (1))
         {
             // into the shared DIST: its own delay / reverb are not used, the mix decides after DIST
@@ -1626,6 +1864,9 @@ void GranulumProcessor::processChunk (int from, int len)
         }
     }
 
+    // ---- TEST: master EQ ----
+    masterEq.process (outL, outR, len, eqBands (v));
+
     // ---- output ----
     outGain.setTargetValue (Decibels::decibelsToGain (v[mtOutput]));
     float pl = 0.0f, pr = 0.0f;
@@ -1663,6 +1904,13 @@ void GranulumProcessor::processChunk (int from, int len)
     if (pl > peakL.load (std::memory_order_relaxed)) peakL.store (pl, std::memory_order_relaxed);
     if (pr > peakR.load (std::memory_order_relaxed)) peakR.store (pr, std::memory_order_relaxed);
     if (pl >= 1.0f || pr >= 1.0f) clipped.store (true, std::memory_order_relaxed);
+    if (eqScopeWanted.load (std::memory_order_relaxed))
+    {
+        // TEST: the final sound for the EQ screen (mono)
+        int w = eqWrite.load (std::memory_order_relaxed);
+        for (int i = 0; i < len; ++i) { eqRing[(size_t) w] = 0.5f * (outL[i] + outR[i]); w = (w + 1) & 4095; }
+        eqWrite.store (w, std::memory_order_release);
+    }
 
     advanceLfos (from + len, len, v);
 }
@@ -2141,14 +2389,14 @@ void GranulumProcessor::randomizeSection (int section)
         const int m = randMask.load();   // 0.99.6: FILTER 1 and FILTER 2 each have their own tick
         if (m & rndFiltersBit)
         {
-            const int type = r.nextInt (2);                     // LP12 / LP24 for filter 1
+            const int type = r.nextInt (3);                     // LP12 / LP24 / LP48 for filter 1
             set (ParamID::ftype,  (float) type);
             set (ParamID::cutoff, 300.0f * std::pow (20.0f, r.nextFloat()));
             set (ParamID::reso,   0.6f * std::pow (5.0f, r.nextFloat()));
         }
         if (m & rndFilter2Bit)
         {
-            const int t2 = 2 + r.nextInt (5);                   // HP .. VOWEL for filter 2
+            const int t2 = FilterUnit::HP12 + r.nextInt (FilterUnit::Vowel - FilterUnit::HP12 + 1);   // HP12 .. VOWEL for filter 2
             set (ParamID::ftype2,  (float) t2);
             set (ParamID::cutoff2, 150.0f * std::pow (30.0f, r.nextFloat()));
             set (ParamID::reso2,   0.6f * std::pow (6.0f, r.nextFloat()));
@@ -2237,6 +2485,7 @@ void GranulumProcessor::getStateInformation (MemoryBlock& destData)
     state.setProperty ("distOrder", 2, nullptr);
     state.setProperty ("modeOrder", 2, nullptr);
     state.setProperty ("randOrder", 2, nullptr);
+    state.setProperty ("filtOrder", 2, nullptr);
     state.setProperty ("oscFold", String ((int) uiFold[0]) + String ((int) uiFold[1]) + String ((int) uiFold[2]), nullptr);
     state.setProperty ("pluginVersion", GRAINFORM_VERSION, nullptr);
     state.setProperty ("grainMask", (int) grainMask.load(), nullptr);
@@ -2316,6 +2565,18 @@ void GranulumProcessor::setStateInformation (const void* data, int sizeInBytes)
             if (child.getProperty ("id").toString() == ParamID::distType && (double) child.getProperty ("value") > 2.5)
                 child.setProperty ("value", 2, nullptr);
     // 0.99.5: noise list = WHITE PINK BROWN BLUE first; STATIC / WIND / BREATH removed. Older states keep their noise.
+    // TEST: filter menu got LP48 / HP24 / HP48: old type numbers move to their new places
+    if (! state.hasProperty ("filtOrder"))
+        for (auto child : state)
+        {
+            const auto id = child.getProperty ("id").toString();
+            if (id == ParamID::ftype || id == ParamID::ftype2)
+            {
+                static const int remap[7] = { FilterUnit::LP12, FilterUnit::LP24, FilterUnit::HP12, FilterUnit::BP, FilterUnit::Peak, FilterUnit::Comb, FilterUnit::Vowel };
+                const int o = jlimit (0, 6, (int) std::round ((double) child.getProperty ("value")));
+                child.setProperty ("value", remap[o], nullptr);
+            }
+        }
     const bool hadNoiseOrder = state.hasProperty ("noiseOrder");
     if (! hadNoiseOrder)
         for (auto child : state)
