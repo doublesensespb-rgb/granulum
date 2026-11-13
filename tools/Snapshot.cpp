@@ -174,6 +174,21 @@ int main (int argc, char** argv)
         save (*base, outDir, "eq.png");
         return 0;
     }
+    if (argc > 2 && String (argv[2]) == "final")
+    {
+        // TEST final: header, RANDOM panel, tour steps, About
+        setP (ParamID::osc1On, 1.0f); setP (ParamID::osc1Grain, 1.0f);
+        p.keyboardState.noteOn (1, 52, 0.9f);
+        run (p, ed, 40);
+        save (*base, outDir, "f-main.png");
+        ed->showOverlayForTest (1); run (p, ed, 3); save (*base, outDir, "f-random.png");
+        ed->showOverlayForTest (0);
+        for (Component* c : ed->getChildren()) if (c->isAlwaysOnTop() == false && c->getBounds() == ed->getLocalBounds() && c->isVisible()) c->setVisible (false);
+        for (int st : { 0, 3, 4, 8 }) { ed->showOverlayForTest (2, st); run (p, ed, 3); save (*base, outDir, ("f-tour" + String (st + 1) + ".png").toRawUTF8()); }
+        for (Component* c : ed->getChildren()) if (c->getBounds() == ed->getLocalBounds() && c->isVisible()) c->setVisible (false);
+        ed->showOverlayForTest (3); run (p, ed, 3); save (*base, outDir, "f-about.png");
+        return 0;
+    }
     if (argc > 2 && String (argv[2]) == "grains3")
     {
         // 0.99.6: grains of OSC 1, the SAMPLE and the NOISE all on the screen

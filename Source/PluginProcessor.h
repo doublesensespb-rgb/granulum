@@ -399,7 +399,13 @@ public:
     enum { rndSticksBit = 1, rndGrainsBit = 2, rndFiltersBit = 4, rndDistBit = 8, rndDelayBit = 16, rndReverbBit = 32,
            rndFilter2Bit = 64, rndLfo1Bit = 128, rndLfo2Bit = 256, rndLfo3Bit = 512 };   // rndFiltersBit = FILTER 1
     std::atomic<int> randMask { 1023 };
-    void randomizeSection (int section); // 0 granular, 1 filter, 2 effects, 3 additive bars
+    void randomizeSection (int section);
+    // TEST: RANDOM by sound type: 0 ANY (as before), 1 BASS, 2 PAD, 3 PLUCK, 4 CHORD, 5 TEXTURE (all voiced for E4)
+    static const juce::StringArray& randTypeNames();
+    std::atomic<int> randType { 0 };
+    void randomizeTyped (int type);
+    void setRandType (int t);
+    void loadUserSettings(); // 0 granular, 1 filter, 2 effects, 3 additive bars
 
     // ---- chords ----
     static const juce::StringArray& chordNames();

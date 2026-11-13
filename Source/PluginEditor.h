@@ -857,6 +857,73 @@ private:
     std::array<Strip, ParamEq::kBands> strips;
 };
 
+// TEST: the GRAIN FORM title: a slow copper sheen runs over the letters now and then; click = About
+class TitleBadge final : public juce::Component, private juce::Timer
+{
+public:
+    TitleBadge() { startTimerHz (30); setInterceptsMouseClicks (true, false); }
+    float scale = 1.0f;
+    std::function<void()> onClick;
+    void paint (juce::Graphics&) override;
+    void mouseUp (const juce::MouseEvent& e) override { if (! e.mods.isPopupMenu() && onClick) onClick(); }
+private:
+    void timerCallback() override;
+    double t0 = juce::Time::getMillisecondCounterHiRes();
+    float sweep = -1.0f;     // 0..1 while the sheen crosses, -1 when resting
+};
+
+// TEST: About card (Thematic & Oddkut, version); a click anywhere closes it
+class AboutOverlay final : public juce::Component
+{
+public:
+    juce::String version;
+    void paint (juce::Graphics&) override;
+    void mouseDown (const juce::MouseEvent&) override { setVisible (false); }
+};
+
+// TEST: the guided tour (variant B): the plugin dims, one part stays lit, a card explains it
+class TourOverlay final : public juce::Component
+{
+public:
+    struct Step { std::function<juce::Rectangle<int>()> area; juce::String title, text; };
+    std::vector<Step> steps;
+    void nextForTest() { step = juce::jmin (step + 1, (int) steps.size() - 1); repaint(); }
+    void start() { step = 0; setVisible (true); toFront (false); repaint(); }
+    void paint (juce::Graphics&) override;
+    void mouseDown (const juce::MouseEvent&) override;
+private:
+    juce::Rectangle<float> cardRect() const;
+    juce::Rectangle<float> btnBack, btnNext, btnSkip;
+    int step = 0;
+};
+
+// TEST: "? GUIDE" pill under the title
+class GuidePill final : public juce::Component, public juce::SettableTooltipClient
+{
+public:
+    std::function<void()> onClick;
+    void paint (juce::Graphics&) override;
+    void mouseUp (const juce::MouseEvent&) override { if (onClick) onClick(); }
+};
+
+// TEST: RANDOM ALL panel: SOUND TYPE (ANY BASS PAD PLUCK CHORD TEXTURE), what to randomize, and a RANDOM button
+class RandomPanel final : public juce::Component
+{
+public:
+    explicit RandomPanel (GranulumProcessor& p) : proc (p) {}
+    std::function<void()> onChange;
+    juce::Rectangle<int> anchor;          // the ▾ button (editor coordinates)
+    void open() { setVisible (true); toFront (false); repaint(); }
+    void paint (juce::Graphics&) override;
+    void mouseDown (const juce::MouseEvent&) override;
+private:
+    juce::Rectangle<float> panel() const;
+    juce::Rectangle<float> chip (int i) const;
+    juce::Rectangle<float> tick (int i) const;
+    juce::Rectangle<float> goButton() const;
+    GranulumProcessor& proc;
+};
+
 // GRAINS | EQ switch in the screen title (an editor setting, not a sound parameter)
 class ViewSwitch final : public juce::Component
 {
@@ -876,6 +943,7 @@ public:
     explicit GranulumEditor (GranulumProcessor&);
     ~GranulumEditor() override;
     // snapshots / tests: open the EQ screen with one band selected (-1 = none)
+    void showOverlayForTest (int which, int step = 0) { if (which == 1) { proc.setRandType (1); if (randomPanel.onChange) randomPanel.onChange(); showRandomMenu(); } else if (which == 2) { tour.start(); for (int i = 0; i < step; ++i) tour.nextForTest(); } else if (which == 3) titleBadge.onClick(); }
     void showEqForTest (int band) { viewSwitch.eq = true; viewSwitch.repaint(); if (viewSwitch.onChange) viewSwitch.onChange (true); eqView.selectForTest (band); }
 
     void paint (juce::Graphics&) override;
@@ -914,6 +982,12 @@ private:
 
     GrainField field;
     EqView eqView { proc };
+    TitleBadge titleBadge;
+    GuidePill guidePill;
+    AboutOverlay about;
+    TourOverlay tour;
+    RandomPanel randomPanel { proc };
+    void setupTour();
     ViewSwitch viewSwitch;
     juce::TextButton eqFlat { "FLAT" };
     bool eqMode = false;

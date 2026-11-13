@@ -927,6 +927,7 @@ GranulumProcessor::GranulumProcessor()
     pFtype     = apvts.getRawParameterValue (ParamID::ftype);
     pFilter2On = apvts.getRawParameterValue (ParamID::filter2On);
     pFtype2    = apvts.getRawParameterValue (ParamID::ftype2);
+    loadUserSettings();
     for (int k = 0; k < ParamEq::kBands; ++k)
         eqRaw[(size_t) k] = { apvts.getRawParameterValue (eqId (k, "On")), apvts.getRawParameterValue (eqId (k, "Type")), apvts.getRawParameterValue (eqId (k, "Slope")) };
     pDistOn    = apvts.getRawParameterValue (ParamID::distOn);
@@ -1054,6 +1055,24 @@ std::array<ParamEq::Band, ParamEq::kBands> GranulumProcessor::eqBands (const flo
 File GranulumProcessor::userInitFile()
 {
     return File::getSpecialLocation (File::userDocumentsDirectory).getChildFile ("GRAIN FORM").getChildFile ("User INIT.gpreset");
+}
+
+// TEST: the RANDOM sound type is the user's choice, not part of a sound: kept in Documents/GRAIN FORM/settings.txt
+void GranulumProcessor::setRandType (int t)
+{
+    randType.store (jlimit (0, randTypeNames().size() - 1, t));
+    const auto f = userInitFile().getParentDirectory().getChildFile ("settings.txt");
+    f.getParentDirectory().createDirectory();
+    f.replaceWithText ("randType=" + String (randType.load()) + "\n");
+}
+
+void GranulumProcessor::loadUserSettings()
+{
+    const auto f = userInitFile().getParentDirectory().getChildFile ("settings.txt");
+    if (! f.existsAsFile()) return;
+    StringArray lines; lines.addLines (f.loadFileAsString());
+    for (auto& l : lines)
+        if (l.startsWith ("randType=")) randType.store (jlimit (0, randTypeNames().size() - 1, l.fromFirstOccurrenceOf ("=", false, false).getIntValue()));
 }
 
 bool GranulumProcessor::saveUserInit()
@@ -2327,8 +2346,16 @@ String GranulumProcessor::getPresetName() const { return presetName; }
 // ===========================================================================
 // Random
 
+const StringArray& GranulumProcessor::randTypeNames()
+{
+    static const StringArray s { "ANY", "BASS", "PAD", "PLUCK", "CHORD", "TEXTURE" };
+    return s;
+}
+
 void GranulumProcessor::randomize()
 {
+    // TEST: a chosen sound type builds a whole, playable sound of that kind (still only touching the ticked parts)
+    if (const int t = randType.load(); t > 0) { randomizeTyped (t); return; }
     // 0.99.5: RANDOM ALL only touches the parts ticked in its menu (randMask)
     const int m = randMask.load();
     if (m & rndGrainsBit)  randomizeSection (0);
@@ -2462,6 +2489,248 @@ void GranulumProcessor::randomizeSection (int section)
             h[(size_t) k] = r.nextFloat() < 0.55f ? jmin (1.0f, r.nextFloat() * tilt * 1.6f) : 0.0f;
         }
         setHarmonics (h);
+    }
+}
+
+// TEST: RANDOM by type. Every type is voiced so that it sounds right on E4 (the note the presets are made on):
+// a BASS played on E4 sits at E1 / E2, a PAD on E3 / E4, and so on. The "body" of the sound (pitch, voice, envelope,
+// oscillators) is always set for the type; the ticked parts (sticks, grains, filters, FX, LFOs) get type-shaped values.
+void GranulumProcessor::randomizeTyped (int type)
+{
+    enum { Bass = 1, Pad, Pluck, Chord, Texture };
+    Random r;
+    const int m = randMask.load();
+    auto set = [this] (const char* id, float real)
+    {
+        if (auto* p = apvts.getParameter (id))
+        {
+            p->beginChangeGesture();
+            p->setValueNotifyingHost (p->convertTo0to1 (real));
+            p->endChangeGesture();
+        }
+    };
+    auto setS = [&] (const String& id, float real) { set (id.toRawUTF8(), real); };
+    auto rr = [&r] (float lo, float hi) { return lo + (hi - lo) * r.nextFloat(); };
+    auto lr = [&r] (float lo, float hi) { return lo * std::pow (hi / lo, r.nextFloat()); };   // log range (Hz, ms)
+    auto pick = [&r] (std::initializer_list<int> v) { return *(v.begin() + r.nextInt ((int) v.size())); };
+    auto chance = [&r] (float c) { return r.nextFloat() < c; };
+
+    // ---------------- body: pitch, voice, envelope, oscillators (always, it IS the type)
+    set (ParamID::osc1On, 1.0f);
+    set (ParamID::osc1Tune, 0.0f); set (ParamID::osc1Semi, 0.0f); set (ParamID::osc1Pan, 0.0f);
+    set (ParamID::osc2On, 0.0f);                                   // the SAMPLE stays as it is, but off
+    set (ParamID::pitch, 0.0f);
+    set (ParamID::freeze, 0.0f);
+    set (ParamID::output, 0.0f);
+    set (ParamID::clipOn, 1.0f);
+    set (ParamID::ampOn, 1.0f);
+    switch (type)
+    {
+        case Bass:
+            set (ParamID::osc1Oct, (float) pick ({ -2, -2, -2, -3 }));  // E4 -> E2 (82 Hz) mostly, sometimes E1
+            set (ParamID::mono, 1.0f);
+            set (ParamID::porta, chance (0.4f) ? lr (15.0f, 90.0f) : 0.0f);
+            set (ParamID::chord, 0.0f);
+            set (ParamID::ampA, rr (0.0f, 4.0f)); set (ParamID::ampD, lr (200.0f, 900.0f));
+            set (ParamID::ampS, rr (0.75f, 1.0f)); set (ParamID::ampR, lr (60.0f, 220.0f));
+            set (ParamID::osc1Vol, rr (0.7f, 0.85f));
+            set (ParamID::subOn, chance (0.75f) ? 1.0f : 0.0f);
+            set (ParamID::subOct, (float) jmin (-1, (int) std::round (apvts.getRawParameterValue (ParamID::osc1Oct)->load()) - 1));
+            set (ParamID::subVol, rr (0.3f, 0.55f));
+            set (ParamID::subH1, 1.0f); set (ParamID::subH2, rr (0.0f, 0.25f)); set (ParamID::subH3, 0.0f); set (ParamID::subH4, 0.0f); set (ParamID::subH5, 0.0f);
+            set (ParamID::osc3On, chance (0.25f) ? 1.0f : 0.0f);
+            set (ParamID::osc3Vol, rr (0.08f, 0.2f));
+            break;
+        case Pad:
+            set (ParamID::osc1Oct, (float) pick ({ -1, -1, 0 }));
+            set (ParamID::mono, 0.0f); set (ParamID::porta, 0.0f);
+            set (ParamID::chord, 0.0f);
+            set (ParamID::ampA, lr (250.0f, 1600.0f)); set (ParamID::ampD, lr (600.0f, 2500.0f));
+            set (ParamID::ampS, rr (0.7f, 1.0f)); set (ParamID::ampR, lr (900.0f, 3200.0f));
+            set (ParamID::osc1Vol, rr (0.65f, 0.8f));
+            set (ParamID::subOn, chance (0.35f) ? 1.0f : 0.0f); set (ParamID::subOct, -1.0f); set (ParamID::subVol, rr (0.2f, 0.4f));
+            set (ParamID::osc3On, chance (0.5f) ? 1.0f : 0.0f); set (ParamID::osc3Vol, rr (0.06f, 0.18f));
+            break;
+        case Pluck:
+            set (ParamID::osc1Oct, (float) pick ({ -1, 0, 0 }));
+            set (ParamID::mono, 0.0f); set (ParamID::porta, 0.0f);
+            set (ParamID::chord, 0.0f);
+            set (ParamID::ampA, rr (0.0f, 3.0f)); set (ParamID::ampD, lr (160.0f, 600.0f));
+            set (ParamID::ampS, rr (0.0f, 0.12f)); set (ParamID::ampR, lr (180.0f, 600.0f));
+            set (ParamID::osc1Vol, rr (0.75f, 0.9f));
+            set (ParamID::subOn, chance (0.3f) ? 1.0f : 0.0f); set (ParamID::subOct, -1.0f); set (ParamID::subVol, rr (0.2f, 0.4f));
+            set (ParamID::osc3On, chance (0.3f) ? 1.0f : 0.0f); set (ParamID::osc3Vol, rr (0.05f, 0.15f));
+            break;
+        case Chord:
+            set (ParamID::osc1Oct, (float) pick ({ -1, -1, 0 }));
+            set (ParamID::mono, 1.0f); set (ParamID::porta, chance (0.3f) ? lr (20.0f, 120.0f) : 0.0f);
+            set (ParamID::chord, (float) (1 + r.nextInt (chordNames().size() - 1)));
+            set (ParamID::ampA, lr (5.0f, 250.0f)); set (ParamID::ampD, lr (400.0f, 1800.0f));
+            set (ParamID::ampS, rr (0.5f, 0.9f)); set (ParamID::ampR, lr (400.0f, 1600.0f));
+            set (ParamID::osc1Vol, rr (0.7f, 0.85f));
+            set (ParamID::subOn, chance (0.4f) ? 1.0f : 0.0f); set (ParamID::subOct, -1.0f); set (ParamID::subVol, rr (0.2f, 0.4f));
+            set (ParamID::osc3On, chance (0.3f) ? 1.0f : 0.0f); set (ParamID::osc3Vol, rr (0.05f, 0.14f));
+            break;
+        default: // Texture
+            set (ParamID::osc1Oct, (float) pick ({ -1, 0, 0, 1 }));
+            set (ParamID::mono, 0.0f); set (ParamID::porta, 0.0f);
+            set (ParamID::chord, 0.0f);
+            set (ParamID::ampA, lr (120.0f, 1200.0f)); set (ParamID::ampD, lr (800.0f, 3000.0f));
+            set (ParamID::ampS, rr (0.6f, 1.0f)); set (ParamID::ampR, lr (1200.0f, 4000.0f));
+            set (ParamID::osc1Vol, rr (0.45f, 0.7f));
+            set (ParamID::subOn, 0.0f);
+            set (ParamID::osc3On, 1.0f); set (ParamID::osc3Vol, rr (0.35f, 0.6f));
+            set (ParamID::osc3Grain, 1.0f);
+            set (ParamID::osc3Type, (float) r.nextInt (noiseNames().size()));
+            set (ParamID::osc3Color, rr (-0.4f, 1.0f));
+            break;
+    }
+    if (type != Texture) { set (ParamID::osc3Type, (float) pick ({ 0, 1, 3 })); set (ParamID::osc3Color, rr (-0.2f, 0.6f)); set (ParamID::osc3Grain, chance (0.5f) ? 1.0f : 0.0f); }
+    // OSC 1: additive mostly, sometimes the full wave
+    const bool waveMode = type == Bass ? chance (0.35f) : type == Texture ? chance (0.2f) : chance (0.15f);
+    set (ParamID::osc1Mode, waveMode ? 1.0f : 0.0f);
+    set (ParamID::osc1Wave, (float) (type == Bass ? pick ({ 1, 1, 2, 3 }) : pick ({ 1, 2, 3 })));
+    set (ParamID::osc1WaveMix, waveMode ? 0.0f : (chance (0.35f) ? rr (0.1f, 0.4f) : 0.0f));
+    set (ParamID::osc1Air, type == Bass ? (chance (0.4f) ? rr (0.05f, 0.2f) : 0.0f)
+                         : type == Pad ? rr (0.1f, 0.4f) : type == Pluck ? rr (0.15f, 0.5f) : rr (0.0f, 0.3f));
+    set (ParamID::osc1Grain, 1.0f);
+
+    // ---------------- sticks
+    if ((m & rndSticksBit) && ! waveMode)
+    {
+        std::array<float, granulum::kNumHarmonics> h {};
+        h[0] = 1.0f;
+        const bool oddOnly = chance (type == Bass ? 0.35f : 0.2f);
+        const float slope = type == Bass ? rr (0.9f, 1.5f) : type == Pad ? rr (1.1f, 1.8f) : type == Pluck ? rr (0.6f, 1.1f) : rr (0.9f, 1.5f);
+        const int top = type == Bass ? 6 + r.nextInt (6) : type == Pad ? 8 + r.nextInt (8) : type == Pluck ? 10 + r.nextInt (7) : 6 + r.nextInt (8);
+        for (int k = 1; k < granulum::kNumHarmonics; ++k)
+        {
+            if (k >= top || (oddOnly && (k % 2) == 1)) continue;
+            const float base = std::pow (1.0f / (float) (k + 1), slope);
+            h[(size_t) k] = chance (0.8f) ? jmin (1.0f, base * rr (0.6f, 1.5f)) : 0.0f;
+        }
+        setHarmonics (h);
+        // grains: the fundamental of a BASS stays clean (punch), the upper sticks move
+        uint32_t gm = 0xffffu;
+        if (type == Bass) gm &= ~(chance (0.5f) ? 0x1u : 0x3u);
+        setGrainMask (gm);
+    }
+
+    // ---------------- grains
+    if (m & rndGrainsBit)
+    {
+        struct G { float bloom[2], smear[2], scatter[2], shimmer[2], drift[2], size[2], dens[2], speed[2], mix[2], shape[2], chime[2]; };
+        static const G g[6] = {
+            {},
+            /* BASS    */ { { 0.0f, .30f }, { 0.0f, .25f }, { 0.0f, .20f }, { 0.0f, .12f }, { .10f, .40f }, { .35f, .65f }, { .55f, .80f }, { 0.0f, .30f }, { .30f, .60f }, { .40f, .60f }, { 0.0f, 0.0f } },
+            /* PAD     */ { { .50f, .90f }, { .40f, .85f }, { .20f, .50f }, { .10f, .45f }, { .30f, .70f }, { .65f, .90f }, { .55f, .85f }, { 0.0f, .25f }, { .70f, 1.0f }, { .15f, .45f }, { 0.0f, .25f } },
+            /* PLUCK   */ { { 0.0f, .25f }, { 0.0f, .20f }, { .20f, .55f }, { .15f, .55f }, { .10f, .35f }, { .20f, .45f }, { .40f, .70f }, { 0.0f, .60f }, { .50f, .85f }, { .60f, .90f }, { .15f, .55f } },
+            /* CHORD   */ { { .20f, .55f }, { .15f, .45f }, { .10f, .40f }, { .05f, .35f }, { .20f, .50f }, { .45f, .75f }, { .45f, .75f }, { 0.0f, .30f }, { .50f, .85f }, { .35f, .60f }, { 0.0f, .25f } },
+            /* TEXTURE */ { { .40f, .90f }, { .30f, .80f }, { .60f, 1.0f }, { .20f, .70f }, { .40f, .90f }, { .30f, .85f }, { .40f, .85f }, { -.8f, .8f }, { .80f, 1.0f }, { .10f, .70f }, { .10f, .50f } } };
+        const auto& x = g[type];
+        auto R = [&] (const float* a) { return rr (a[0], a[1]); };
+        set (ParamID::bloom, R (x.bloom)); set (ParamID::smear, R (x.smear)); set (ParamID::scatter, R (x.scatter));
+        set (ParamID::shimmer, R (x.shimmer)); set (ParamID::drift, R (x.drift)); set (ParamID::gsize, R (x.size));
+        set (ParamID::density, R (x.dens)); set (ParamID::speed, R (x.speed)); set (ParamID::gmix, R (x.mix));
+        set (ParamID::gshape, R (x.shape)); set (ParamID::chime, R (x.chime));
+        set (ParamID::position, rr (0.0f, 0.8f));
+        set (ParamID::spread, type == Bass ? rr (0.1f, 0.35f) : type == Pluck ? rr (0.4f, 0.8f) : rr (0.3f, 0.65f));     // a bass stays narrow, nothing goes phasey
+        set (ParamID::shimmerMode, (float) (type == Bass || type == Chord ? pick ({ 1, 2 }) : pick ({ 0, 1, 2 })));
+        if (type == Texture && chance (0.3f)) set (ParamID::freeze, 1.0f);
+    }
+
+    // ---------------- filters
+    if (m & rndFiltersBit)
+    {
+        set (ParamID::filterOn, 1.0f);
+        switch (type)
+        {
+            case Bass:  set (ParamID::ftype, (float) pick ({ FilterUnit::LP12, FilterUnit::LP24, FilterUnit::LP24 })); set (ParamID::cutoff, lr (280.0f, 1500.0f)); set (ParamID::reso, rr (0.6f, 1.6f)); break;
+            case Pad:   set (ParamID::ftype, (float) pick ({ FilterUnit::LP12, FilterUnit::LP24 })); set (ParamID::cutoff, lr (900.0f, 5000.0f)); set (ParamID::reso, rr (0.6f, 1.2f)); break;
+            case Pluck: set (ParamID::ftype, (float) pick ({ FilterUnit::LP12, FilterUnit::LP24 })); set (ParamID::cutoff, lr (1500.0f, 7000.0f)); set (ParamID::reso, rr (0.7f, 1.8f)); break;
+            case Chord: set (ParamID::ftype, (float) pick ({ FilterUnit::LP12, FilterUnit::LP24 })); set (ParamID::cutoff, lr (900.0f, 4500.0f)); set (ParamID::reso, rr (0.6f, 1.3f)); break;
+            default:    set (ParamID::ftype, (float) pick ({ FilterUnit::LP12, FilterUnit::BP, FilterUnit::HP12 })); set (ParamID::cutoff, lr (500.0f, 5000.0f)); set (ParamID::reso, rr (0.6f, 1.6f)); set (ParamID::bpWidth, rr (1.0f, 3.0f)); break;
+        }
+    }
+    if (m & rndFilter2Bit)
+    {
+        if (type == Bass)
+        {
+            // keeps the low end clean: a gentle high pass under the fundamental
+            set (ParamID::filter2On, 1.0f); set (ParamID::ftype2, (float) FilterUnit::HP12); set (ParamID::cutoff2, lr (22.0f, 35.0f)); set (ParamID::reso2, 0.707f);
+        }
+        else if (chance (0.5f))
+        {
+            set (ParamID::filter2On, 1.0f);
+            const int t2 = pick ({ FilterUnit::Peak, FilterUnit::Vowel, FilterUnit::HP12 });
+            set (ParamID::ftype2, (float) t2);
+            set (ParamID::cutoff2, t2 == FilterUnit::HP12 ? lr (60.0f, 200.0f) : lr (500.0f, 3000.0f));
+            set (ParamID::reso2, rr (0.6f, 1.4f));
+            set (ParamID::peakGain2, rr (-6.0f, 6.0f));
+        }
+        else set (ParamID::filter2On, 0.0f);
+    }
+
+    // ---------------- effects
+    if (m & rndDistBit)
+    {
+        const bool on = type == Bass ? chance (0.65f) : type == Texture ? chance (0.4f) : chance (0.25f);
+        set (ParamID::distOn, on ? 1.0f : 0.0f);
+        set (ParamID::distType, (float) r.nextInt (4));
+        set (ParamID::distDrive, type == Bass ? rr (0.12f, 0.4f) : rr (0.08f, 0.3f));
+        set (ParamID::distTone, rr (0.45f, 1.0f));
+        set (ParamID::distMix, type == Bass ? rr (0.3f, 0.75f) : rr (0.2f, 0.6f));
+    }
+    if (m & rndReverbBit)
+    {
+        const bool on = type == Bass ? chance (0.25f) : true;
+        set (ParamID::revOn, on ? 1.0f : 0.0f);
+        set (ParamID::revMix, type == Bass ? rr (0.04f, 0.12f) : type == Pad ? rr (0.25f, 0.45f) : type == Texture ? rr (0.25f, 0.45f) : rr (0.15f, 0.3f));
+        set (ParamID::revSize, type == Bass ? rr (0.15f, 0.35f) : type == Pad || type == Texture ? rr (0.65f, 0.95f) : rr (0.35f, 0.75f));
+        set (ParamID::revLowCut, type == Bass ? rr (300.0f, 600.0f) : rr (150.0f, 400.0f));
+    }
+    if (m & rndDelayBit)
+    {
+        const bool on = type == Pluck ? chance (0.8f) : type == Bass ? false : chance (0.4f);
+        set (ParamID::delayOn, on ? 1.0f : 0.0f);
+        set (ParamID::delaySync, 1.0f);
+        set (ParamID::delayDiv, (float) divisionNames().indexOf (pick ({ 0, 1, 2 }) == 0 ? "1/8D" : chance (0.5f) ? "1/4" : "1/8"));
+        set (ParamID::delayFb, rr (0.2f, 0.5f));
+        set (ParamID::delayTone, rr (0.4f, 0.8f));
+        set (ParamID::delayMix, rr (0.12f, 0.3f));
+    }
+
+    // ---------------- LFOs: musical shapes + a couple of tasteful links for this type
+    const int lfoBits[kNumLfos] = { rndLfo1Bit, rndLfo2Bit, rndLfo3Bit };
+    bool anyLfo = false;
+    for (int l = 0; l < kNumLfos; ++l) anyLfo = anyLfo || (m & lfoBits[l]) != 0;
+    if (anyLfo)
+    {
+        for (int l = 0; l < kNumLfos; ++l)
+        {
+            if (! (m & lfoBits[l])) continue;
+            for (auto& slot : mods) if (slot.lfo.load() == l) slot.target.store (-1);   // this LFO's old links go
+            ++modVersion;
+            setLfoPoints (l, lfoPreset (r.nextInt (lfoPresetNames().size())));
+            setS (ParamID::lfo (l, "On"), 1.0f);
+            setS (ParamID::lfo (l, "Sync"), 1.0f);
+            const char* slow[] = { "2/1", "1/1", "1/2" };
+            const char* mid[]  = { "1/2", "1/4", "1/4D", "1/8D" };
+            const char* fast[] = { "1/8", "1/8T", "1/16" };
+            const char* d = type == Pad || type == Texture ? slow[r.nextInt (3)] : type == Bass ? mid[r.nextInt (4)] : (chance (0.5f) ? mid[r.nextInt (4)] : fast[r.nextInt (3)]);
+            setS (ParamID::lfo (l, "Div"), (float) divisionNames().indexOf (d));
+            setS (ParamID::lfo (l, "Mode"), type == Bass || type == Pluck ? 1.0f : 0.0f);   // RETRIG: every note starts the same
+        }
+        int first = -1, second = -1;
+        for (int l = 0; l < kNumLfos; ++l) if (m & lfoBits[l]) { if (first < 0) first = l; else if (second < 0) second = l; }
+        switch (type)
+        {
+            case Bass:    setModulation (mtCutoff, first, rr (0.12f, 0.3f)); if (second >= 0 && chance (0.5f)) setModulation (mtSize, second, rr (-0.25f, 0.25f)); break;
+            case Pad:     setModulation (mtPosition, first, rr (0.1f, 0.3f)); if (second >= 0) setModulation (mtCutoff, second, rr (0.08f, 0.2f)); break;
+            case Pluck:   setModulation (mtCutoff, first, rr (0.15f, 0.35f)); break;
+            case Chord:   setModulation (mtCutoff, first, rr (0.1f, 0.25f)); if (second >= 0 && chance (0.5f)) setModulation (mtOsc1WaveMix, second, rr (0.1f, 0.3f)); break;
+            default:      setModulation (mtPosition, first, rr (0.2f, 0.45f)); if (second >= 0) setModulation (mtScatter, second, rr (-0.3f, 0.3f)); break;
+        }
     }
 }
 

@@ -175,6 +175,12 @@ master EQ `ParamEq` (5 Simper-SVF bands, params eq{1..5}{On,Type,Freq,Gain,Q,Slo
 per band), processed in processChunk before OUTPUT/CLIP; `eqRing` tap only while EqView is showing); EqView + ViewSwitch
 (GRAINS | EQ) replace the GRAIN FIELD title; filter types reordered LP12 LP24 LP48 HP12 HP24 HP48 BP PEAK COMB VOWEL
 (`filtOrder` 2, older states remapped), BP = HP+LP pair with `bpWidth`/`bpWidth2` (mtBpWidth*), `subTune` (mtSubTune).
+Final TEST UI: typed random (`randType` 0..5 ANY/BASS/PAD/PLUCK/CHORD/TEXTURE, `randomizeTyped`, voiced for E4 = the owner's
+preset note; saved in Documents/GRAIN FORM/settings.txt, not in presets); `RandomPanel` overlay replaces the PopupMenu of the ▾
+button (chips without captions, 2-column ticks = randMask, RANDOM <TYPE> button; main button label follows the type);
+`TourOverlay` (9 steps, spotlight + card, `setupTour`) opened by `GuidePill`; `TitleBadge` draws the name (copper sheen every 8 s,
+click -> `AboutOverlay`: "Made by producers Thematic & Oddkut" + version); the header version plate is gone.
+Snapshot mode `final` renders header / panel / tour / About.
 v0.99.6: `osc1Mode` = ADDITIVE|WAVE (2 choices; states without `modeOrder` map old MIX -> ADD keeping osc1WaveMix, old WAVE -> 1).
 MIX WAVE (osc1WaveMix, default 0) only in ADD: drawn as a pill in HarmonicEditor::paintOverChildren (drag, double click = 0); the wave
 is read INSIDE engineAdd as `Params::overlay` (same grains, phase mapped by ovScale = wave sr / add sr, one 1024-sample cycle per

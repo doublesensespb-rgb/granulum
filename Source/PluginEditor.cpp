@@ -5040,6 +5040,21 @@ GranulumEditor::GranulumEditor (GranulumProcessor& p)
     addAndMakeVisible (randomMenuButton);
     randomMenuButton.setTooltip ("What RANDOM ALL may change");
     randomMenuButton.onClick = [this] { showRandomMenu(); };
+    {
+        auto syncRandomLabel = [this] { const int t = proc.randType.load(); randomButton.setButtonText ("RANDOM " + (t == 0 ? String ("ALL") : GranulumProcessor::randTypeNames()[t])); };
+        syncRandomLabel();
+        randomPanel.onChange = syncRandomLabel;
+        addAndMakeVisible (titleBadge);
+        titleBadge.onClick = [this] { about.version = versionString(); about.setVisible (true); about.toFront (false); };
+        addAndMakeVisible (guidePill);
+        guidePill.setRepaintsOnMouseActivity (true);
+        guidePill.setTooltip ("A short tour of GRAIN FORM");
+        guidePill.onClick = [this] { tour.start(); };
+        addChildComponent (about);
+        addChildComponent (tour);
+        addChildComponent (randomPanel);
+        setupTour();
+    }
     initButton.onClick   = [this] { proc.resetToInit(); lfoEditor.setLfo (selectedLfo); };
     initButton.onRightClick = [this]
     {
@@ -5376,22 +5391,9 @@ void GranulumEditor::openFile (const File& f)
 
 void GranulumEditor::showRandomMenu()
 {
-    const int m = proc.randMask.load();
-    PopupMenu menu;
-    menu.addSectionHeader ("RANDOM ALL changes:");
-    const std::pair<int, const char*> items[] = { { GranulumProcessor::rndSticksBit, "Harmonics (sticks)" }, { GranulumProcessor::rndGrainsBit, "Grains" },
-                                                  { GranulumProcessor::rndFiltersBit, "Filter 1" }, { GranulumProcessor::rndFilter2Bit, "Filter 2" },
-                                                  { GranulumProcessor::rndDistBit, "Distortion" }, { GranulumProcessor::rndDelayBit, "Delay" },
-                                                  { GranulumProcessor::rndReverbBit, "Reverb" }, { GranulumProcessor::rndLfo1Bit, "LFO 1" },
-                                                  { GranulumProcessor::rndLfo2Bit, "LFO 2" }, { GranulumProcessor::rndLfo3Bit, "LFO 3" } };
-    for (auto& it : items) menu.addItem (it.first, it.second, true, (m & it.first) != 0);
-    Component::SafePointer<GranulumEditor> safe (this);
-    menu.showMenuAsync (PopupMenu::Options().withTargetComponent (&randomMenuButton), [safe] (int res)
-    {
-        if (safe == nullptr || res <= 0) return;
-        safe->proc.randMask.store (safe->proc.randMask.load() ^ res);
-        safe->showRandomMenu();   // stays open: tick several in a row
-    });
+    randomPanel.setBounds (getLocalBounds());
+    randomPanel.anchor = randomMenuButton.getBounds();
+    randomPanel.open();
 }
 
 void GranulumEditor::setFold (int i, bool f)
@@ -5627,34 +5629,10 @@ void GranulumEditor::paint (Graphics& g)
         g.drawRoundedRectangle (full.reduced (1.0f), 14.0f, 1.0f);
     }
 
-    const auto titleFont = uiFont (40.0f * sc, false, 0.04f);
-    g.setFont (titleFont);
-    if (Palette::hardware)
-    {
-        // screen-printed lettering: a hair of shadow so it sits ON the metal
-        g.setColour (Colours::black.withAlpha (0.6f));
-        g.drawText ("GRAIN FORM", titleArea.withHeight ((int) (46 * sc)).translated (0, 1), Justification::bottomLeft);
-    }
-    g.setColour (Palette::text);
-    g.drawText ("GRAIN FORM", titleArea.withHeight ((int) (46 * sc)), Justification::bottomLeft);
-    {
-        // version, always visible: a small plate right after the name
-        GlyphArrangement ga; ga.addLineOfText (titleFont, "GRAIN FORM", 0.0f, 0.0f);
-        const float tw = ga.getBoundingBox (0, -1, true).getWidth();
-        const auto vf = uiFont (9.0f * sc, true, 0.02f);
-        const float vw = (float) GlyphArrangement::getStringWidthInt (vf, "v" + versionString()) + 10.0f * sc;
-        auto vr = Rectangle<float> ((float) titleArea.getX() + tw + 5.0f * sc, (float) titleArea.getY() + 22.0f * sc, vw, 14.0f * sc);
-        g.setColour (Palette::hardware ? Colours::black.withAlpha (0.35f) : Palette::screen.withAlpha (0.5f));
-        g.fillRoundedRectangle (vr, 3.0f * sc);
-        g.setColour (Palette::textDim.withAlpha (0.7f));
-        g.drawRoundedRectangle (vr.reduced (0.5f), 3.0f * sc, 0.8f);
-        g.setColour (Palette::label);
-        g.setFont (uiFont (9.0f * sc, true, 0.02f));
-        g.drawText ("v" + versionString(), vr, Justification::centred, false);
-    }
+    // the name itself is the TitleBadge component (sheen + click for About)
     g.setColour (Palette::textDim);
     g.setFont (uiFont (16.0f * sc, false, 0.3f));
-    g.drawText ("SELECTIVE GRANULATION", titleArea.withTrimmedTop ((int) (49 * sc)), Justification::topLeft);
+    g.drawText ("SELECTIVE GRANULATION", titleArea.withTrimmedTop ((int) (49 * sc)).withWidth ((int) (270 * sc)), Justification::topLeft, false);
 
     for (auto fr : { screenFrame, lfoFrame })
     {
@@ -5979,7 +5957,7 @@ void GranulumEditor::resized()
     globalKnobs[2]->setBounds (header.removeFromRight (S (58)));   // master pitch, next to output
     header.removeFromRight (S (8));
     {
-        auto rb = header.removeFromRight (S (118)).withSizeKeepingCentre (S (118), S (30));
+        auto rb = header.removeFromRight (S (146)).withSizeKeepingCentre (S (146), S (30));
         randomMenuButton.setBounds (rb.removeFromRight (S (22)));   // the little arrow: what RANDOM ALL may change
         rb.removeFromRight (S (2));
         randomButton.setBounds (rb);
@@ -5991,6 +5969,15 @@ void GranulumEditor::resized()
     header.removeFromRight (S (10));
     presetBar.setBounds (header.removeFromRight (S (198)).withSizeKeepingCentre (S (198), S (30)));
     titleArea = header.withTrimmedLeft (S (4));
+    {
+        const auto tf = uiFont (40.0f * sc, false, 0.04f);
+        const int tw = GlyphArrangement::getStringWidthInt (tf, "GRAIN FORM") + S (6);
+        titleBadge.scale = sc;
+        titleBadge.setBounds (titleArea.getX(), titleArea.getY(), jmin (tw, titleArea.getWidth()), S (46));
+        guidePill.setBounds (S (306), S (64), S (62), S (18));
+    }
+    for (Component* o : { (Component*) &about, (Component*) &tour, (Component*) &randomPanel }) o->setBounds (getLocalBounds());
+    randomPanel.anchor = randomMenuButton.getBounds();
     r.removeFromTop (S (6));
 
     keyboard.setBounds (r.removeFromBottom (S (46)).reduced (S (2), S (2)));
@@ -6820,4 +6807,324 @@ void EqView::showMenu (int b)
         else if (r == 40) set ("On", safe->baseBand (b).on ? 0.0f : 1.0f);
         safe->repaint();
     });
+}
+
+// ============================================================================
+// TEST: title sheen, About, guided tour, RANDOM panel
+
+void TitleBadge::timerCallback()
+{
+    // every 8 s a copper sheen crosses the name in 2.6 s; the rest of the time nothing moves (and nothing repaints)
+    const double t = (Time::getMillisecondCounterHiRes() - t0) / 1000.0;
+    const double cycle = std::fmod (t, 8.0);
+    const float s = cycle < 2.6 ? (float) (cycle / 2.6) : -1.0f;
+    if (s != sweep) { const bool was = sweep >= 0.0f; sweep = s; if (s >= 0.0f || was) repaint(); }
+}
+
+void TitleBadge::paint (Graphics& g)
+{
+    const float sc = scale;
+    auto r = getLocalBounds().toFloat();
+    g.setFont (uiFont (40.0f * sc, false, 0.04f));
+    if (Palette::hardware)
+    {
+        g.setColour (Colours::black.withAlpha (0.6f));
+        g.drawText ("GRAIN FORM", r.translated (0, 1), Justification::bottomLeft, false);
+    }
+    if (sweep < 0.0f) { g.setColour (Palette::text); g.drawText ("GRAIN FORM", r, Justification::bottomLeft, false); return; }
+    // a soft band of warm light moving left -> right across the letters
+    const float w = r.getWidth(), x = -0.3f * w + 1.6f * w * sweep;
+    const auto sheen = Palette::accent.interpolatedWith (Colours::white, 0.45f);
+    ColourGradient cg (Palette::text, x - 0.22f * w, 0.0f, Palette::text, x + 0.22f * w, 0.0f, false);
+    cg.addColour (0.5, sheen);
+    g.setGradientFill (cg);
+    g.drawText ("GRAIN FORM", r, Justification::bottomLeft, false);
+}
+
+void AboutOverlay::paint (Graphics& g)
+{
+    const float sc = (float) getWidth() / 1080.0f;
+    g.fillAll (Colours::black.withAlpha (0.45f));
+    auto card = Rectangle<float> (30.0f * sc, 94.0f * sc, 300.0f * sc, 168.0f * sc);
+    g.setColour (Colours::black.withAlpha (0.35f));
+    g.fillRoundedRectangle (card.translated (0, 8.0f * sc).expanded (4.0f * sc), 16.0f * sc);
+    g.setColour (Palette::panel.darker (0.25f));
+    g.fillRoundedRectangle (card, 14.0f * sc);
+    g.setColour (Colours::white.withAlpha (0.08f));
+    g.drawRoundedRectangle (card.reduced (0.5f), 14.0f * sc, 1.0f);
+    auto in = card.reduced (24.0f * sc, 20.0f * sc);
+    g.setColour (Palette::text);
+    g.setFont (uiFont (24.0f * sc, false, 0.14f));
+    g.drawText ("GRAIN FORM", in.removeFromTop (30.0f * sc), Justification::centredLeft, false);
+    g.setColour (Palette::textDim);
+    g.setFont (uiFont (8.5f * sc, true, 0.42f));
+    g.drawText ("SELECTIVE GRANULATION", in.removeFromTop (14.0f * sc), Justification::centredLeft, false);
+    in.removeFromTop (12.0f * sc);
+    g.setColour (Colours::white.withAlpha (0.07f));
+    g.fillRect (in.removeFromTop (1.0f));
+    in.removeFromTop (12.0f * sc);
+    g.setColour (Palette::label);
+    g.setFont (uiFont (12.0f * sc, false, 0.02f));
+    g.drawText ("Made by producers", in.removeFromTop (18.0f * sc), Justification::centredLeft, false);
+    g.setColour (Palette::accent.brighter (0.25f));
+    g.setFont (uiFont (15.0f * sc, true, 0.04f));
+    g.drawText ("Thematic & Oddkut", in.removeFromTop (22.0f * sc), Justification::centredLeft, false);
+    auto bottom = in.removeFromBottom (20.0f * sc);
+    const String v = "VERSION " + version;
+    const auto vf = uiFont (9.0f * sc, true, 0.16f);
+    auto vr = bottom.removeFromLeft ((float) GlyphArrangement::getStringWidthInt (vf, v) + 18.0f * sc).withSizeKeepingCentre ((float) GlyphArrangement::getStringWidthInt (vf, v) + 18.0f * sc, 20.0f * sc);
+    g.setColour (Palette::field);
+    g.fillRoundedRectangle (vr, 6.0f * sc);
+    g.setColour (Colours::white.withAlpha (0.1f));
+    g.drawRoundedRectangle (vr.reduced (0.5f), 6.0f * sc, 1.0f);
+    g.setColour (Palette::label);
+    g.setFont (vf);
+    g.drawText (v, vr, Justification::centred, false);
+    g.setColour (Palette::textDim.withAlpha (0.8f));
+    g.setFont (uiFont (9.0f * sc, false, 0.1f));
+    g.drawText ("click to close", bottom, Justification::centredRight, false);
+}
+
+void GuidePill::paint (Graphics& g)
+{
+    auto r = getLocalBounds().toFloat().reduced (0.5f);
+    const bool over = isMouseOver();
+    g.setColour (over ? Palette::accent : Palette::field);
+    g.fillRoundedRectangle (r, r.getHeight() * 0.5f);
+    g.setColour (Palette::accent.withAlpha (over ? 1.0f : 0.55f));
+    g.drawRoundedRectangle (r, r.getHeight() * 0.5f, 1.0f);
+    auto dot = r.removeFromLeft (r.getHeight()).reduced (2.5f);
+    g.setColour (over ? Colours::white : Palette::accent);
+    g.fillEllipse (dot);
+    g.setColour (over ? Palette::accent : Palette::onAccent());
+    g.setFont (uiFont (r.getHeight() * 0.62f, true, 0.0f));
+    g.drawText ("?", dot, Justification::centred, false);
+    g.setColour (over ? Palette::onAccent() : Palette::label);
+    g.setFont (uiFont (r.getHeight() * 0.5f, true, 0.14f));
+    g.drawText ("GUIDE", r.withTrimmedLeft (3.0f), Justification::centredLeft, false);
+}
+
+Rectangle<float> TourOverlay::cardRect() const
+{
+    const float sc = (float) getWidth() / 1080.0f;
+    const auto a = steps[(size_t) step].area().toFloat();
+    const float w = 300.0f * sc, h = 178.0f * sc, gap = 16.0f * sc;
+    const auto full = getLocalBounds().toFloat().reduced (10.0f * sc);
+    Rectangle<float> c;
+    if (a.getRight() + gap + w <= full.getRight())     c = { a.getRight() + gap, a.getY() + 10.0f * sc, w, h };
+    else if (a.getX() - gap - w >= full.getX())        c = { a.getX() - gap - w, a.getY() + 10.0f * sc, w, h };
+    else if (a.getBottom() + gap + h <= full.getBottom()) c = { a.getX() + 20.0f * sc, a.getBottom() + gap, w, h };
+    else                                               c = { a.getX() + 20.0f * sc, a.getY() - gap - h, w, h };
+    return c.constrainedWithin (full);
+}
+
+void TourOverlay::paint (Graphics& g)
+{
+    if (steps.empty()) return;
+    const float sc = (float) getWidth() / 1080.0f;
+    const auto& st = steps[(size_t) step];
+    const auto a = st.area().toFloat().expanded (4.0f * sc);
+    Path dim;
+    dim.addRectangle (getLocalBounds().toFloat());
+    dim.addRoundedRectangle (a, 14.0f * sc);
+    dim.setUsingNonZeroWinding (false);
+    g.setColour (Colour (0xff0b0b0c).withAlpha (0.68f));
+    g.fillPath (dim);
+    g.setColour (Palette::accent.brighter (0.3f));
+    g.drawRoundedRectangle (a, 14.0f * sc, 1.6f);
+
+    auto c = cardRect();
+    g.setColour (Colours::black.withAlpha (0.4f));
+    g.fillRoundedRectangle (c.translated (0, 8.0f * sc).expanded (3.0f * sc), 16.0f * sc);
+    g.setColour (Palette::panel.darker (0.3f));
+    g.fillRoundedRectangle (c, 14.0f * sc);
+    g.setColour (Colours::white.withAlpha (0.09f));
+    g.drawRoundedRectangle (c.reduced (0.5f), 14.0f * sc, 1.0f);
+    auto in = c.reduced (18.0f * sc, 16.0f * sc);
+    g.setColour (Palette::accent.brighter (0.3f));
+    g.setFont (uiFont (9.0f * sc, true, 0.2f));
+    g.drawText ("STEP " + String (step + 1) + " OF " + String ((int) steps.size()), in.removeFromTop (14.0f * sc), Justification::centredLeft, false);
+    g.setColour (Palette::text);
+    g.setFont (uiFont (17.0f * sc, true, 0.0f));
+    g.drawText (st.title, in.removeFromTop (26.0f * sc), Justification::centredLeft, false);
+    auto bottom = in.removeFromBottom (30.0f * sc);
+    auto bars = in.removeFromBottom (14.0f * sc);
+    g.setColour (Palette::label);
+    g.setFont (uiFont (12.0f * sc, false, 0.0f));
+    g.drawFittedText (st.text, in.toNearestInt(), Justification::topLeft, 6, 1.0f);
+    const float bw = (bars.getWidth() - 4.0f * sc * (float) (steps.size() - 1)) / (float) steps.size();
+    for (int i = 0; i < (int) steps.size(); ++i)
+    {
+        g.setColour (i <= step ? Palette::accent.brighter (0.3f) : Colours::white.withAlpha (0.1f));
+        g.fillRoundedRectangle (Rectangle<float> (bars.getX() + (float) i * (bw + 4.0f * sc), bars.getCentreY() - 1.5f * sc, bw, 3.0f * sc), 1.5f * sc);
+    }
+    const bool last = step == (int) steps.size() - 1;
+    btnNext = bottom.removeFromRight (70.0f * sc).reduced (0, 1.0f * sc);
+    bottom.removeFromRight (6.0f * sc);
+    btnBack = step > 0 ? bottom.removeFromRight (66.0f * sc).reduced (0, 1.0f * sc) : Rectangle<float>();
+    btnSkip = bottom;
+    g.setFont (uiFont (9.5f * sc, true, 0.14f));
+    g.setColour (Palette::accent);
+    g.fillRoundedRectangle (btnNext, 8.0f * sc);
+    g.setColour (Palette::onAccent());
+    g.drawText (last ? "DONE" : "NEXT", btnNext, Justification::centred, false);
+    if (! btnBack.isEmpty())
+    {
+        g.setColour (Palette::field);
+        g.fillRoundedRectangle (btnBack, 8.0f * sc);
+        g.setColour (Colours::white.withAlpha (0.12f));
+        g.drawRoundedRectangle (btnBack.reduced (0.5f), 8.0f * sc, 1.0f);
+        g.setColour (Palette::text);
+        g.drawText ("BACK", btnBack, Justification::centred, false);
+    }
+    if (! last)
+    {
+        g.setColour (Palette::textDim);
+        g.drawText ("SKIP TOUR", btnSkip, Justification::centredLeft, false);
+    }
+}
+
+void TourOverlay::mouseDown (const MouseEvent& e)
+{
+    const auto p = e.position;
+    if (btnNext.contains (p)) { if (++step >= (int) steps.size()) { setVisible (false); return; } repaint(); return; }
+    if (! btnBack.isEmpty() && btnBack.contains (p)) { step = jmax (0, step - 1); repaint(); return; }
+    if (btnSkip.contains (p) && step < (int) steps.size() - 1) { setVisible (false); return; }
+}
+
+Rectangle<float> RandomPanel::panel() const
+{
+    const float sc = (float) getWidth() / 1080.0f;
+    const float w = 300.0f * sc, h = 292.0f * sc;
+    return Rectangle<float> ((float) anchor.getRight() + 40.0f * sc - w, (float) anchor.getBottom() + 7.0f * sc, w, h);
+}
+
+Rectangle<float> RandomPanel::chip (int i) const
+{
+    const float sc = (float) getWidth() / 1080.0f;
+    auto p = panel().reduced (14.0f * sc);
+    const float cw = (p.getWidth() - 12.0f * sc) / 3.0f, ch = 34.0f * sc;
+    return { p.getX() + (float) (i % 3) * (cw + 6.0f * sc), p.getY() + 22.0f * sc + (float) (i / 3) * (ch + 6.0f * sc), cw, ch };
+}
+
+Rectangle<float> RandomPanel::tick (int i) const
+{
+    const float sc = (float) getWidth() / 1080.0f;
+    auto p = panel().reduced (14.0f * sc);
+    const float cw = p.getWidth() / 2.0f;
+    return { p.getX() + (float) (i % 2) * cw, p.getY() + 136.0f * sc + (float) (i / 2) * 18.0f * sc, cw, 16.0f * sc };
+}
+
+Rectangle<float> RandomPanel::goButton() const
+{
+    const float sc = (float) getWidth() / 1080.0f;
+    auto p = panel().reduced (14.0f * sc);
+    return p.removeFromBottom (30.0f * sc);
+}
+
+namespace
+{
+    const std::pair<int, const char*> kRandItems[] = { { GranulumProcessor::rndSticksBit, "Harmonics" }, { GranulumProcessor::rndGrainsBit, "Grains" },
+                                                       { GranulumProcessor::rndFiltersBit, "Filter 1" }, { GranulumProcessor::rndFilter2Bit, "Filter 2" },
+                                                       { GranulumProcessor::rndDistBit, "Distortion" }, { GranulumProcessor::rndDelayBit, "Delay" },
+                                                       { GranulumProcessor::rndReverbBit, "Reverb" }, { GranulumProcessor::rndLfo1Bit, "LFO 1" },
+                                                       { GranulumProcessor::rndLfo2Bit, "LFO 2" }, { GranulumProcessor::rndLfo3Bit, "LFO 3" } };
+}
+
+void RandomPanel::paint (Graphics& g)
+{
+    const float sc = (float) getWidth() / 1080.0f;
+    const auto p = panel();
+    g.setColour (Colours::black.withAlpha (0.4f));
+    g.fillRoundedRectangle (p.translated (0, 8.0f * sc).expanded (3.0f * sc), 16.0f * sc);
+    g.setColour (Palette::panel.darker (0.3f));
+    g.fillRoundedRectangle (p, 14.0f * sc);
+    g.setColour (Colours::white.withAlpha (0.09f));
+    g.drawRoundedRectangle (p.reduced (0.5f), 14.0f * sc, 1.0f);
+    auto in = p.reduced (14.0f * sc);
+    g.setColour (Palette::textDim);
+    g.setFont (uiFont (8.5f * sc, true, 0.2f));
+    g.drawText ("SOUND TYPE", in.withHeight (14.0f * sc), Justification::centredLeft, false);
+    const int t = proc.randType.load();
+    for (int i = 0; i < GranulumProcessor::randTypeNames().size(); ++i)
+    {
+        const auto c = chip (i);
+        const bool on = i == t;
+        g.setColour (on ? Palette::accent : Palette::field.brighter (0.06f));
+        g.fillRoundedRectangle (c, 9.0f * sc);
+        g.setColour (on ? Palette::accent.brighter (0.35f) : Colours::white.withAlpha (0.07f));
+        g.drawRoundedRectangle (c.reduced (0.5f), 9.0f * sc, 1.0f);
+        g.setColour (on ? Palette::onAccent() : Palette::label);
+        g.setFont (uiFont (10.0f * sc, true, 0.14f));
+        g.drawText (GranulumProcessor::randTypeNames()[i], c, Justification::centred, false);
+    }
+    const float sepY = chip (5).getBottom() + 12.0f * sc;
+    g.setColour (Colours::white.withAlpha (0.07f));
+    g.fillRect (Rectangle<float> (in.getX(), sepY, in.getWidth(), 1.0f));
+    g.setColour (Palette::textDim);
+    g.setFont (uiFont (8.5f * sc, true, 0.2f));
+    g.drawText ("RANDOMIZE", Rectangle<float> (in.getX(), sepY + 8.0f * sc, in.getWidth(), 14.0f * sc), Justification::centredLeft, false);
+    const int m = proc.randMask.load();
+    for (int i = 0; i < 10; ++i)
+    {
+        const auto r = tick (i);
+        const bool on = (m & kRandItems[i].first) != 0;
+        auto box = r.withWidth (13.0f * sc).withSizeKeepingCentre (13.0f * sc, 13.0f * sc);
+        g.setColour (on ? Palette::accent : Palette::field);
+        g.fillRoundedRectangle (box, 3.5f * sc);
+        if (! on) { g.setColour (Colours::white.withAlpha (0.15f)); g.drawRoundedRectangle (box.reduced (0.5f), 3.5f * sc, 1.0f); }
+        else
+        {
+            Path tickPath;
+            tickPath.startNewSubPath (box.getX() + box.getWidth() * 0.25f, box.getCentreY());
+            tickPath.lineTo (box.getX() + box.getWidth() * 0.43f, box.getBottom() - box.getHeight() * 0.28f);
+            tickPath.lineTo (box.getRight() - box.getWidth() * 0.22f, box.getY() + box.getHeight() * 0.28f);
+            g.setColour (Colours::white);
+            g.strokePath (tickPath, PathStrokeType (1.6f * sc, PathStrokeType::curved, PathStrokeType::rounded));
+        }
+        g.setColour (on ? Palette::text : Palette::label);
+        g.setFont (uiFont (10.5f * sc, false, 0.02f));
+        g.drawText (kRandItems[i].second, r.withTrimmedLeft (20.0f * sc), Justification::centredLeft, false);
+    }
+    const auto b = goButton();
+    g.setColour (Palette::accent);
+    g.fillRoundedRectangle (b, 9.0f * sc);
+    g.setColour (Palette::onAccent());
+    g.setFont (uiFont (10.0f * sc, true, 0.16f));
+    g.drawText ("RANDOM " + (t == 0 ? String ("ALL") : GranulumProcessor::randTypeNames()[t]), b, Justification::centred, false);
+}
+
+void RandomPanel::mouseDown (const MouseEvent& e)
+{
+    const auto p = e.position;
+    if (! panel().contains (p)) { setVisible (false); return; }   // a click outside closes it
+    for (int i = 0; i < GranulumProcessor::randTypeNames().size(); ++i)
+        if (chip (i).contains (p)) { proc.setRandType (i); if (onChange) onChange(); repaint(); return; }
+    for (int i = 0; i < 10; ++i)
+        if (tick (i).contains (p)) { proc.randMask.store (proc.randMask.load() ^ kRandItems[i].first); repaint(); return; }
+    if (goButton().contains (p)) { proc.randomize(); repaint(); }
+}
+
+void GranulumEditor::setupTour()
+{
+    auto u = [] (Rectangle<int> a, Rectangle<int> b) { return a.isEmpty() ? b : b.isEmpty() ? a : a.getUnion (b); };
+    tour.steps = {
+        { [this, u] { return u (u (presetBar.getBounds(), undoButton.getBounds()), u (randomButton.getBounds(), randomMenuButton.getBounds())); },
+          "Presets & Random", "Browse sounds with the arrows or the name. INIT starts clean (right-click to make your own INIT). RANDOM makes a new sound; the arrow next to it picks a SOUND TYPE (bass, pad, pluck...) and what may change." },
+        { [this] { return osc1Area; }, "Oscillator 1",
+          "The heart of the synth. ADDITIVE draws harmonics with the sticks, WAVE plays a classic shape. MIX WAVE and AIR blend in a wave and bright air. Drop an LFO on any knob or pill." },
+        { [this, u] { return u (u (osc2Area, osc3Area), osc4Area); }, "Osc 2, Noise & Sub",
+          "A second oscillator, a noise layer and a sub with its own TUNE. Power each one with its switch; each can be granulated or stay clean." },
+        { [this] { return screenFrame; }, "The screen",
+          "GRAINS shows every grain as it plays. Switch to EQ for a 5-band equalizer: drag the dots, click one to edit it, wheel for Q." },
+        { [this] { return grainArea; }, "Granular",
+          "SIZE, DENSITY and SPREAD shape the grain cloud. FREEZE holds the moment, SHIMMER adds octaves or fifths, SHAPE sets the grain window." },
+        { [this] { return filterArea; }, "Filters",
+          "Two filters in a row: low-pass, high-pass, band-pass with WIDTH, peak, comb and vowel. Steeper slopes for a harder cut." },
+        { [this] { return fxArea; }, "Effects",
+          "Distortion, delay and reverb. Each has its own switch and MIX, so you can keep the dry sound punchy." },
+        { [this, u] { return u (lfoFrame, voiceArea); }, "LFO & Envelope",
+          "Three LFOs: drag an LFO tab onto any knob to modulate it. ADSR shapes every note. VOICE sets POLY or MONO and the glide time." },
+        { [this, u] { return u (globalKnobs[2]->getBounds(), u (globalKnobs[1]->getBounds(), gemsArea)); }, "Pitch, Output & Clip",
+          "Master PITCH, the OUTPUT level and the meter. Push OUTPUT for really loud sounds. Enjoy GRAIN FORM!" } };
 }
