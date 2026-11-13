@@ -48,12 +48,20 @@ jobs:
           Copy-Item "build/Granulum_artefacts/Release/Standalone/GRAIN FORM.exe" out/
           Compress-Archive -Path out/* -DestinationPath GRAIN-FORM-TEST-Windows.zip -Force
 
-      - uses: actions/upload-artifact@v4
-        with:
-          name: win
-          path: |
-            GRAIN-FORM-TEST-Windows.zip
-            shots/*.png
+      - name: Push to builds branch
+        shell: bash
+        run: |
+          # no Actions artifacts (storage quota): each job commits its zip to the builds branch itself, retrying on races
+          for i in 1 2 3 4 5 6; do
+            rm -rf pub
+            git clone -q --depth 1 --branch builds "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${GITHUB_REPOSITORY}.git" pub
+            cp GRAIN-FORM-TEST-Windows.zip shots/*.png pub/ 2>/dev/null || true
+            cd pub
+            git config user.name "github-actions"; git config user.email "github-actions@users.noreply.github.com"
+            git add -A; git commit -q -m "Build ${GITHUB_SHA::7} ${{ github.job }}" || { cd ..; break; }
+            if git push -q origin builds; then cd ..; break; fi
+            cd ..; sleep $((i * 7))
+          done
 
   mac:
     if: inputs.target != 'windows'
@@ -89,31 +97,31 @@ jobs:
           TXT
           ditto -c -k --sequesterRsrc out GRAIN-FORM-TEST-macOS.zip
 
-      - uses: actions/upload-artifact@v4
-        with:
-          name: mac
-          path: GRAIN-FORM-TEST-macOS.zip
+      - name: Push to builds branch
+        shell: bash
+        run: |
+          # no Actions artifacts (storage quota): each job commits its zip to the builds branch itself, retrying on races
+          for i in 1 2 3 4 5 6; do
+            rm -rf pub
+            git clone -q --depth 1 --branch builds "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${GITHUB_REPOSITORY}.git" pub
+            cp GRAIN-FORM-TEST-macOS.zip pub/ 2>/dev/null || true
+            cd pub
+            git config user.name "github-actions"; git config user.email "github-actions@users.noreply.github.com"
+            git add -A; git commit -q -m "Build ${GITHUB_SHA::7} ${{ github.job }}" || { cd ..; break; }
+            if git push -q origin builds; then cd ..; break; fi
+            cd ..; sleep $((i * 7))
+          done
 
-  publish:
+  squash:
     needs: [windows, mac]
     if: always()
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/download-artifact@v4
-        with:
-          path: art
-      - name: Publish to builds branch
+      - name: Squash builds branch to one commit (keeps the repo small)
         run: |
-          # keep what is already on the builds branch, replace only what was built now
-          git clone --depth 1 --branch builds "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${GITHUB_REPOSITORY}.git" pub || mkdir pub
-          rm -rf pub/.git
-          find art -name '*.zip' -exec cp {} pub/ \;
-          find art -name '*.png' -exec cp {} pub/ \;
-          ls pub
-          cd pub
+          git clone -q --depth 1 --branch builds "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${GITHUB_REPOSITORY}.git" pub
+          cd pub && rm -rf .git && ls
           git init -q -b builds
-          git config user.name "github-actions"
-          git config user.email "github-actions@users.noreply.github.com"
-          git add -A
-          git commit -q -m "Build ${GITHUB_SHA::7}"
-          git push -f "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${GITHUB_REPOSITORY}.git" builds
+          git config user.name "github-actions"; git config user.email "github-actions@users.noreply.github.com"
+          git add -A && git commit -q -m "Build ${GITHUB_SHA::7}"
+          git push -q -f "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${GITHUB_REPOSITORY}.git" builds
