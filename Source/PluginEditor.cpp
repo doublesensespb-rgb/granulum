@@ -5974,7 +5974,7 @@ void GranulumEditor::resized()
         const int tw = GlyphArrangement::getStringWidthInt (tf, "GRAIN FORM") + S (6);
         titleBadge.scale = sc;
         titleBadge.setBounds (titleArea.getX(), titleArea.getY(), jmin (tw, titleArea.getWidth()), S (46));
-        guidePill.setBounds (S (306), S (64), S (62), S (18));
+        guidePill.setBounds (S (304), S (58), S (90), S (32));
     }
     for (Component* o : { (Component*) &about, (Component*) &tour, (Component*) &randomPanel }) o->setBounds (getLocalBounds());
     randomPanel.anchor = randomMenuButton.getBounds();
@@ -6887,21 +6887,34 @@ void AboutOverlay::paint (Graphics& g)
 
 void GuidePill::paint (Graphics& g)
 {
-    auto r = getLocalBounds().toFloat().reduced (0.5f);
+    // copper pill that invites a click: a soft glow breathes around it (3.2 s), brighter on hover
+    const float pad = (float) getHeight() * 0.22f;
+    auto r = getLocalBounds().toFloat().reduced (pad);
+    const float rad = r.getHeight() * 0.5f;
     const bool over = isMouseOver();
-    g.setColour (over ? Palette::accent : Palette::field);
-    g.fillRoundedRectangle (r, r.getHeight() * 0.5f);
-    g.setColour (Palette::accent.withAlpha (over ? 1.0f : 0.55f));
-    g.drawRoundedRectangle (r, r.getHeight() * 0.5f, 1.0f);
-    auto dot = r.removeFromLeft (r.getHeight()).reduced (2.5f);
-    g.setColour (over ? Colours::white : Palette::accent);
+    const auto orange = Palette::accent.withMultipliedSaturation (1.25f).withMultipliedBrightness (1.08f);
+    const double t = (Time::getMillisecondCounterHiRes() - t0) / 1000.0;
+    const float breath = glowForTest >= 0.0f ? glowForTest : 0.5f - 0.5f * std::cos ((float) (t * MathConstants<double>::twoPi / 3.2));
+    const float glow = over ? 1.0f : 0.35f + 0.65f * breath;
+    for (int i = 3; i >= 1; --i)
+    {
+        g.setColour (orange.withAlpha (0.09f * glow * (float) (4 - i)));
+        g.fillRoundedRectangle (r.expanded (pad * (float) i / 3.0f), rad + pad * (float) i / 3.0f);
+    }
+    const auto top = orange.brighter (over ? 0.45f : 0.25f), bottom = orange.darker (over ? 0.0f : 0.12f);
+    g.setGradientFill (ColourGradient (top, 0.0f, r.getY(), bottom, 0.0f, r.getBottom(), false));
+    g.fillRoundedRectangle (r, rad);
+    g.setColour (Colours::white.withAlpha (over ? 0.45f : 0.25f));
+    g.drawRoundedRectangle (r.reduced (0.5f), rad, 1.0f);
+    auto dot = r.removeFromLeft (r.getHeight()).reduced (r.getHeight() * 0.16f);
+    g.setColour (Colours::white);
     g.fillEllipse (dot);
-    g.setColour (over ? Palette::accent : Palette::onAccent());
-    g.setFont (uiFont (r.getHeight() * 0.62f, true, 0.0f));
-    g.drawText ("?", dot, Justification::centred, false);
-    g.setColour (over ? Palette::onAccent() : Palette::label);
-    g.setFont (uiFont (r.getHeight() * 0.5f, true, 0.14f));
-    g.drawText ("GUIDE", r.withTrimmedLeft (3.0f), Justification::centredLeft, false);
+    g.setColour (orange.darker (0.2f));
+    g.setFont (uiFont (dot.getHeight() * 0.82f, true, 0.0f));
+    g.drawText ("?", dot.translated (0.0f, 0.5f), Justification::centred, false);
+    g.setColour (Colours::white);
+    g.setFont (uiFont (r.getHeight() * 0.56f, true, 0.16f));
+    g.drawText ("GUIDE", r.withTrimmedLeft (r.getHeight() * 0.18f).withTrimmedRight (r.getHeight() * 0.3f), Justification::centred, false);
 }
 
 Rectangle<float> TourOverlay::cardRect() const

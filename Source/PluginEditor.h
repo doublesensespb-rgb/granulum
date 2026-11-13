@@ -898,12 +898,17 @@ private:
 };
 
 // TEST: "? GUIDE" pill under the title
-class GuidePill final : public juce::Component, public juce::SettableTooltipClient
+class GuidePill final : public juce::Component, public juce::SettableTooltipClient, private juce::Timer
 {
 public:
+    GuidePill() { startTimerHz (30); }
     std::function<void()> onClick;
+    float glowForTest = -1.0f;
     void paint (juce::Graphics&) override;
     void mouseUp (const juce::MouseEvent&) override { if (onClick) onClick(); }
+private:
+    void timerCallback() override { repaint(); }   // slow copper breathing (a few px, cheap)
+    double t0 = juce::Time::getMillisecondCounterHiRes();
 };
 
 // TEST: RANDOM ALL panel: SOUND TYPE (ANY BASS PAD PLUCK CHORD TEXTURE), what to randomize, and a RANDOM button
