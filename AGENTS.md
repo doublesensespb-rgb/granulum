@@ -186,6 +186,9 @@ Output: the 0.99.6 tanh soft clipper (knee at -3 dB, 23-35 % THD on bass when pu
 150 ms release, ceiling 0.9886 (-0.1 dB) + hard safety clamp; the signal is always delayed (constant latency, reported via
 setLatencySamples). Param id stays `clipOn` (name "Output Limiter"), button reads LIMIT and glows with `limitGr`.
 Pills MIX WAVE / AIR: LFO chip (`pillChip`, `pillLfo`, `pillChipDrag`) = dot + depth, drag up/down / wheel = depth, right-click removes.
+CPU: `Params::maxOverlap` (14 tones, 6 noise, set in voiceParams) caps grains per voice; spawnGrain stretches `spacing`
+(by reference) to length/cap, and to 35-100 % of that in RELEASE by env; v.norm follows, so the level holds. Owner's heavy pad
+(size 600 ms, density 33/s, bloom .5, smear .4, AIR, pink noise grains, 6 notes): 53 % -> 13 % of a core (rdemo Bench3.cpp).
 Snapshot mode `pill`; rdemo Loud.cpp (`loud <note> <outDb>`, `loud sine <inDb> <out.raw>`) measures level and limiter THD.
 v0.99.6: `osc1Mode` = ADDITIVE|WAVE (2 choices; states without `modeOrder` map old MIX -> ADD keeping osc1WaveMix, old WAVE -> 1).
 MIX WAVE (osc1WaveMix, default 0) only in ADD: drawn as a pill in HarmonicEditor::paintOverChildren (drag, double click = 0); the wave

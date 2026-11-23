@@ -1308,6 +1308,7 @@ void GranulumProcessor::advanceLfos (int endSample, int len, const float* v)
 granulum::Params GranulumProcessor::voiceParams (const float* v, int osc) const
 {
     granulum::Params p;
+    p.maxOverlap = osc == 2 ? 6.0f : 14.0f;   // CPU (0.99.7-test): noise needs few grains, tones a full cloud
     p.bloom    = v[mtBloom];
     p.smear    = v[mtSmear];
     p.scatter  = v[mtScatter];

@@ -217,6 +217,9 @@ inline SampleData renderAdditive (const std::array<float, kNumHarmonics>& amps)
 
 struct Params
 {
+    // CPU (0.99.7-test): most grains of one voice that may overlap. A cloud is already full at ~12-16;
+    // above that only the CPU notices. Noise needs even fewer (noise over noise is still the same noise).
+    float maxOverlap = 14.0f;
     // granular macros (0..1 unless noted)
     float bloom    = 0.0f;
     float smear    = 0.0f;
@@ -1011,7 +1014,7 @@ private:
     }
 
     // ---- macros -> grain ----
-    void spawnGrain (Voice& v, const Params& p, const SampleData& s, double baseRatio, double spacing, double fileRate, float bloom)
+    void spawnGrain (Voice& v, const Params& p, const SampleData& s, double baseRatio, double& spacing, double fileRate, float bloom)
     {
         Grain* g = nullptr;
         for (auto& c : v.grains) if (! c.active) { g = &c; break; }
@@ -1026,6 +1029,13 @@ private:
         holdMs *= 1.0 + 0.4 * drift * v.walk[2];
         holdMs = std::min (holdMs, 2500.0);
         int length = std::max (32, (int) (holdMs * 0.001 * sr));
+        {
+            // CPU cap: long grains x high density used to stack up to 48 grains per voice (x every note, x every osc).
+            // Keep at most maxOverlap of them (fewer while a note fades out); v.norm below follows, so the level stays.
+            float cap = std::max (2.0f, p.maxOverlap);
+            if (v.stage == Stage::Release) cap *= std::clamp (v.env * 1.5f, 0.35f, 1.0f);
+            spacing = std::max (spacing, (double) length / (double) cap);
+        }
 
         // softness: SMEAR + BLOOM
         const float soft = std::clamp (0.15f + 0.85f * (smear * 0.9f + bloom * 0.5f), 0.0f, 1.0f);
