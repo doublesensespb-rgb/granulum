@@ -174,6 +174,15 @@ int main (int argc, char** argv)
         save (*base, outDir, "eq.png");
         return 0;
     }
+    if (argc > 2 && String (argv[2]) == "pill")
+    {
+        setP (ParamID::osc1On, 1.0f); setP (ParamID::osc1WaveMix, 0.3f); setP (ParamID::osc1Air, 0.5f);
+        p.setModulation (mtOsc1WaveMix, 0, 0.4f); p.setModulation (mtOsc1Air, 1, -0.25f);
+        p.keyboardState.noteOn (1, 40, 0.9f);
+        run (p, ed, 40);
+        save (*base, outDir, "pill.png");
+        return 0;
+    }
     if (argc > 2 && String (argv[2]) == "final")
     {
         // TEST final: header, RANDOM panel, tour steps, About

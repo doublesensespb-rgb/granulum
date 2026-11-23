@@ -312,6 +312,55 @@ struct FxChain
     bool busDelay = false, busReverb = false;          // shared DIST bus only: what follows it
 };
 
+// LIMIT (0.99.7-test): a clean look-ahead peak limiter on the output. Below the ceiling it does nothing;
+// it sees peaks 1.5 ms ahead, so it turns the gain down smoothly before them (no clipping, no fizz),
+// holds, then lets go over ~150 ms so bass notes are not wobbled. Always delays by the look-ahead
+// (also when off) so the plugin latency stays constant.
+struct OutLimiter
+{
+    void prepare (double sr)
+    {
+        la = juce::jmax (8, (int) std::round (sr * 0.0015));
+        rel = (float) std::exp (-1.0 / (sr * 0.15));
+        hold = (int) std::round (sr * 0.01);
+        dl[0].assign ((size_t) la + 1, 0.0f); dl[1].assign ((size_t) la + 1, 0.0f);
+        req.assign ((size_t) la, 1.0f); avg.assign ((size_t) la, 1.0f);
+        pos = 0; avgSum = (double) la; g = 1.0f; holdLeft = 0;
+    }
+    int latency() const { return la - 1; }   // the output is the sample written la-1 steps ago
+    // returns the deepest gain reduction of this block (linear gain, 1 = none)
+    float process (float* L, float* R, int n, bool on, float ceiling)
+    {
+        float minG = 1.0f;
+        for (int i = 0; i < n; ++i)
+        {
+            const float a = std::max (std::abs (L[i]), std::abs (R[i]));
+            const float need = on && a > ceiling ? ceiling / a : 1.0f;
+            req[(size_t) pos] = need;
+            float m = 1.0f;                                     // the lowest gain any sample in the look-ahead needs
+            for (float r : req) m = std::min (m, r);
+            if (m < g) { g = m; holdLeft = hold; }              // down at once (the averaging below makes it a smooth ramp)
+            else if (holdLeft > 0) --holdLeft;
+            else g = m + (g - m) * rel;                         // then back up slowly
+            avgSum += (double) g - (double) avg[(size_t) pos];
+            avg[(size_t) pos] = g;
+            const float gs = (float) (avgSum / (double) la);
+            dl[0][(size_t) pos] = L[i]; dl[1][(size_t) pos] = R[i];
+            const int rd = (pos + 1) % la;                      // the sample from la steps ago
+            float yl = dl[0][(size_t) rd] * gs, yr = dl[1][(size_t) rd] * gs;
+            if (on) { yl = juce::jlimit (-ceiling, ceiling, yl); yr = juce::jlimit (-ceiling, ceiling, yr); }   // safety net, practically never touched
+            L[i] = yl; R[i] = yr;
+            minG = std::min (minG, gs);
+            pos = rd;
+        }
+        return minG;
+    }
+    int la = 64, hold = 441, holdLeft = 0, pos = 0;
+    float rel = 0.9998f, g = 1.0f;
+    double avgSum = 64.0;
+    std::vector<float> dl[2], req, avg;
+};
+
 class GranulumProcessor final : public juce::AudioProcessor,
                                 private juce::Timer
 {
@@ -437,6 +486,7 @@ public:
     std::atomic<float> outputLevel { 0.0f };
     std::atomic<float> peakL { 0.0f }, peakR { 0.0f };   // max since the UI last read them (UI swaps in 0)
     std::atomic<bool>  clipped { false };
+    std::atomic<float> limitGr { 0.0f };   // LIMIT: deepest gain reduction since the UI last looked (dB, >= 0)
     std::atomic<bool>  soundReset { false };   // 0.99.2: a new preset / INIT / project state: stop the old sound and its tails (audio thread)
     float lastOut[2] {};                       // last output sample, for a click-free cut                 // set when the output hit 0 dBFS; the UI clears it
     std::atomic<float> keyCutoff { 20000.0f };
@@ -543,7 +593,7 @@ private:
 
     std::array<FxChain, kNumOscs> chains;
     FxChain subChain;   // the SUB's own effect chain (it only goes through blocks whose "2" digit is lit)
-    juce::dsp::Oversampling<float> outClipOS { 2, 2, juce::dsp::Oversampling<float>::filterHalfBandPolyphaseIIR, true };   // CLIP (0.99.6)
+    OutLimiter outLimiter;   // LIMIT (0.99.7-test), replaces the 0.99.6 soft clipper
     FxChain distBusChain;   // 0.99.5: the shared DIST (+ the delay / reverb that follow it for the distorted mix)
     juce::AudioBuffer<float> distBuf;
     juce::SmoothedValue<float> outGain;

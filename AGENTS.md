@@ -181,6 +181,12 @@ button (chips without captions, 2-column ticks = randMask, RANDOM <TYPE> button;
 `TourOverlay` (9 steps, spotlight + card, `setupTour`) opened by `GuidePill`; `TitleBadge` draws the name (copper sheen every 8 s,
 click -> `AboutOverlay`: "Made by producers Thematic & Oddkut" + version); the header version plate is gone.
 Snapshot mode `final` renders header / panel / tour / About.
+Output: the 0.99.6 tanh soft clipper (knee at -3 dB, 23-35 % THD on bass when pushed) is replaced by `OutLimiter`
+(PluginProcessor.h): look-ahead 1.5 ms (min-window + moving average, so gain is down before the peak), 10 ms hold,
+150 ms release, ceiling 0.9886 (-0.1 dB) + hard safety clamp; the signal is always delayed (constant latency, reported via
+setLatencySamples). Param id stays `clipOn` (name "Output Limiter"), button reads LIMIT and glows with `limitGr`.
+Pills MIX WAVE / AIR: LFO chip (`pillChip`, `pillLfo`, `pillChipDrag`) = dot + depth, drag up/down / wheel = depth, right-click removes.
+Snapshot mode `pill`; rdemo Loud.cpp (`loud <note> <outDb>`, `loud sine <inDb> <out.raw>`) measures level and limiter THD.
 v0.99.6: `osc1Mode` = ADDITIVE|WAVE (2 choices; states without `modeOrder` map old MIX -> ADD keeping osc1WaveMix, old WAVE -> 1).
 MIX WAVE (osc1WaveMix, default 0) only in ADD: drawn as a pill in HarmonicEditor::paintOverChildren (drag, double click = 0); the wave
 is read INSIDE engineAdd as `Params::overlay` (same grains, phase mapped by ovScale = wave sr / add sr, one 1024-sample cycle per

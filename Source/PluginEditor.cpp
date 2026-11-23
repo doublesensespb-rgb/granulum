@@ -2105,6 +2105,23 @@ void HarmonicEditor::mouseWheelMove (const MouseEvent& e, const MouseWheelDetail
 
 void HarmonicEditor::mouseMove (const MouseEvent& e)
 {
+    if (const int pk = osc1WaveMode (proc) ? -1 : pillAt (e.position); pk >= 0)
+    {
+        hoverBar = -1;
+        if (const int l = pillLfo (pk); l >= 0 && pillChip (pk).contains (e.position))
+        {
+            setTooltip ("LFO " + String (l + 1) + " on " + (pk == 0 ? "MIX WAVE" : "AIR") + ":  drag up/down or mouse wheel = depth (Shift = fine),  right-click = remove");
+            setMouseCursor (MouseCursor::UpDownResizeCursor);
+        }
+        else
+        {
+            setTooltip (String (pk == 0 ? "MIX WAVE: how much full wave rides on the sticks." : "AIR: bright harmonics above the 16 sticks.")
+                        + "\nDrag = amount, double-click = 0. Drop an LFO here; its dot on the right sets the depth.");
+            setMouseCursor (MouseCursor::NormalCursor);
+        }
+        repaint();
+        return;
+    }
     if (const auto c = chipAt (e.position); c.harm >= 0)
     {
         hoverBar = -1;
@@ -2146,6 +2163,14 @@ void HarmonicEditor::mouseDown (const MouseEvent& e)
         {
             // right click: take the LFO off this pill
             for (int l = 0; l < kNumLfos; ++l) if (proc.hasModulation (pillTarget (pk), l)) proc.removeModulation (pillTarget (pk), l);
+            repaint();
+            return;
+        }
+        if (pillLfo (pk) >= 0 && pillChip (pk).contains (e.position))
+        {
+            pillChipDrag = pk;
+            pillChipStart = proc.getModulationDepth (pillTarget (pk), pillLfo (pk));
+            pillChipY = e.position.y;
             repaint();
             return;
         }
@@ -2191,6 +2216,14 @@ void HarmonicEditor::mouseDown (const MouseEvent& e)
 
 void HarmonicEditor::mouseDrag (const MouseEvent& e)
 {
+    if (pillChipDrag >= 0)
+    {
+        if (const int l = pillLfo (pillChipDrag); l >= 0)
+            proc.setModulation (pillTarget (pillChipDrag), l,
+                                snapDepth (pillChipStart + (pillChipY - e.position.y) / 90.0f * (e.mods.isShiftDown() ? 0.25f : 1.0f)));
+        repaint();
+        return;
+    }
     if (pillDrag >= 0)
     {
         const auto r = pillTrack (pillRect (pillDrag), pillDrag);
@@ -2214,7 +2247,7 @@ void HarmonicEditor::mouseDrag (const MouseEvent& e)
 
 void HarmonicEditor::mouseExit (const MouseEvent&) { hoverBar = -1; if (readout.hold && chipDrag.harm < 0) readout.release(); }
 
-void HarmonicEditor::mouseUp (const MouseEvent&) { if (pillDrag >= 0) { if (auto* m = proc.apvts.getParameter (pillParam (pillDrag))) m->endChangeGesture(); pillDrag = -1; } if (chipDrag.harm >= 0) readout.release(); chipDrag = {}; editing = false; lastBar = -1; lastPill = -1; pillMode = false; }
+void HarmonicEditor::mouseUp (const MouseEvent&) { if (pillChipDrag >= 0) { pillChipDrag = -1; repaint(); } if (pillDrag >= 0) { if (auto* m = proc.apvts.getParameter (pillParam (pillDrag))) m->endChangeGesture(); pillDrag = -1; } if (chipDrag.harm >= 0) readout.release(); chipDrag = {}; editing = false; lastBar = -1; lastPill = -1; pillMode = false; }
 
 Rectangle<float> HarmonicEditor::pillRect (int k) const
 {
@@ -2222,6 +2255,12 @@ Rectangle<float> HarmonicEditor::pillRect (int k) const
     auto mix = top.removeFromRight (176.0f);
     if (k == 0) return mix.reduced (6.0f, 4.0f);
     return top.removeFromRight (140.0f).reduced (2.0f, 4.0f).withTrimmedRight (-4.0f);
+}
+
+int HarmonicEditor::pillLfo (int k) const
+{
+    for (int l = 0; l < kNumLfos; ++l) if (proc.hasModulation (pillTarget (k), l)) return l;
+    return -1;
 }
 
 int HarmonicEditor::pillAt (Point<float> p) const
@@ -2268,8 +2307,29 @@ void HarmonicEditor::paintOverChildren (Graphics& g)
         }
         g.setColour (Palette::accent);
         g.fillEllipse (Rectangle<float> (8.0f, 8.0f).withCentre ({ tr.getX() + tr.getWidth() * v, tr.getCentreY() }));
-        g.setColour (on ? Palette::text : Palette::textDim);
-        g.drawText (String (roundToInt ((lfo >= 0 ? live : v) * 100.0f)) + "%", r.withTrimmedRight (8.0f).removeFromRight (30.0f), Justification::centredRight, false);
+        if (lfo >= 0)
+        {
+            // LFO chip: a dot in the LFO's colour with its number, then the depth (drag it up/down)
+            const auto col = Palette::lfo (lfo).withMultipliedAlpha (proc.isLfoOn (lfo) ? 1.0f : 0.4f);
+            const auto chip = pillChip (k);
+            const bool hot = pillChipDrag == k || (isMouseOver() && chip.contains (getMouseXYRelative().toFloat()));
+            const auto dot = Rectangle<float> (12.0f, 12.0f).withCentre ({ chip.getX() + 8.0f, chip.getCentreY() });
+            if (hot) { g.setColour (col.withAlpha (0.25f)); g.fillEllipse (dot.expanded (2.5f)); }
+            g.setColour (col);
+            g.fillEllipse (dot);
+            g.setColour (Palette::screen);
+            g.setFont (uiFont (8.0f, true, 0.0f));
+            g.drawText (String (lfo + 1), dot.translated (0.0f, 0.5f), Justification::centred, false);
+            const int dpt = roundToInt (proc.getModulationDepth (pillTarget (k), lfo) * 100.0f);
+            g.setColour (hot ? Palette::text : col);
+            g.setFont (uiFont (8.5f, true, 0.0f));
+            g.drawText ((dpt > 0 ? "+" : "") + String (dpt), chip.withTrimmedLeft (15.0f).withTrimmedRight (4.0f), Justification::centredRight, false);
+        }
+        else
+        {
+            g.setColour (on ? Palette::text : Palette::textDim);
+            g.drawText (String (roundToInt (v * 100.0f)) + "%", r.withTrimmedRight (8.0f).removeFromRight (30.0f), Justification::centredRight, false);
+        }
     }
 
     // harmonic numbers (0.99.2): quiet, the stick under the mouse lights up
@@ -2973,7 +3033,8 @@ void HarmonicEditor::paint (Graphics& g)
 PeakMeter::PeakMeter (GranulumProcessor& p) : proc (p)
 {
     setTooltip ("Output level (click the bars to reset the peak).\n"
-                "CLIP = soft clipper on the output: CLIP lit = the sound never goes over 0 dB. Click CLIP to switch it.");
+                "LIMIT = clean limiter on the output: lit = the sound never goes over 0 dB, push OUTPUT as loud as you like.\n"
+                "It glows brighter while it is turning peaks down. Click LIMIT to switch it.");
     // (no own timer: GranulumEditor::timerCallback calls frame() at 30 fps)
 }
 
@@ -2987,8 +3048,9 @@ void PeakMeter::timerCallback()
         else if (++holdAge[c] > 40) hold[c] *= 0.93f;
     }
     if (proc.clipped.load()) clipShown = true;
+    grShown = jmax (proc.limitGr.exchange (0.0f), grShown * 0.85f);   // LIMIT glow: gain reduction in dB, falls off smoothly
     // repaint only when something visible changed (a silent meter used to repaint 30x a second)
-    const float sig = level[0] + level[1] + hold[0] * 0.5f + hold[1] * 0.5f + (clipShown ? 10.0f : 0.0f);
+    const float sig = level[0] + level[1] + hold[0] * 0.5f + hold[1] * 0.5f + (clipShown ? 10.0f : 0.0f) + grShown * 0.01f;
     if (std::abs (sig - lastSig) > 1.0e-4f || isMouseOver()) { lastSig = sig; repaint(); }
 }
 
@@ -2997,7 +3059,7 @@ void PeakMeter::mouseMove (const MouseEvent&) { repaint(); }   // hover look on 
 void PeakMeter::mouseDown (const MouseEvent& e)
 {
     // CLIP box: switch the output clipper on/off; anywhere else: reset the peak hold and the clip light
-    if (e.position.x > (float) getWidth() - 38.0f)   // the whole CLIP box (and a little around it) is the button
+    if (e.position.x > (float) getWidth() - 40.0f)   // the whole LIMIT box (and a little around it) is the button
     {
         if (auto* p = proc.apvts.getParameter (ParamID::clipOn))
         {
@@ -3016,7 +3078,7 @@ void PeakMeter::mouseDown (const MouseEvent& e)
 void PeakMeter::paint (Graphics& g)
 {
     auto r = getLocalBounds().toFloat();
-    auto clipBox = r.removeFromRight (34.0f).withSizeKeepingCentre (32.0f, 17.0f);
+    auto clipBox = r.removeFromRight (36.0f).withSizeKeepingCentre (35.0f, 17.0f);
     r.removeFromRight (6.0f);
     auto scale = r.removeFromBottom (11.0f);
     const float barH = 5.0f;
@@ -3067,17 +3129,23 @@ void PeakMeter::paint (Graphics& g)
         g.drawText (db == 0.0f ? String ("0") : String ((int) db), Rectangle<float> (x - 12.0f, scale.getY(), 24.0f, scale.getHeight()), Justification::centred, false);
     }
 
-    // CLIP: the whole box is the button (0.99.2). On = the whole box glows copper. Flashes red when the signal hits 0 dB.
+    // LIMIT (0.99.7-test): the whole box is the button. On = copper; it glows brighter while peaks are turned down.
     const bool clipOn = proc.apvts.getRawParameterValue (ParamID::clipOn)->load() > 0.5f;
-    const bool hover  = isMouseOver() && getMouseXYRelative().x > getWidth() - 38;
-    // 0.99.6: CLIP is just a switch (lit copper = on); it no longer flashes red as a clip light
-    g.setColour (clipOn ? Palette::accent.withAlpha (hover ? 0.95f : 0.85f) : Palette::button.brighter (hover ? 0.25f : 0.0f));
+    const bool hover  = isMouseOver() && getMouseXYRelative().x > getWidth() - 40;
+    const float work  = clipOn ? jlimit (0.0f, 1.0f, grShown / 6.0f) : 0.0f;   // 0 = idle, 1 = 6 dB or more off the peaks
+    if (work > 0.02f)
+    {
+        g.setColour (Palette::accent.withAlpha (0.35f * work));
+        g.fillRoundedRectangle (clipBox.expanded (2.5f), 6.0f);
+    }
+    g.setColour (clipOn ? Palette::accent.withMultipliedBrightness (0.72f + 0.5f * work).withAlpha (hover ? 0.95f : 0.88f)
+                        : Palette::button.brighter (hover ? 0.25f : 0.0f));
     g.fillRoundedRectangle (clipBox, 4.0f);
-    g.setColour (clipOn ? Palette::accent.brighter (0.2f) : Palette::edge.withMultipliedAlpha (hover ? 3.0f : 2.0f));
+    g.setColour (clipOn ? Palette::accent.brighter (0.2f + 0.5f * work) : Palette::edge.withMultipliedAlpha (hover ? 3.0f : 2.0f));
     g.drawRoundedRectangle (clipBox.reduced (0.5f), 4.0f, 1.0f);
     g.setColour (clipOn ? Colours::white : Palette::textDim.withAlpha (hover ? 0.9f : 0.6f));
-    g.setFont (uiFont (8.5f, true, 0.08f));
-    g.drawText ("CLIP", clipBox, Justification::centred, false);
+    g.setFont (uiFont (8.0f, true, 0.06f));
+    g.drawText ("LIMIT", clipBox, Justification::centred, false);
 }
 
 // ============================================================================

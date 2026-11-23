@@ -353,6 +353,10 @@ public:
     juce::Rectangle<float> pillRect (int k) const;
     int pillAt (juce::Point<float>) const;
     int pillDrag = -1, pillDrop = -1;
+    // LFO chip on a pill (0.99.7-test): colour dot + depth; drag up/down = depth, wheel = depth, right-click = remove
+    int pillChipDrag = -1; float pillChipStart = 0.0f, pillChipY = 0.0f;
+    juce::Rectangle<float> pillChip (int k) const { const auto r = pillRect (k); return { r.getRight() - 40.0f, r.getY(), 38.0f, r.getHeight() }; }
+    int pillLfo (int k) const;
     explicit HarmonicEditor (GranulumProcessor&);
     void paint (juce::Graphics&) override;
     void mouseMove (const juce::MouseEvent&) override;
@@ -413,6 +417,7 @@ private:
     GranulumProcessor& proc;
     float level[2] {}, hold[2] {};
     int holdAge[2] {};
+    float grShown = 0.0f;   // LIMIT glow (dB of gain reduction)
     bool clipShown = false;
     float lastSig = -1.0f;   // last drawn state (repaint only on change)
 };

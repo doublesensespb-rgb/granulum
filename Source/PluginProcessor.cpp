@@ -855,7 +855,7 @@ AudioProcessorValueTreeState::ParameterLayout GranulumProcessor::createLayout()
     ps.push_back (std::make_unique<B> (ParameterID { ParamID::mono, 1 }, "Mono", true));   // 0.99.5: INIT (and a fresh plugin) starts in MONO
     ps.push_back (std::make_unique<P> (ParameterID { ParamID::porta, 1 }, "Portamento", skewed (0.0f, 3000.0f, 200.0f), 0.0f,
                                        A().withStringFromValueFunction ([] (float v, int) { return v < 0.5f ? String ("OFF") : v < 1000.0f ? fmt (v, 0, " ms") : fmt (v / 1000.0f, 2, " s"); })));
-    ps.push_back (std::make_unique<B> (ParameterID { ParamID::clipOn, 1 }, "Output Clipper", true));
+    ps.push_back (std::make_unique<B> (ParameterID { ParamID::clipOn, 1 }, "Output Limiter", true));
     // PAN per oscillator (the sub stays centred) and SPREAD = stereo width of the grain cloud
     {
         auto panFmt = A().withStringFromValueFunction ([] (float v, int) { const int n = roundToInt (v * 100.0f); return n == 0 ? String ("C") : (n < 0 ? "L " : "R ") + String (std::abs (n)); })
@@ -1017,9 +1017,9 @@ void GranulumProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
         c.quietSeconds = 1.0e9;
     }
 
-    outClipOS.initProcessing ((size_t) kChunk);
+    outLimiter.prepare (sampleRate);
+    setLatencySamples (outLimiter.latency());
     masterEq.prepare (sampleRate);
-    outClipOS.reset();
     outGain.reset (sampleRate, 0.05);
     outGain.setCurrentAndTargetValue (Decibels::decibelsToGain (apvts.getRawParameterValue (ParamID::output)->load()));
 
@@ -1895,24 +1895,11 @@ void GranulumProcessor::processChunk (int from, int len)
         const float gg = outGain.getNextValue();
         outL[i] *= gg; outR[i] *= gg;
     }
-    if (clipper)
     {
-        // 0.99.6 CLIP = a clean soft clipper (like FL's Fruity Soft Clipper): below -3 dB the sound is untouched,
-        // above it the peaks bend smoothly into a ceiling just under 0 dB. 4x oversampled, so no fizz from the bend.
-        float* ch[2] = { outL, outR };
-        dsp::AudioBlock<float> blk (ch, 2, (size_t) len);
-        auto up = outClipOS.processSamplesUp (blk);
-        constexpr float t = 0.708f, ceil = 0.985f, k = ceil - t;   // knee from -3 dB
-        for (size_t c = 0; c < 2; ++c)
-        {
-            float* x = up.getChannelPointer (c);
-            for (size_t i = 0; i < up.getNumSamples(); ++i)
-            {
-                const float a = std::abs (x[i]);
-                if (a > t) x[i] = std::copysign (t + k * std::tanh ((a - t) / k), x[i]);
-            }
-        }
-        outClipOS.processSamplesDown (blk);
+        // LIMIT (0.99.7-test): clean look-ahead limiter, ceiling -0.1 dB. Push OUTPUT for loudness: no clipping, no fizz.
+        const float gmin = outLimiter.process (outL, outR, len, clipper, 0.9886f);
+        const float grDb = -Decibels::gainToDecibels (gmin, -60.0f);
+        if (grDb > limitGr.load (std::memory_order_relaxed)) limitGr.store (grDb, std::memory_order_relaxed);
     }
     for (int i = 0; i < len; ++i)
     {
