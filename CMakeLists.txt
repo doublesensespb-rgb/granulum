@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.22)
 project(Granulum VERSION 0.9.9)
 # Name shown on the version plate in the plugin (may have an extra step like 0.99.1; the DAW version above stays 3 numbers)
-set(GRAINFORM_LABEL "0.99.7-test")
+set(GRAINFORM_LABEL "0.99.8")
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)

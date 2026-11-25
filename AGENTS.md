@@ -1,7 +1,7 @@
 # GRAIN FORM (repo: granulum) — guide for AI agents and developers
 
 Read this whole file before changing anything. It describes the product, the code, the build
-pipeline and how the owner wants to work. Current version: **0.99.6** (test build 0.99.7-test on branch `test`) (`project(... VERSION 0.9.9)` + display label `set(GRAINFORM_LABEL "0.99.6")` in CMakeLists.txt).
+pipeline and how the owner wants to work. Current version: **0.99.8** on branch `test` (main still 0.99.6; 0.99.7-test was the test label before) (`project(... VERSION 0.9.9)` + display label `set(GRAINFORM_LABEL "0.99.8")` in CMakeLists.txt).
 The UI shows the version on a small plate next to the title (taken from CMake `GRAINFORM_VERSION`, "0.9.8" -> "v0.98").
 
 ## 1. Product
