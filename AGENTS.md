@@ -181,10 +181,10 @@ button (chips without captions, 2-column ticks = randMask, RANDOM <TYPE> button;
 `TourOverlay` (9 steps, spotlight + card, `setupTour`) opened by `GuidePill`; `TitleBadge` draws the name (copper sheen every 8 s,
 click -> `AboutOverlay`: "Made by producers Thematic & Oddkut" + version); the header version plate is gone.
 Snapshot mode `final` renders header / panel / tour / About.
-Output: the 0.99.6 tanh soft clipper (knee at -3 dB, 23-35 % THD on bass when pushed) is replaced by `OutLimiter`
-(PluginProcessor.h): look-ahead 1.5 ms (min-window + moving average, so gain is down before the peak), 10 ms hold,
-150 ms release, ceiling 0.9886 (-0.1 dB) + hard safety clamp; the signal is always delayed (constant latency, reported via
-setLatencySamples). Param id stays `clipOn` (name "Output Limiter"), button reads LIMIT and glows with `limitGr`.
+Output CLIP (owner's request, Nov 25): a plain cut at 0 dB like FL's clipper - nothing below 0 dB changes (verified bit-identical
+on vs off when nothing is over 0). `outClipOS` (4x, linear-phase FIR half-band, latency reported via setLatencySamples) runs always;
+when CLIP is on, samples are clamped to +-1 at 4x and again at 1x (FIR ripple). No knee, no limiter (the look-ahead LIMIT of the
+previous TEST build was removed: the owner wants the cut, not gain riding). `limitGr` = dB cut over 0 for the button glow.
 Pills MIX WAVE / AIR: LFO chip (`pillChip`, `pillLfo`, `pillChipDrag`) = dot + depth, drag up/down / wheel = depth, right-click removes.
 CPU: `Params::maxOverlap` (14 tones, 6 noise, set in voiceParams) caps grains per voice; spawnGrain stretches `spacing`
 (by reference) to length/cap, and to 35-100 % of that in RELEASE by env; v.norm follows, so the level holds. Owner's heavy pad

@@ -417,7 +417,7 @@ private:
     GranulumProcessor& proc;
     float level[2] {}, hold[2] {};
     int holdAge[2] {};
-    float grShown = 0.0f;   // LIMIT glow (dB of gain reduction)
+    float grShown = 0.0f;   // CLIP glow (dB cut over 0 dB)
     bool clipShown = false;
     float lastSig = -1.0f;   // last drawn state (repaint only on change)
 };

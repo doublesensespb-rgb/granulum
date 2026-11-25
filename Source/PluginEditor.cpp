@@ -3033,8 +3033,8 @@ void HarmonicEditor::paint (Graphics& g)
 PeakMeter::PeakMeter (GranulumProcessor& p) : proc (p)
 {
     setTooltip ("Output level (click the bars to reset the peak).\n"
-                "LIMIT = clean limiter on the output: lit = the sound never goes over 0 dB, push OUTPUT as loud as you like.\n"
-                "It glows brighter while it is turning peaks down. Click LIMIT to switch it.");
+                "CLIP = everything over 0 dB is cut off at 0 dB, nothing else changes.\n"
+                "It glows brighter while it is cutting. Click CLIP to switch it.");
     // (no own timer: GranulumEditor::timerCallback calls frame() at 30 fps)
 }
 
@@ -3048,7 +3048,7 @@ void PeakMeter::timerCallback()
         else if (++holdAge[c] > 40) hold[c] *= 0.93f;
     }
     if (proc.clipped.load()) clipShown = true;
-    grShown = jmax (proc.limitGr.exchange (0.0f), grShown * 0.85f);   // LIMIT glow: gain reduction in dB, falls off smoothly
+    grShown = jmax (proc.limitGr.exchange (0.0f), grShown * 0.85f);   // CLIP glow: dB over 0 that was cut, falls off smoothly
     // repaint only when something visible changed (a silent meter used to repaint 30x a second)
     const float sig = level[0] + level[1] + hold[0] * 0.5f + hold[1] * 0.5f + (clipShown ? 10.0f : 0.0f) + grShown * 0.01f;
     if (std::abs (sig - lastSig) > 1.0e-4f || isMouseOver()) { lastSig = sig; repaint(); }
@@ -3059,7 +3059,7 @@ void PeakMeter::mouseMove (const MouseEvent&) { repaint(); }   // hover look on 
 void PeakMeter::mouseDown (const MouseEvent& e)
 {
     // CLIP box: switch the output clipper on/off; anywhere else: reset the peak hold and the clip light
-    if (e.position.x > (float) getWidth() - 40.0f)   // the whole LIMIT box (and a little around it) is the button
+    if (e.position.x > (float) getWidth() - 40.0f)   // the whole CLIP box (and a little around it) is the button
     {
         if (auto* p = proc.apvts.getParameter (ParamID::clipOn))
         {
@@ -3129,10 +3129,10 @@ void PeakMeter::paint (Graphics& g)
         g.drawText (db == 0.0f ? String ("0") : String ((int) db), Rectangle<float> (x - 12.0f, scale.getY(), 24.0f, scale.getHeight()), Justification::centred, false);
     }
 
-    // LIMIT (0.99.7-test): the whole box is the button. On = copper; it glows brighter while peaks are turned down.
+    // CLIP (0.99.7-test): the whole box is the button. On = copper; it glows brighter while it cuts over 0 dB.
     const bool clipOn = proc.apvts.getRawParameterValue (ParamID::clipOn)->load() > 0.5f;
     const bool hover  = isMouseOver() && getMouseXYRelative().x > getWidth() - 40;
-    const float work  = clipOn ? jlimit (0.0f, 1.0f, grShown / 6.0f) : 0.0f;   // 0 = idle, 1 = 6 dB or more off the peaks
+    const float work  = clipOn ? jlimit (0.0f, 1.0f, grShown / 6.0f) : 0.0f;   // 0 = idle, 1 = 6 dB or more over 0 dB
     if (work > 0.02f)
     {
         g.setColour (Palette::accent.withAlpha (0.35f * work));
@@ -3145,7 +3145,7 @@ void PeakMeter::paint (Graphics& g)
     g.drawRoundedRectangle (clipBox.reduced (0.5f), 4.0f, 1.0f);
     g.setColour (clipOn ? Colours::white : Palette::textDim.withAlpha (hover ? 0.9f : 0.6f));
     g.setFont (uiFont (8.0f, true, 0.06f));
-    g.drawText ("LIMIT", clipBox, Justification::centred, false);
+    g.drawText ("CLIP", clipBox, Justification::centred, false);
 }
 
 // ============================================================================

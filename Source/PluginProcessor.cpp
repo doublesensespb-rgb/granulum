@@ -855,7 +855,7 @@ AudioProcessorValueTreeState::ParameterLayout GranulumProcessor::createLayout()
     ps.push_back (std::make_unique<B> (ParameterID { ParamID::mono, 1 }, "Mono", true));   // 0.99.5: INIT (and a fresh plugin) starts in MONO
     ps.push_back (std::make_unique<P> (ParameterID { ParamID::porta, 1 }, "Portamento", skewed (0.0f, 3000.0f, 200.0f), 0.0f,
                                        A().withStringFromValueFunction ([] (float v, int) { return v < 0.5f ? String ("OFF") : v < 1000.0f ? fmt (v, 0, " ms") : fmt (v / 1000.0f, 2, " s"); })));
-    ps.push_back (std::make_unique<B> (ParameterID { ParamID::clipOn, 1 }, "Output Limiter", true));
+    ps.push_back (std::make_unique<B> (ParameterID { ParamID::clipOn, 1 }, "Output Clipper", true));
     // PAN per oscillator (the sub stays centred) and SPREAD = stereo width of the grain cloud
     {
         auto panFmt = A().withStringFromValueFunction ([] (float v, int) { const int n = roundToInt (v * 100.0f); return n == 0 ? String ("C") : (n < 0 ? "L " : "R ") + String (std::abs (n)); })
@@ -1017,8 +1017,9 @@ void GranulumProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
         c.quietSeconds = 1.0e9;
     }
 
-    outLimiter.prepare (sampleRate);
-    setLatencySamples (outLimiter.latency());
+    outClipOS.initProcessing ((size_t) kChunk);
+    outClipOS.reset();
+    setLatencySamples ((int) std::round (outClipOS.getLatencyInSamples()));
     masterEq.prepare (sampleRate);
     outGain.reset (sampleRate, 0.05);
     outGain.setCurrentAndTargetValue (Decibels::decibelsToGain (apvts.getRawParameterValue (ParamID::output)->load()));
@@ -1897,9 +1898,26 @@ void GranulumProcessor::processChunk (int from, int len)
         outL[i] *= gg; outR[i] *= gg;
     }
     {
-        // LIMIT (0.99.7-test): clean look-ahead limiter, ceiling -0.1 dB. Push OUTPUT for loudness: no clipping, no fizz.
-        const float gmin = outLimiter.process (outL, outR, len, clipper, 0.9886f);
-        const float grDb = -Decibels::gainToDecibels (gmin, -60.0f);
+        // CLIP (0.99.7-test): whatever goes over 0 dB is cut off at 0 dB, nothing else is done to the sound.
+        // Always runs through the 4x oversampler (constant latency); cut only when CLIP is on.
+        float* chans[2] = { outL, outR };
+        juce::dsp::AudioBlock<float> blk (chans, 2, (size_t) len);
+        auto up = outClipOS.processSamplesUp (blk);
+        float over = 0.0f;
+        if (clipper)
+            for (size_t ch = 0; ch < up.getNumChannels(); ++ch)
+            {
+                auto* d = up.getChannelPointer (ch);
+                for (size_t i = 0; i < up.getNumSamples(); ++i)
+                {
+                    const float a = std::abs (d[i]);
+                    if (a > 1.0f) { over = jmax (over, a); d[i] = d[i] > 0.0f ? 1.0f : -1.0f; }
+                }
+            }
+        outClipOS.processSamplesDown (blk);
+        if (clipper)
+            for (int i = 0; i < len; ++i) { outL[i] = jlimit (-1.0f, 1.0f, outL[i]); outR[i] = jlimit (-1.0f, 1.0f, outR[i]); }   // filter ripple: still never over 0 dB
+        const float grDb = over > 1.0f ? Decibels::gainToDecibels (over) : 0.0f;
         if (grDb > limitGr.load (std::memory_order_relaxed)) limitGr.store (grDb, std::memory_order_relaxed);
     }
     for (int i = 0; i < len; ++i)
