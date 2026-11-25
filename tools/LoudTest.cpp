@@ -12,6 +12,8 @@ int main (int argc, char** argv)
     auto setP = [&p] (const char* id, float v) { if (auto* x = p.apvts.getParameter (id)) x->setValueNotifyingHost (x->convertTo0to1 (v)); };
     setP (ParamID::output, outDb);
     if (mode == 1) setP (ParamID::clipOn, 0.0f);
+    if (mode == 2) { setP (ParamID::compOn, 1.0f); setP (ParamID::compThresh, -24.0f); setP (ParamID::compRatio, 4.0f); }
+    if (mode == 3) { setP (ParamID::compOn, 1.0f); setP (ParamID::compThresh, -24.0f); setP (ParamID::compRatio, 4.0f); setP (ParamID::compGain, 12.0f); }
     FILE* wf = argc > 4 ? fopen (argv[4], "wb") : nullptr;
     if (auto* mm = MessageManager::getInstanceWithoutCreating()) mm->runDispatchLoopUntil (200);
     const int total = (int) (sr * 2.0); AudioBuffer<float> buf (2, block); MidiBuffer midi;

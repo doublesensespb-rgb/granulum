@@ -174,6 +174,19 @@ int main (int argc, char** argv)
         save (*base, outDir, "eq.png");
         return 0;
     }
+    if (argc > 2 && String (argv[2]) == "comp")
+    {
+        setP (ParamID::osc1On, 1.0f); setP (ParamID::compOn, 1.0f); setP (ParamID::compGain, 6.0f);
+        p.keyboardState.noteOn (1, 52, 0.9f);
+        ed->showCompForTest();
+        run (p, ed, 40);
+        save (*base, outDir, "comp.png");
+        setP (ParamID::compOn, 0.0f); setP (ParamID::eqOn, 0.0f); run (p, ed, 10);
+        save (*base, outDir, "comp-off.png");
+        ed->showEqForTest (-1); setP (ParamID::eqOn, 1.0f); run (p, ed, 10);
+        save (*base, outDir, "eq-lamp.png");
+        return 0;
+    }
     if (argc > 2 && String (argv[2]) == "pill")
     {
         setP (ParamID::osc1On, 1.0f); setP (ParamID::osc1WaveMix, 0.3f); setP (ParamID::osc1Air, 0.5f);

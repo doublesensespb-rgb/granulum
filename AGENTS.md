@@ -1,7 +1,7 @@
 # GRAIN FORM (repo: granulum) — guide for AI agents and developers
 
 Read this whole file before changing anything. It describes the product, the code, the build
-pipeline and how the owner wants to work. Current version: **0.99.8** on branch `test` (main still 0.99.6; 0.99.7-test was the test label before) (`project(... VERSION 0.9.9)` + display label `set(GRAINFORM_LABEL "0.99.8")` in CMakeLists.txt).
+pipeline and how the owner wants to work. Current version: **0.99.9** on branch `test` (main still 0.99.6; 0.99.7-test / 0.99.8 were the labels before) (`project(... VERSION 0.9.9)` + display label `set(GRAINFORM_LABEL "0.99.9")` in CMakeLists.txt).
 The UI shows the version on a small plate next to the title (taken from CMake `GRAINFORM_VERSION`, "0.9.8" -> "v0.98").
 
 ## 1. Product
@@ -185,6 +185,14 @@ Output CLIP (owner's request, Nov 25): a plain cut at 0 dB like FL's clipper - n
 on vs off when nothing is over 0). `outClipOS` (4x, linear-phase FIR half-band, latency reported via setLatencySamples) runs always;
 when CLIP is on, samples are clamped to +-1 at 4x and again at 1x (FIR ripple). No knee, no limiter (the look-ahead LIMIT of the
 previous TEST build was removed: the owner wants the cut, not gain riding). `limitGr` = dB cut over 0 for the button glow.
+0.99.9: `Compressor masterComp` (PluginProcessor.h) after masterEq, before OUTPUT/CLIP: stereo-linked peak, 6 dB soft knee,
+attack/release on the gain in dB, GAIN = manual make-up, MIX = parallel; 20 ms on/off gate. Params eqOn (default on), compOn (off),
+compThresh/Ratio/Attack/Release/Gain/Mix (mod targets mtCompThresh..mtCompMix appended). eqOn off = all bands faded via band.on.
+UI: `ViewSwitch` now 3 segments with lamps (lamp click toggles the param, name click shows the screen), `CompView` (curve, live dot,
+GR/IN/OUT, six Small Knobs). setStateInformation now adds missing PARAM children at their defaults (old presets no longer inherit
+the previous sound's newer settings). Save window: CANCEL | SAVE | NEW VERSION (`nextVersionName`: _02, _03 ..., >= 2 digits).
+Sampler x: the editor also listens to itself (addMouseListener), so mouseDown arrived twice; `lastBoxClick` dedupes it.
+Snapshot mode `comp`. rdemo Keys.cpp measures level per note (filters are already key-tracked 100 % from C4, lastNote is global).
 Pills MIX WAVE / AIR: LFO chip (`pillChip`, `pillLfo`, `pillChipDrag`) = dot + depth, drag up/down / wheel = depth, right-click removes.
 CPU: `Params::maxOverlap` (14 tones, 6 noise, set in voiceParams) caps grains per voice; spawnGrain stretches `spacing`
 (by reference) to length/cap, and to 35-100 % of that in RELEASE by env; v.norm follows, so the level holds. Owner's heavy pad

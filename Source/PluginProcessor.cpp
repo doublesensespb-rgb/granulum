@@ -43,7 +43,8 @@ namespace
         ParamID::osc1Air, ParamID::gshape,
         ParamID::subTune, ParamID::bpWidth, ParamID::bpWidth2,
         "eq1Freq", "eq1Gain", "eq1Q", "eq2Freq", "eq2Gain", "eq2Q", "eq3Freq", "eq3Gain", "eq3Q",
-        "eq4Freq", "eq4Gain", "eq4Q", "eq5Freq", "eq5Gain", "eq5Q"
+        "eq4Freq", "eq4Gain", "eq4Q", "eq5Freq", "eq5Gain", "eq5Q",
+        ParamID::compThresh, ParamID::compRatio, ParamID::compAttack, ParamID::compRelease, ParamID::compGain, ParamID::compMix
     };
 
     String hzWithNote (float hz)
@@ -779,6 +780,22 @@ AudioProcessorValueTreeState::ParameterLayout GranulumProcessor::createLayout()
         }
     }
 
+    // 0.99.9: EQ on/off (on: old presets keep their EQ) + COMP (off: old presets sound the same)
+    ps.push_back (std::make_unique<B> (ParameterID { ParamID::eqOn, 1 }, "EQ On", true));
+    ps.push_back (std::make_unique<B> (ParameterID { ParamID::compOn, 1 }, "Comp On", false));
+    {
+        auto dbF  = A().withStringFromValueFunction ([] (float v, int) { return String (v, 1) + " dB"; });
+        auto dbFs = A().withStringFromValueFunction ([] (float v, int) { return (v > 0.05f ? "+" : "") + String (v, 1) + " dB"; });
+        auto msF  = A().withStringFromValueFunction ([] (float v, int) { return v < 10.0f ? fmt (v, 1, " ms") : fmt (v, 0, " ms"); });
+        auto ratF = A().withStringFromValueFunction ([] (float v, int) { return v >= 19.95f ? String ("20 : 1") : String (v, 1) + " : 1"; });
+        ps.push_back (std::make_unique<P> (ParameterID { ParamID::compThresh, 1 },  "Comp Threshold", NormalisableRange<float> (-48.0f, 0.0f, 0.1f), -18.0f, dbF));
+        ps.push_back (std::make_unique<P> (ParameterID { ParamID::compRatio, 1 },   "Comp Ratio", skewed (1.0f, 20.0f, 4.0f), 4.0f, ratF));
+        ps.push_back (std::make_unique<P> (ParameterID { ParamID::compAttack, 1 },  "Comp Attack", skewed (0.1f, 100.0f, 10.0f), 10.0f, msF));
+        ps.push_back (std::make_unique<P> (ParameterID { ParamID::compRelease, 1 }, "Comp Release", skewed (10.0f, 1000.0f, 120.0f), 120.0f, msF));
+        ps.push_back (std::make_unique<P> (ParameterID { ParamID::compGain, 1 },    "Comp Gain", NormalisableRange<float> (-12.0f, 24.0f, 0.1f), 0.0f, dbFs));
+        ps.push_back (std::make_unique<P> (ParameterID { ParamID::compMix, 1 },     "Comp Mix", NormalisableRange<float> (0.0f, 1.0f), 1.0f, pct));
+    }
+
     // FILTER (key-tracked from C3 under the hood)
     ps.push_back (std::make_unique<B> (ParameterID { ParamID::filterOn, 1 }, "Filter On", false));
     ps.push_back (std::make_unique<P> (ParameterID { ParamID::cutoff, 1 }, "Cutoff", skewed (20.0f, 20000.0f, 1000.0f), 2000.0f,
@@ -962,6 +979,8 @@ GranulumProcessor::GranulumProcessor()
     }
 
     pClipOn    = apvts.getRawParameterValue (ParamID::clipOn);
+    pEqOn      = apvts.getRawParameterValue (ParamID::eqOn);
+    pCompOn    = apvts.getRawParameterValue (ParamID::compOn);
     pSubOn     = apvts.getRawParameterValue (ParamID::subOn);
     pSubOct    = apvts.getRawParameterValue (ParamID::subOct);
     pSubH      = { apvts.getRawParameterValue (ParamID::subH1), apvts.getRawParameterValue (ParamID::subH2), apvts.getRawParameterValue (ParamID::subH3),
@@ -1021,6 +1040,7 @@ void GranulumProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
     outClipOS.reset();
     setLatencySamples ((int) std::round (outClipOS.getLatencyInSamples()));
     masterEq.prepare (sampleRate);
+    masterComp.prepare (sampleRate);
     outGain.reset (sampleRate, 0.05);
     outGain.setCurrentAndTargetValue (Decibels::decibelsToGain (apvts.getRawParameterValue (ParamID::output)->load()));
 
@@ -1452,6 +1472,7 @@ void GranulumProcessor::processBlock (AudioBuffer<float>& buffer, MidiBuffer& mi
         normSmInit = false;   // a new preset starts on its own values, without gliding from the old ones
         distGate = pDistOn->load() > 0.5f ? 1.0f : 0.0f;
         masterEq.reset();
+        masterComp.reset();
     }
 
     if (work.getNumSamples() < numSamples)
@@ -1886,7 +1907,24 @@ void GranulumProcessor::processChunk (int from, int len)
     }
 
     // ---- TEST: master EQ ----
-    masterEq.process (outL, outR, len, eqBands (v));
+    {
+        // 0.99.9: EQ lamp off = every band fades out (the bands crossfade on their own, no click)
+        auto bands = eqBands (v);
+        if (pEqOn->load() < 0.5f) for (auto& b : bands) b.on = false;
+        masterEq.process (outL, outR, len, bands);
+    }
+
+    // ---- 0.99.9: COMP (after the EQ, before OUTPUT / CLIP) ----
+    {
+        const bool compOn = pCompOn->load() > 0.5f;
+        if (compOn || masterComp.active())
+        {
+            masterComp.process (outL, outR, len, compOn, v[mtCompThresh], v[mtCompRatio], v[mtCompAttack], v[mtCompRelease], v[mtCompGain], v[mtCompMix]);
+            if (masterComp.grBlock > compGrUi.load (std::memory_order_relaxed)) compGrUi.store (masterComp.grBlock, std::memory_order_relaxed);
+            if (masterComp.inPk > compInUi.load (std::memory_order_relaxed)) compInUi.store (masterComp.inPk, std::memory_order_relaxed);
+            if (masterComp.outPk > compOutUi.load (std::memory_order_relaxed)) compOutUi.store (masterComp.outPk, std::memory_order_relaxed);
+        }
+    }
 
     // ---- output ----
     outGain.setTargetValue (Decibels::decibelsToGain (v[mtOutput]));
@@ -2890,6 +2928,17 @@ void GranulumProcessor::setStateInformation (const void* data, int sizeInBytes)
         for (int i = 0; i < 3; ++i) uiFold[i] = fo.length() > i && fo[i] == '1';
     }
     const uint32_t gm = (uint32_t) (int) state.getProperty ("grainMask", 0xffff);
+    // 0.99.9: a parameter the preset does not know yet (COMP, EQ lamp, ...) starts at its default
+    // (before, it kept whatever the previous sound had, e.g. COMP stayed on when loading an old preset)
+    for (auto* ap : getParameters())
+        if (auto* rp = dynamic_cast<RangedAudioParameter*> (ap))
+            if (! state.getChildWithProperty ("id", rp->getParameterID()).isValid())
+            {
+                ValueTree child ("PARAM");
+                child.setProperty ("id", rp->getParameterID(), nullptr);
+                child.setProperty ("value", rp->convertFrom0to1 (rp->getDefaultValue()), nullptr);
+                state.appendChild (child, nullptr);
+            }
     apvts.replaceState (state);
     presetName = pn;
     presetSub = pf;

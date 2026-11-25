@@ -601,6 +601,9 @@ private:
     void askDeletePreset (int i);
     int presetRenaming = -1;                     // TEST: index of the preset being renamed
     juce::TextButton newFolder { "+ FOLDER" }, saveBtn { "SAVE" }, cancelBtn { "CANCEL" };
+    juce::TextButton newVerBtn { "NEW VERSION" };   // 0.99.9: like FL - saves NAME_2, NAME_3 ... never replaces
+    juce::String nextVersionName() const;
+    void doSaveNewVersion();
     juce::TextButton initBtn { "INIT" }, openDirBtn { "FOLDER" }, saveAsBtn { "SAVE AS..." };   // browse mode
     juce::TextButton deleteBtn { "DELETE" }, renameBtn { "RENAME" };                                // TEST, browse mode
     void loadRow (int i);
@@ -935,13 +938,40 @@ private:
 };
 
 // GRAINS | EQ switch in the screen title (an editor setting, not a sound parameter)
-class ViewSwitch final : public juce::Component
+class ViewSwitch final : public juce::Component, private juce::Timer
 {
 public:
-    std::function<void (bool)> onChange;
-    bool eq = false;
+    // 0.99.9: GRAINS | (lamp) EQ | (lamp) COMP. Click the lamp = effect on/off, click the name = show that screen
+    explicit ViewSwitch (GranulumProcessor& p) : proc (p) { startTimerHz (10); }
+    std::function<void (int)> onChange;
+    int view = 0;                       // 0 grains, 1 eq, 2 comp
+    bool eq = false;                    // kept for older code: view == 1
+    void setView (int v) { if (v != view) { view = v; eq = v == 1; repaint(); if (onChange) onChange (view); } }
     void paint (juce::Graphics&) override;
-    void mouseDown (const juce::MouseEvent& e) override { const bool v = e.position.x > (float) getWidth() * 0.5f; if (v != eq) { eq = v; repaint(); if (onChange) onChange (eq); } }
+    void mouseDown (const juce::MouseEvent& e) override;
+private:
+    void timerCallback() override;
+    juce::Rectangle<float> seg (int i) const;
+    juce::Rectangle<float> lampOf (int i) const;
+    GranulumProcessor& proc;
+    bool lastEq = true, lastComp = false;
+};
+
+// 0.99.9 COMP screen: transfer curve with a live dot, GR / IN / OUT meters, six knobs
+class CompView final : public juce::Component, private juce::Timer
+{
+public:
+    explicit CompView (GranulumProcessor&);
+    void paint (juce::Graphics&) override;
+    void resized() override;
+    void visibilityChanged() override { if (isVisible()) startTimerHz (30); else stopTimer(); }
+private:
+    void timerCallback() override;
+    juce::Rectangle<float> plot() const;
+    juce::Rectangle<float> meters() const;
+    GranulumProcessor& proc;
+    std::vector<std::unique_ptr<Knob>> knobs;
+    float gr = 0.0f, inDb = -60.0f, outDb = -60.0f;
 };
 
 class GranulumEditor final : public juce::AudioProcessorEditor,
@@ -954,7 +984,8 @@ public:
     ~GranulumEditor() override;
     // snapshots / tests: open the EQ screen with one band selected (-1 = none)
     void showOverlayForTest (int which, int step = 0) { if (which == 1) { proc.setRandType (1); if (randomPanel.onChange) randomPanel.onChange(); showRandomMenu(); } else if (which == 2) { tour.start(); for (int i = 0; i < step; ++i) tour.nextForTest(); } else if (which == 3) titleBadge.onClick(); }
-    void showEqForTest (int band) { viewSwitch.eq = true; viewSwitch.repaint(); if (viewSwitch.onChange) viewSwitch.onChange (true); eqView.selectForTest (band); }
+    void showEqForTest (int band) { viewSwitch.setView (1); eqView.selectForTest (band); }
+    void showCompForTest() { viewSwitch.setView (2); }
 
     void paint (juce::Graphics&) override;
     void paintOverChildren (juce::Graphics&) override;
@@ -998,7 +1029,9 @@ private:
     TourOverlay tour;
     RandomPanel randomPanel { proc };
     void setupTour();
-    ViewSwitch viewSwitch;
+    ViewSwitch viewSwitch { proc };
+    CompView compView { proc };
+    juce::Time lastBoxClick;   // 0.99.9: one click on the sample box / x is handled once
     juce::TextButton eqFlat { "FLAT" };
     bool eqMode = false;
     HarmonicEditor harmonics;

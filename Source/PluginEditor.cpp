@@ -4465,11 +4465,13 @@ PresetSaveWindow::PresetSaveWindow (GranulumProcessor& p, bool browseMode) : bro
     }
     folderView.setViewedComponent (&folderRows, false);
     presetView.setViewedComponent (&presetRows, false);
-    for (auto* c : { (Component*) &nameEdit, (Component*) &newFolder, (Component*) &saveBtn, (Component*) &cancelBtn }) addAndMakeVisible (*c);
+    for (auto* c : { (Component*) &nameEdit, (Component*) &newFolder, (Component*) &saveBtn, (Component*) &cancelBtn, (Component*) &newVerBtn }) addAndMakeVisible (*c);
+    newVerBtn.onClick = [this] { doSaveNewVersion(); };
     if (browse)
     {
         nameEdit.setVisible (false);
         saveBtn.setVisible (false);
+        newVerBtn.setVisible (false);
         cancelBtn.setButtonText ("CLOSE");
         for (auto* b : { &initBtn, &openDirBtn, &saveAsBtn, &deleteBtn, &renameBtn }) addAndMakeVisible (*b);
         deleteBtn.onClick = [this] { if (presetRows.selected >= 0) askDeletePreset (presetRows.selected); };
@@ -4606,10 +4608,12 @@ void PresetSaveWindow::updateSaveLabel()
 {
     const auto name = File::createLegalFileName (nameEdit.getText().trim());
     const bool exists = name.isNotEmpty() && folderFile (folderRows.selected).getChildFile (name + ".gpreset").existsAsFile();
-    saveBtn.setButtonText (exists ? "REPLACE" : "SAVE");
-    saveBtn.setColour (TextButton::textColourOffId, exists ? Palette::accent.brighter (0.3f) : Palette::text);
+    saveBtn.setButtonText ("SAVE");   // 0.99.9: always SAVE (the tooltip says when it replaces)
+    saveBtn.setColour (TextButton::textColourOffId, Palette::text);
     saveBtn.setTooltip (exists ? "A preset with this name is already in this folder: it will be replaced" : "Save into the selected folder");
     saveBtn.setEnabled (name.isNotEmpty());
+    newVerBtn.setEnabled (name.isNotEmpty());
+    newVerBtn.setTooltip (name.isNotEmpty() ? "Save a new copy as \"" + nextVersionName() + "\" (nothing is replaced)" : String());
     if (! browse) presetRows.selected = presetRows.items.indexOf (name);
     presetRows.repaint();
     repaint();
@@ -4716,6 +4720,37 @@ void PresetSaveWindow::doSave()
     if (onClose) onClose();
 }
 
+// NEW VERSION: BASS -> BASS_02, BASS_02 -> BASS_03, BASS_9 -> BASS_10, BASS_099 -> BASS_100; always at least 2 digits; skips names that exist
+String PresetSaveWindow::nextVersionName() const
+{
+    const auto name = File::createLegalFileName (nameEdit.getText().trim());
+    if (name.isEmpty()) return {};
+    String base = name;
+    int n = 2, digits = 2;
+    const int us = name.lastIndexOfChar ('_');
+    if (us > 0 && us < name.length() - 1 && name.substring (us + 1).containsOnly ("0123456789"))
+    {
+        base = name.substring (0, us);
+        digits = jmax (2, name.length() - us - 1);
+        n = name.substring (us + 1).getIntValue() + 1;
+    }
+    const auto dir = folderFile (folderRows.selected);
+    for (;; ++n)
+    {
+        const auto cand = base + "_" + String (n).paddedLeft ('0', digits);
+        if (! dir.getChildFile (cand + ".gpreset").existsAsFile()) return cand;
+    }
+}
+
+void PresetSaveWindow::doSaveNewVersion()
+{
+    const auto name = nextVersionName();
+    if (name.isEmpty()) return;
+    proc.savePreset (name, folderFile (folderRows.selected));
+    if (onSaved) onSaved();
+    if (onClose) onClose();
+}
+
 Rectangle<int> PresetSaveWindow::panel() const
 {
     return getLocalBounds().withSizeKeepingCentre (jmin (getWidth() - 40, 560), jmin (getHeight() - 40, 400));
@@ -4757,7 +4792,9 @@ void PresetSaveWindow::resized()
         renameBtn.setBounds (bottom.removeFromLeft (76));
         return;
     }
-    // bottom: name, CANCEL, SAVE
+    // bottom: name, CANCEL, SAVE, NEW VERSION
+    newVerBtn.setBounds (bottom.removeFromRight (112));
+    bottom.removeFromRight (8);
     saveBtn.setBounds (bottom.removeFromRight (96));
     bottom.removeFromRight (8);
     cancelBtn.setBounds (bottom.removeFromRight (86));
@@ -5078,14 +5115,16 @@ GranulumEditor::GranulumEditor (GranulumProcessor& p)
     addChildComponent (eqFlat);
     eqFlat.setTooltip ("Reset the whole EQ (every band back to 0 dB)");
     eqFlat.onClick = [this] { eqView.flat(); };
-    viewSwitch.onChange = [this] (bool eq)
+    addChildComponent (compView);
+    viewSwitch.onChange = [this] (int view)
     {
-        // TEST: the screen shows the grains or the master EQ
-        eqMode = eq;
-        field.setVisible (! eq);
-        loopBar.setVisible (! eq);
-        eqView.setVisible (eq);
-        eqFlat.setVisible (eq);
+        // the screen shows the grains, the master EQ or the compressor (0.99.9)
+        eqMode = view == 1;
+        field.setVisible (view == 0);
+        loopBar.setVisible (view == 0);
+        eqView.setVisible (view == 1);
+        eqFlat.setVisible (view == 1);
+        compView.setVisible (view == 2);
         repaint();
     };
     addAndMakeVisible (harmonics);
@@ -6070,8 +6109,9 @@ void GranulumEditor::resized()
     inside.removeFromRight (S (12));
     field.setBounds (inside);
     eqView.setBounds (inside);
-    loopBar.setBounds (screenFrame.getX() + S (150), screenFrame.getY() + S (9), inside.getRight() - screenFrame.getX() - S (150), S (22));
-    viewSwitch.setBounds (screenFrame.getX() + S (14), screenFrame.getY() + S (9), S (124), S (22));
+    compView.setBounds (inside);
+    loopBar.setBounds (screenFrame.getX() + S (196), screenFrame.getY() + S (9), inside.getRight() - screenFrame.getX() - S (196), S (22));
+    viewSwitch.setBounds (screenFrame.getX() + S (14), screenFrame.getY() + S (9), S (172), S (22));
     eqFlat.setBounds (inside.getRight() - S (60), screenFrame.getY() + S (7), S (60), S (25));
 
     {
@@ -6396,14 +6436,18 @@ void GranulumEditor::mouseDown (const MouseEvent& e)
     proc.undoManager.beginNewTransaction();          // each click (on any control) is one undo step
     if (e.eventComponent != this) return;            // clicks on children only start the undo step
     if (sampleMenu.isVisible()) { toggleSampleMenu (false); return; }
+    // 0.99.9: the editor also listens to itself (addMouseListener for the undo steps), so the same click can
+    // arrive twice: after x had removed the sample, the second copy saw an empty box and opened the file window
+    if (e.eventTime == lastBoxClick) return;
     if (proc.hasSample() && clearRect().expanded (2).contains (e.getPosition()))
     {
+        lastBoxClick = e.eventTime;
         proc.clearSample();               // x: remove the sample from OSC 2
         clearHover = false;
         repaint (dropZone.expanded (2));
         return;
     }
-    if (dropZone.contains (e.getPosition())) launchChooser();   // click the sample box = choose your own file
+    if (dropZone.contains (e.getPosition())) { lastBoxClick = e.eventTime; launchChooser(); }   // click the sample box = choose your own file
 }
 
 bool GranulumEditor::keyPressed (const KeyPress& k)
@@ -6443,20 +6487,257 @@ Colour EqView::bandColour (int b)
     return c[jlimit (0, ParamEq::kBands - 1, b)];
 }
 
+// 0.99.9: GRAINS | (lamp) EQ | (lamp) COMP
+Rectangle<float> ViewSwitch::seg (int i) const
+{
+    auto r = getLocalBounds().toFloat();
+    static const float w[3] = { 0.32f, 0.30f, 0.38f };
+    float x = r.getX();
+    for (int k = 0; k < i; ++k) x += r.getWidth() * w[k];
+    return { x, r.getY(), r.getWidth() * w[i], r.getHeight() };
+}
+
+Rectangle<float> ViewSwitch::lampOf (int i) const
+{
+    if (i == 0) return {};
+    // lamp + name are centred together in the segment (the bold font is measured, so nothing moves when selected)
+    const auto s = seg (i);
+    const float tw = (float) GlyphArrangement::getStringWidthInt (uiFont (10.0f, true, 0.12f), i == 1 ? "EQ" : "COMP");
+    const float group = 7.0f + 6.0f + tw;
+    return Rectangle<float> (7.0f, 7.0f).withCentre ({ s.getCentreX() - group * 0.5f + 3.5f, s.getCentreY() });
+}
+
+void ViewSwitch::timerCallback()
+{
+    const bool e = proc.apvts.getRawParameterValue (ParamID::eqOn)->load() > 0.5f;
+    const bool c = proc.apvts.getRawParameterValue (ParamID::compOn)->load() > 0.5f;
+    if (e != lastEq || c != lastComp) { lastEq = e; lastComp = c; repaint(); }
+}
+
+void ViewSwitch::mouseDown (const MouseEvent& e)
+{
+    for (int i = 0; i < 3; ++i)
+    {
+        if (! seg (i).contains (e.position)) continue;
+        // the lamp (and a little around it) switches the effect; the rest of the segment shows that screen
+        if (i > 0 && e.position.x < lampOf (i).getRight() + 4.0f)
+        {
+            if (auto* p = proc.apvts.getParameter (i == 1 ? ParamID::eqOn : ParamID::compOn))
+            {
+                p->beginChangeGesture();
+                p->setValueNotifyingHost (p->getValue() > 0.5f ? 0.0f : 1.0f);
+                p->endChangeGesture();
+            }
+            timerCallback();
+            return;
+        }
+        setView (i);
+        return;
+    }
+}
+
 void ViewSwitch::paint (Graphics& g)
 {
     auto r = getLocalBounds().toFloat();
     g.setColour (Palette::field);
     g.fillRoundedRectangle (r, 7.0f);
-    const char* names[2] = { "GRAINS", "EQ" };
-    for (int i = 0; i < 2; ++i)
+    const char* names[3] = { "GRAINS", "EQ", "COMP" };
+    const bool lit[3] = { false, proc.apvts.getRawParameterValue (ParamID::eqOn)->load() > 0.5f,
+                          proc.apvts.getRawParameterValue (ParamID::compOn)->load() > 0.5f };
+    for (int i = 0; i < 3; ++i)
     {
-        auto seg = r.withWidth (r.getWidth() * 0.5f).withX (r.getX() + r.getWidth() * 0.5f * (float) i);
-        const bool on = (i == 1) == eq;
-        if (on) { g.setColour (Palette::accent); g.fillRoundedRectangle (seg.reduced (2.0f), 5.5f); }
+        auto s = seg (i);
+        const bool on = i == view;
+        if (on) { g.setColour (Palette::accent); g.fillRoundedRectangle (s.reduced (2.0f), 5.5f); }
+        auto text = s;
+        if (i > 0)
+        {
+            const auto led = lampOf (i);
+            if (lit[i])
+            {
+                g.setColour ((on ? Colours::white : Palette::accent).withAlpha (0.28f));
+                g.fillEllipse (led.expanded (3.0f));
+                g.setColour (on ? Colour (0xffffe3cc) : Palette::accent.brighter (0.2f));
+                g.fillEllipse (led);
+            }
+            else
+            {
+                g.setColour (on ? Colour (0xfff4cfb3) : Palette::textDim.withAlpha (0.6f));
+                g.drawEllipse (led.reduced (0.3f), 1.1f);
+            }
+            text = text.withLeft (led.getRight() + 6.0f);
+        }
         g.setColour (on ? Palette::onAccent() : Palette::textDim);
         g.setFont (uiFont (10.0f, on, 0.12f));
-        g.drawText (names[i], seg, Justification::centred, false);
+        g.drawText (names[i], text, i == 0 ? Justification::centred : Justification::centredLeft, false);
+    }
+}
+
+// ===========================================================================
+// 0.99.9 COMP screen
+
+CompView::CompView (GranulumProcessor& p) : proc (p)
+{
+    const char* ids[6] = { ParamID::compThresh, ParamID::compRatio, ParamID::compAttack, ParamID::compRelease, ParamID::compGain, ParamID::compMix };
+    const char* titles[6] = { "Threshold", "Ratio", "Attack", "Release", "Gain", "Mix" };
+    for (int k = 0; k < 6; ++k)
+    {
+        knobs.push_back (std::make_unique<Knob> (proc, ids[k], titles[k], Knob::Size::Small));
+        addAndMakeVisible (*knobs.back());
+    }
+    knobs[0]->slider.setTooltip ("THRESHOLD: above this level the sound is turned down");
+    knobs[1]->slider.setTooltip ("RATIO: how hard it turns down (4 : 1 = 4 dB over the threshold come out as 1 dB)");
+    knobs[2]->slider.setTooltip ("ATTACK: how fast it grabs (short = tames the clicks and hits)");
+    knobs[3]->slider.setTooltip ("RELEASE: how fast it lets go");
+    knobs[4]->slider.setTooltip ("GAIN: gives back the level the compressor took (about as much as the GR number shows)");
+    knobs[5]->slider.setTooltip ("MIX: 100 % = only the compressed sound, less = parallel compression");
+    setRepaintsOnMouseActivity (false);
+}
+
+void CompView::resized()
+{
+    auto r = getLocalBounds().removeFromBottom (64).reduced (8, 2);
+    const int w = r.getWidth() / (int) knobs.size();
+    for (auto& k : knobs) k->setBounds (r.removeFromLeft (w));
+}
+
+Rectangle<float> CompView::plot() const
+{
+    auto r = getLocalBounds().toFloat().reduced (10.0f, 8.0f);
+    r.removeFromBottom (66.0f);       // knobs
+    r.removeFromBottom (12.0f);       // dB labels under the plot
+    r.removeFromRight (116.0f);       // meters
+    r.removeFromLeft (22.0f);         // dB labels left
+    return r;
+}
+
+Rectangle<float> CompView::meters() const
+{
+    auto r = getLocalBounds().toFloat().reduced (10.0f, 8.0f);
+    r.removeFromBottom (66.0f);
+    return r.removeFromRight (104.0f);
+}
+
+void CompView::timerCallback()
+{
+    const bool on = proc.apvts.getRawParameterValue (ParamID::compOn)->load() > 0.5f;
+    const float g  = proc.compGrUi.exchange (0.0f);
+    const float ip = Decibels::gainToDecibels (proc.compInUi.exchange (0.0f), -60.0f);
+    const float op = Decibels::gainToDecibels (proc.compOutUi.exchange (0.0f), -60.0f);
+    gr    = on ? jmax (g, gr * 0.8f) : 0.0f;
+    inDb  = jmax (ip, inDb - 1.5f);
+    outDb = jmax (op, outDb - 1.5f);
+    repaint();
+}
+
+void CompView::paint (Graphics& g)
+{
+    auto all = getLocalBounds().toFloat();
+    g.setColour (Palette::screen);
+    g.fillRoundedRectangle (all, 10.0f);
+    const bool on = proc.apvts.getRawParameterValue (ParamID::compOn)->load() > 0.5f;
+    const float th    = proc.apvts.getRawParameterValue (ParamID::compThresh)->load();
+    const float ratio = proc.apvts.getRawParameterValue (ParamID::compRatio)->load();
+    const auto p = plot();
+    auto xOf = [&] (float db) { return p.getX() + (db + 48.0f) / 48.0f * p.getWidth(); };
+    auto yOf = [&] (float db) { return p.getBottom() - (db + 48.0f) / 48.0f * p.getHeight(); };
+    auto curve = [&] (float x)
+    {
+        const float knee = 6.0f, over = x - th, slope = 1.0f - 1.0f / jmax (1.0f, ratio);
+        float red = 0.0f;
+        if (over >= knee * 0.5f) red = slope * over;
+        else if (over > -knee * 0.5f) red = slope * (over + knee * 0.5f) * (over + knee * 0.5f) / (2.0f * knee);
+        return x - red;
+    };
+    // grid + labels
+    g.setColour (Colour (0xff141516));
+    g.fillRect (p);
+    g.setFont (uiFont (8.0f, false, 0.04f));
+    for (int d = -48; d <= 0; d += 12)
+    {
+        g.setColour (Colours::white.withAlpha (0.05f));
+        g.drawVerticalLine ((int) xOf ((float) d), p.getY(), p.getBottom());
+        g.drawHorizontalLine ((int) yOf ((float) d), p.getX(), p.getRight());
+        g.setColour (Palette::textDim);
+        g.drawText (String (d), Rectangle<float> (30.0f, 10.0f).withCentre ({ xOf ((float) d), p.getBottom() + 7.0f }), Justification::centred, false);
+        g.drawText (String (d), Rectangle<float> (p.getX() - 26.0f, yOf ((float) d) - 5.0f, 22.0f, 10.0f), Justification::centredRight, false);
+    }
+    // 1 : 1 line and the threshold
+    {
+        Path diag; diag.startNewSubPath (xOf (-48.0f), yOf (-48.0f)); diag.lineTo (xOf (0.0f), yOf (0.0f));
+        Path dashed; const float dl[2] = { 3.0f, 3.0f };
+        PathStrokeType (1.0f).createDashedStroke (dashed, diag, dl, 2);
+        g.setColour (Colours::white.withAlpha (0.12f));
+        g.fillPath (dashed);
+        Path tl; tl.startNewSubPath (xOf (th), p.getY()); tl.lineTo (xOf (th), p.getBottom());
+        Path td; const float d2[2] = { 2.0f, 3.0f };
+        PathStrokeType (1.0f).createDashedStroke (td, tl, d2, 2);
+        g.setColour (Palette::accent.withAlpha (0.45f));
+        g.fillPath (td);
+        g.setColour (Palette::accent.withAlpha (on ? 1.0f : 0.5f));
+        g.setFont (uiFont (8.5f, true, 0.08f));
+        const String tt = "THRESHOLD " + String (th, 1) + " dB";
+        const bool right = xOf (th) + 110.0f < p.getRight();
+        g.drawText (tt, right ? Rectangle<float> (xOf (th) + 4.0f, p.getY() + 4.0f, 110.0f, 11.0f)
+                              : Rectangle<float> (xOf (th) - 114.0f, p.getY() + 4.0f, 110.0f, 11.0f),
+                    right ? Justification::centredLeft : Justification::centredRight, false);
+    }
+    // the curve
+    const auto col = on ? Palette::accent.brighter (0.25f) : Palette::textDim;
+    {
+        Path c;
+        for (int i = 0; i <= 96; ++i)
+        {
+            const float x = -48.0f + 0.5f * (float) i;
+            const Point<float> pt (xOf (x), yOf (jlimit (-48.0f, 0.0f, curve (x))));
+            if (i == 0) c.startNewSubPath (pt); else c.lineTo (pt);
+        }
+        g.setColour (col);
+        g.strokePath (c, PathStrokeType (2.0f, PathStrokeType::curved, PathStrokeType::rounded));
+        g.fillEllipse (Rectangle<float> (8.0f, 8.0f).withCentre ({ xOf (th), yOf (curve (th)) }));
+        if (inDb > -47.0f)
+        {
+            const float x = jmin (0.0f, inDb);
+            g.setColour (Colour (0xfff3ede6));
+            g.fillEllipse (Rectangle<float> (10.0f, 10.0f).withCentre ({ xOf (x), yOf (jlimit (-48.0f, 0.0f, on ? curve (x) : x)) }));
+        }
+        g.setColour (Palette::textDim);
+        g.setFont (uiFont (8.0f, false, 0.1f));
+        g.drawText ("IN dB", p.reduced (5.0f).removeFromBottom (11.0f), Justification::bottomRight, false);
+    }
+    // meters: GR number + GR / IN / OUT bars
+    {
+        auto m = meters();
+        g.setColour (Colour (0xff1b1c1e));
+        g.fillRoundedRectangle (m, 8.0f);
+        auto top = m.removeFromTop (44.0f);
+        g.setColour (on ? Palette::accent.brighter (0.35f) : Palette::textDim);
+        g.setFont (uiFont (20.0f, true, 0.0f));
+        g.drawText (on ? "-" + String (gr, 1) : String ("OFF"), top.removeFromTop (28.0f).withTrimmedTop (4.0f), Justification::centred, false);
+        g.setColour (Palette::textDim);
+        g.setFont (uiFont (7.5f, true, 0.12f));
+        g.drawText ("dB GAIN REDUCTION", top, Justification::centredTop, false);
+        auto bars = m.reduced (14.0f, 6.0f);
+        auto lab = bars.removeFromBottom (12.0f);
+        const float bw = 12.0f, gap = (bars.getWidth() - 3.0f * bw) / 2.0f;
+        auto bar = [&] (int i, float frac, Colour c, bool fromTop, const char* name)
+        {
+            const auto b = Rectangle<float> (bars.getX() + (float) i * (bw + gap), bars.getY(), bw, bars.getHeight());
+            g.setColour (Palette::field);
+            g.fillRoundedRectangle (b, 3.0f);
+            frac = jlimit (0.0f, 1.0f, frac);
+            if (frac > 0.002f)
+            {
+                g.setColour (c);
+                g.fillRoundedRectangle (fromTop ? b.withHeight (b.getHeight() * frac) : b.withTrimmedTop (b.getHeight() * (1.0f - frac)), 3.0f);
+            }
+            g.setColour (Palette::textDim);
+            g.setFont (uiFont (7.5f, false, 0.08f));
+            g.drawText (name, Rectangle<float> (b.getX() - 8.0f, lab.getY(), b.getWidth() + 16.0f, lab.getHeight()), Justification::centred, false);
+        };
+        bar (0, gr / 24.0f, Palette::accent, true, "GR");
+        bar (1, (inDb + 48.0f) / 48.0f, Colour (0xff9a9da1), false, "IN");
+        bar (2, (outDb + 48.0f) / 48.0f, Colour (0xffe8e4de), false, "OUT");
     }
 }
 

@@ -100,6 +100,15 @@ namespace ParamID
     inline constexpr const char* subTune   = "subTune";     // TEST: SUB smooth pitch -48..+48
     inline constexpr const char* bpWidth   = "bpWidth";     // TEST: BAND PASS width in octaves (filter 1 / 2)
     inline constexpr const char* bpWidth2  = "bpWidth2";
+    // 0.99.9: master EQ on/off + compressor after the EQ
+    inline constexpr const char* eqOn        = "eqOn";
+    inline constexpr const char* compOn      = "compOn";
+    inline constexpr const char* compThresh  = "compThresh";
+    inline constexpr const char* compRatio   = "compRatio";
+    inline constexpr const char* compAttack  = "compAttack";
+    inline constexpr const char* compRelease = "compRelease";
+    inline constexpr const char* compGain    = "compGain";
+    inline constexpr const char* compMix     = "compMix";
     inline constexpr const char* pitch     = "pitch";       // master pitch of the whole synth, -24..+24 semitones, smooth (0.99.3)
     inline constexpr const char* osc1Pan   = "osc1Pan";
     inline constexpr const char* osc2Pan   = "osc2Pan";
@@ -151,6 +160,7 @@ enum ModTarget
     mtSubTune, mtBpWidth, mtBpWidth2,
     mtEq1Freq, mtEq1Gain, mtEq1Q, mtEq2Freq, mtEq2Gain, mtEq2Q, mtEq3Freq, mtEq3Gain, mtEq3Q,
     mtEq4Freq, mtEq4Gain, mtEq4Q, mtEq5Freq, mtEq5Gain, mtEq5Q,
+    mtCompThresh, mtCompRatio, mtCompAttack, mtCompRelease, mtCompGain, mtCompMix,   // 0.99.9
     kNumModTargets
 };
 
@@ -284,6 +294,51 @@ private:
     double sr = 44100.0;
     std::array<std::array<std::array<St, 2>, 4>, kBands> st {};   // band, stage, channel
     std::array<float, kBands> wet {};
+};
+
+// 0.99.9 COMP: one simple stereo-linked compressor after the master EQ (feed-forward, peak detector,
+// 6 dB soft knee, attack/release on the gain in dB). GAIN = make-up (by hand), MIX = parallel (dry/wet).
+class Compressor
+{
+public:
+    void prepare (double sampleRate) { sr = sampleRate; reset(); }
+    void reset() { grDb = 0.0f; gate = 0.0f; }
+    // on/off crossfades over ~20 ms. Returns nothing; meters are read from grDb / inDb / outDb.
+    void process (float* L, float* R, int n, bool on, float threshDb, float ratio, float attackMs, float releaseMs, float gainDb, float mix)
+    {
+        const float aA = std::exp (-1.0f / (0.001f * std::max (0.05f, attackMs) * (float) sr));
+        const float aR = std::exp (-1.0f / (0.001f * std::max (5.0f, releaseMs) * (float) sr));
+        const float gStep = (float) n > 0.0f ? 1.0f / (0.02f * (float) sr) : 0.0f;
+        const float makeup = juce::Decibels::decibelsToGain (gainDb);
+        const float knee = 6.0f, slope = 1.0f - 1.0f / std::max (1.0f, ratio);
+        float pin = 0.0f, pout = 0.0f, grMax = 0.0f;
+        for (int i = 0; i < n; ++i)
+        {
+            gate = on ? std::min (1.0f, gate + gStep) : std::max (0.0f, gate - gStep);
+            const float x = std::max (std::abs (L[i]), std::abs (R[i]));
+            pin = std::max (pin, x);
+            if (gate <= 0.0f) { grDb = 0.0f; pout = std::max (pout, x); continue; }
+            const float xDb = juce::Decibels::gainToDecibels (x, -120.0f);
+            const float over = xDb - threshDb;
+            float want = 0.0f;                                   // gain reduction this sample wants (dB, >= 0)
+            if (over >= knee * 0.5f) want = slope * over;
+            else if (over > -knee * 0.5f) want = slope * (over + knee * 0.5f) * (over + knee * 0.5f) / (2.0f * knee);
+            grDb = want > grDb ? want + (grDb - want) * aA : want + (grDb - want) * aR;
+            grMax = std::max (grMax, grDb);
+            const float g = juce::Decibels::decibelsToGain (-grDb) * makeup;
+            const float wetL = L[i] * g, wetR = R[i] * g;
+            const float m = mix * gate;
+            L[i] += (wetL - L[i]) * m;
+            R[i] += (wetR - R[i]) * m;
+            pout = std::max (pout, std::max (std::abs (L[i]), std::abs (R[i])));
+        }
+        inPk = pin; outPk = pout; grBlock = grMax;
+    }
+    bool active() const { return gate > 0.0f; }
+    float grBlock = 0.0f, inPk = 0.0f, outPk = 0.0f;
+private:
+    double sr = 44100.0;
+    float grDb = 0.0f, gate = 0.0f;
 };
 
 // Stereo delay with tone filter in the feedback loop and optional ping-pong
@@ -484,6 +539,8 @@ private:
 public:
     // TEST: the master EQ and a tap of the final sound for the EQ screen's spectrum
     ParamEq masterEq;
+    Compressor masterComp;                             // 0.99.9 COMP
+    std::atomic<float> compGrUi { 0.0f }, compInUi { 0.0f }, compOutUi { 0.0f };   // COMP screen: max since the UI looked
     std::array<float, 4096> eqRing {};               // kScopeSize long
     std::atomic<int> eqWrite { 0 };
     std::atomic<bool> eqScopeWanted { false };        // the EQ screen is open: only then the tap is written
@@ -572,6 +629,8 @@ private:
     std::array<std::atomic<float>*, kNumLfos> pLfoSync {}, pLfoDiv {}, pLfoMode {}, pLfoRise {}, pLfoOn {}, pLfoGrains {};
     std::array<double, kNumLfos> lfoRateNow {};
     std::atomic<float>* pClipOn {};
+    std::atomic<float>* pEqOn {};      // 0.99.9
+    std::atomic<float>* pCompOn {};    // 0.99.9
     std::atomic<float>* pSubOn {}; std::atomic<float>* pSubOct {}; std::array<std::atomic<float>*, 5> pSubH {};
     std::atomic<float>* pLoopMode {}; std::atomic<float>* pLoopStart {}; std::atomic<float>* pLoopEnd {};
 
