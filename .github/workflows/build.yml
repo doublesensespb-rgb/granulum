@@ -10,8 +10,8 @@ on:
         options: [all, windows, mac]
         default: all
       mac_runner:
-        description: "macOS runner (macos-15; macos-14 was retired by GitHub in Nov 2026)"
-        default: macos-15
+        description: "macOS runner (macos-15-intel: the arm64 pool has had no capacity since Nov 2026; the build is universal anyway)"
+        default: macos-15-intel
 
 permissions:
   contents: write
@@ -65,7 +65,7 @@ jobs:
 
   mac:
     if: inputs.target != 'windows'
-    runs-on: ${{ inputs.mac_runner || 'macos-15' }}
+    runs-on: ${{ inputs.mac_runner || 'macos-15-intel' }}
     steps:
       - uses: actions/checkout@v4
 
