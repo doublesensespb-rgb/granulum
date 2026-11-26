@@ -187,7 +187,7 @@ public:
 class Knob final : public juce::Component, public juce::DragAndDropTarget
 {
 public:
-    enum class Size { Small, Normal, Hero };
+    enum class Size { Small, Normal, Hero, Mini };   // Mini (1.0): tiny dial, name under it, value pops up while turning
 
     Knob (GranulumProcessor&, const juce::String& paramId, const juce::String& title, Size size = Size::Normal);
     void resized() override;
@@ -220,6 +220,29 @@ private:
     bool dragHover = false, anyMod = false, compact = false;
     std::array<std::unique_ptr<ModChip>, kNumLfos> chips;
     std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> attachment;
+};
+
+// 1.0 VOICE window (OSC 1 header): unison count + two mini knobs DETUNE / BLEND
+class VoiceBox final : public juce::Component, public juce::SettableTooltipClient, private juce::Timer
+{
+public:
+    explicit VoiceBox (GranulumProcessor&);
+    void paint (juce::Graphics&) override;
+    void resized() override;
+    void mouseDown (const juce::MouseEvent&) override;
+    void mouseDrag (const juce::MouseEvent&) override;
+    void mouseUp (const juce::MouseEvent&) override;
+    void mouseDoubleClick (const juce::MouseEvent&) override;
+    void mouseWheelMove (const juce::MouseEvent&, const juce::MouseWheelDetails&) override;
+private:
+    void timerCallback() override;
+    juce::Rectangle<float> countArea() const;
+    int voices() const;
+    void setVoices (int n);
+    GranulumProcessor& proc;
+    Knob detune, blend;
+    int dragStart = 1; float dragY = 0.0f; bool dragging = false;
+    int shown = -1;
 };
 
 // The central screen: glowing waveform + crystalline shards born from every grain
@@ -1031,6 +1054,7 @@ private:
     void setupTour();
     ViewSwitch viewSwitch { proc };
     CompView compView { proc };
+    VoiceBox voiceBox { proc };   // 1.0: OSC 1 unison
     juce::Time lastBoxClick;   // 0.99.9: one click on the sample box / x is handled once
     juce::TextButton eqFlat { "FLAT" };
     bool eqMode = false;

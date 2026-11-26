@@ -174,6 +174,18 @@ int main (int argc, char** argv)
         save (*base, outDir, "eq.png");
         return 0;
     }
+    if (argc > 2 && String (argv[2]) == "voice")
+    {
+        setP (ParamID::osc1On, 1.0f); setP (ParamID::osc1Voices, 5.0f);
+        p.keyboardState.noteOn (1, 52, 0.9f);
+        run (p, ed, 30);
+        save (*base, outDir, "voice-add.png");
+        setP (ParamID::osc1Mode, 1.0f); run (p, ed, 20);
+        save (*base, outDir, "voice-wave.png");
+        setP (ParamID::osc1Voices, 1.0f); setP (ParamID::osc1Mode, 0.0f); run (p, ed, 20);
+        save (*base, outDir, "voice-one.png");
+        return 0;
+    }
     if (argc > 2 && String (argv[2]) == "comp")
     {
         setP (ParamID::osc1On, 1.0f); setP (ParamID::compOn, 1.0f); setP (ParamID::compGain, 6.0f);

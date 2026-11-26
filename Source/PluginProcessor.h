@@ -109,6 +109,10 @@ namespace ParamID
     inline constexpr const char* compRelease = "compRelease";
     inline constexpr const char* compGain    = "compGain";
     inline constexpr const char* compMix     = "compMix";
+    // 1.0: OSC 1 unison (VOICE window next to the OSC 1 title)
+    inline constexpr const char* osc1Voices  = "osc1Voices";
+    inline constexpr const char* osc1Detune  = "osc1Detune";
+    inline constexpr const char* osc1Blend   = "osc1Blend";
     inline constexpr const char* pitch     = "pitch";       // master pitch of the whole synth, -24..+24 semitones, smooth (0.99.3)
     inline constexpr const char* osc1Pan   = "osc1Pan";
     inline constexpr const char* osc2Pan   = "osc2Pan";
@@ -161,6 +165,7 @@ enum ModTarget
     mtEq1Freq, mtEq1Gain, mtEq1Q, mtEq2Freq, mtEq2Gain, mtEq2Q, mtEq3Freq, mtEq3Gain, mtEq3Q,
     mtEq4Freq, mtEq4Gain, mtEq4Q, mtEq5Freq, mtEq5Gain, mtEq5Q,
     mtCompThresh, mtCompRatio, mtCompAttack, mtCompRelease, mtCompGain, mtCompMix,   // 0.99.9
+    mtOsc1Detune, mtOsc1Blend,                                                        // 1.0 VOICE
     kNumModTargets
 };
 

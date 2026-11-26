@@ -1,7 +1,7 @@
 # GRAIN FORM (repo: granulum) — guide for AI agents and developers
 
 Read this whole file before changing anything. It describes the product, the code, the build
-pipeline and how the owner wants to work. Current version: **0.99.9** on branch `test` (main still 0.99.6; 0.99.7-test / 0.99.8 were the labels before) (`project(... VERSION 0.9.9)` + display label `set(GRAINFORM_LABEL "0.99.9")` in CMakeLists.txt).
+pipeline and how the owner wants to work. Current version: **1.0** on branch `test` (main still 0.99.6; 0.99.7-test / 0.99.8 / 0.99.9 were the labels before) (`project(... VERSION 1.0.0)` + display label `set(GRAINFORM_LABEL "1.0")` in CMakeLists.txt).
 The UI shows the version on a small plate next to the title (taken from CMake `GRAINFORM_VERSION`, "0.9.8" -> "v0.98").
 
 ## 1. Product
@@ -193,6 +193,13 @@ GR/IN/OUT, six Small Knobs). setStateInformation now adds missing PARAM children
 the previous sound's newer settings). Save window: CANCEL | SAVE | NEW VERSION (`nextVersionName`: _02, _03 ..., >= 2 digits).
 Sampler x: the editor also listens to itself (addMouseListener), so mouseDown arrived twice; `lastBoxClick` dedupes it.
 Snapshot mode `comp`. rdemo Keys.cpp measures level per note (filters are already key-tracked 100 % from C4, lastNote is global).
+1.0 VOICE (OSC 1 unison): params osc1Voices (int 1..9), osc1Detune, osc1Blend (mtOsc1Detune / mtOsc1Blend appended).
+Engine: `prepareUnison` builds per-block tables (offsets -1..1, +-60 cents * detune^1.5, centre copy weight 1 / sides BLEND,
+power-normalised, pan off*0.8, centre at 0). Dry path reads `v.uPos[u]` with own MipCache per copy; grains do not multiply -
+spawnGrain picks one copy (pitch, +pan*0.6, weight uniGrainW). CPU: dry part with grains and MIX >= 85 % plays one copy,
+60-85 % a 3-copy lite set, MIX 100 % reads nothing (`dryMuted`). uPos phases come from a hash of startStamp (main rng untouched,
+engine_test stays deterministic). UI: `VoiceBox` (count drag/wheel/double-click + two Knob::Size::Mini). WAVE buttons now share
+the RANDOM slot. Fix: wave/AIR tables are built when an LFO targets MIX WAVE / AIR even at 0 %. rdemo Bench3: VOICES / CLEAN / WAVE env.
 Pills MIX WAVE / AIR: LFO chip (`pillChip`, `pillLfo`, `pillChipDrag`) = dot + depth, drag up/down / wheel = depth, right-click removes.
 CPU: `Params::maxOverlap` (14 tones, 6 noise, set in voiceParams) caps grains per voice; spawnGrain stretches `spacing`
 (by reference) to length/cap, and to 35-100 % of that in RELEASE by env; v.norm follows, so the level holds. Owner's heavy pad

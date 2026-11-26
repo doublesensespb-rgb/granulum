@@ -220,6 +220,10 @@ struct Params
     // CPU (0.99.7-test): most grains of one voice that may overlap. A cloud is already full at ~12-16;
     // above that only the CPU notices. Noise needs even fewer (noise over noise is still the same noise).
     float maxOverlap = 14.0f;
+    // 1.0 VOICE (OSC 1 unison): 1..9 copies, DETUNE spreads them in pitch, BLEND = level of the side copies.
+    // The clean part reads one copy per voice; the grains do NOT multiply - each new grain takes one copy's pitch.
+    int   uniVoices = 1;
+    float uniDetune = 0.25f, uniBlend = 0.6f;
     // granular macros (0..1 unless noted)
     float bloom    = 0.0f;
     float smear    = 0.0f;
@@ -585,6 +589,13 @@ public:
         int liveGrains = 0;
         for (auto& v : voices) if (v.active) for (auto& g : v.grains) liveGrains += g.active ? 1 : 0;
         const double budgetStretch = std::max (1.0, (double) liveGrains / (double) kGrainBudget);
+        prepareUnison (p);
+        // CPU: the dry part under the grains is quiet - MIX >= 85 %: it plays one copy (the grains carry the voices),
+        // MIX 60-85 %: 3 copies (both edges + the middle) instead of up to 9
+        const bool uniDry = uniN > 1 && p.loopMode == 0 && ! (p.grainOn && p.mix >= 0.85f);
+        const bool uniLite = uniDry && uniN > 3 && p.grainOn && p.mix >= 0.6f;
+        // CPU: dry part fully under the grains (MIX 100 %, no EVOLVE): nothing to read at all
+        const bool dryMuted = p.grainOn && p.mix >= 0.999f && p.evolve <= 0.01f;
 
         const bool chimeOn = p.grainOn && p.chime > 0.001f;
         const float strikeDecay = (float) std::exp (-1.0 / (0.0015 * sr));
@@ -679,7 +690,41 @@ public:
 
                 // dry: plain looping playback
                 float dl, dr;
-                readAll (v.playPos, i, dl, dr, v.mc, ratio);
+                if (dryMuted) { dl = dr = 0.0f; }
+                else if (uniLite)
+                {
+                    dl = dr = 0.0f;
+                    const double N2 = (double) N;
+                    for (int k = 0; k < 3; ++k)
+                    {
+                        const auto u = (size_t) liteIdx[(size_t) k];
+                        const double inc = ratio * uniRatio[u];
+                        float l, r;
+                        readAll (v.uPos[u], i, l, r, v.uMc[u], inc);
+                        dl += l * liteGL[(size_t) k];
+                        dr += r * liteGR[(size_t) k];
+                        v.uPos[u] += inc;
+                        if (v.uPos[u] >= N2) v.uPos[u] = std::fmod (v.uPos[u], N2);
+                    }
+                }
+                else if (uniDry)
+                {
+                    // 1.0 VOICE: every copy reads the cycle at its own pitch and place in the stereo field
+                    dl = dr = 0.0f;
+                    const double N2 = (double) N;
+                    for (int u = 0; u < uniN; ++u)
+                    {
+                        const double inc = ratio * uniRatio[(size_t) u];
+                        float l, r;
+                        readAll (v.uPos[(size_t) u], i, l, r, v.uMc[(size_t) u], inc);
+                        dl += l * uniGL[(size_t) u];
+                        dr += r * uniGR[(size_t) u];
+                        double& q = v.uPos[(size_t) u];
+                        q += inc;
+                        if (q >= N2) q = std::fmod (q, N2);
+                    }
+                }
+                else readAll (v.playPos, i, dl, dr, v.mc, ratio);
                 if (p.loopMode == 0)
                 {
                     v.playPos += ratio;
@@ -816,6 +861,56 @@ public:
         publishViz (N, hasSample, p);
     }
 
+    // 1.0 VOICE: per-block tables of the unison copies (pitch ratio, stereo gains, grain weight)
+    void prepareUnison (const Params& p)
+    {
+        uniN = std::clamp (p.uniVoices, 1, 9);
+        if (uniN == 1) return;
+        const float det = std::clamp (p.uniDetune, 0.0f, 1.0f), blend = std::clamp (p.uniBlend, 0.0f, 1.0f);
+        const double maxCents = 60.0 * std::pow ((double) det, 1.5);            // 25 % = +-7.5 cents, 100 % = +-60
+        const float inner = 1.0f / (float) (uniN - 1) + 1.0e-4f;                // the middle copy (or the two middle ones)
+        float sumW2 = 0.0f;
+        for (int u = 0; u < uniN; ++u)
+        {
+            const float off = -1.0f + 2.0f * (float) u / (float) (uniN - 1);
+            const float w = std::abs (off) <= inner ? 1.0f : blend;
+            uniW[(size_t) u] = w;
+            sumW2 += w * w;
+            uniRatio[(size_t) u] = std::exp2 ((double) off * maxCents / 1200.0);
+            uniPan[(size_t) u] = std::abs (off) <= 1.0e-3f ? 0.0f : off * 0.8f; // the centre copy stays in the middle (mono bass)
+        }
+        const float norm = 1.0f / std::sqrt (std::max (1.0e-6f, sumW2));       // detuned copies add up in power
+        const float meanW2 = sumW2 / (float) uniN;
+        for (int u = 0; u < uniN; ++u)
+        {
+            const float a = (uniPan[(size_t) u] + 1.0f) * 0.25f * (float) kPi;
+            uniGL[(size_t) u] = std::cos (a) * 1.41421356f * uniW[(size_t) u] * norm;
+            uniGR[(size_t) u] = std::sin (a) * 1.41421356f * uniW[(size_t) u] * norm;
+            uniGrainW[(size_t) u] = uniW[(size_t) u] / std::sqrt (std::max (1.0e-6f, meanW2));
+        }
+        // light set for a dry part that is mostly under the grains (MIX >= 70 %): 3 copies - both edges + the middle
+        if (uniN > 3)
+        {
+            const int idx[3] = { 0, (uniN - 1) / 2, uniN - 1 };
+            float s2 = 0.0f;
+            for (int k = 0; k < 3; ++k) s2 += uniW[(size_t) idx[k]] * uniW[(size_t) idx[k]];
+            const float n3 = 1.0f / std::sqrt (std::max (1.0e-6f, s2));
+            for (int k = 0; k < 3; ++k)
+            {
+                const int u = idx[k];
+                const float a = (uniPan[(size_t) u] + 1.0f) * 0.25f * (float) kPi;
+                liteIdx[(size_t) k] = u;
+                liteGL[(size_t) k] = std::cos (a) * 1.41421356f * uniW[(size_t) u] * n3;
+                liteGR[(size_t) k] = std::sin (a) * 1.41421356f * uniW[(size_t) u] * n3;
+            }
+        }
+    }
+    std::array<int, 3> liteIdx {};
+    std::array<float, 3> liteGL {}, liteGR {};
+    int uniN = 1;
+    std::array<double, 9> uniRatio {};
+    std::array<float, 9> uniW {}, uniPan {}, uniGL {}, uniGR {}, uniGrainW {};
+
     int activeVoiceCount() const
     {
         int n = 0;
@@ -874,6 +969,8 @@ private:
         float    strike = 0.0f;       // CHIME hammer: a short click every time a grain is born
         float    strikeLp = 0.0f;
         double   playPos = 0.0;
+        std::array<double, 9> uPos {};      // 1.0 VOICE: read position of every unison copy (clean part)
+        std::array<MipCache, 9> uMc {};
         int      playDir = 1;            // PING-PONG direction of the plain playback
         bool     playDone = false;       // ONE-SHOT plain playback reached the end
         int64_t  age = 0;
@@ -902,6 +999,16 @@ private:
         v.travel = 0.0; v.nextGrainIn = 0.0; v.age = 0; v.normSm = -1.0f;
         v.playPos = loopHead ((double) std::clamp (p.position, 0.0f, 0.9999f), p) * (double) lastNumFrames;
         v.playDir = 1; v.playDone = false;
+        // 1.0 VOICE: the centre copy starts with the voice, the others at random points of the cycle (no phasing "zip")
+        {
+            uint32_t h = 0x9e3779b9u * (uint32_t) (v.startStamp + 1);   // own little hash: the main random stream stays untouched
+            for (size_t u = 0; u < v.uPos.size(); ++u)
+            {
+                h ^= h << 13; h ^= h >> 17; h ^= h << 5;
+                v.uPos[u] = (double) (h & 0xffffff) / 16777216.0 * (double) std::max (1, lastNumFrames);
+                v.uMc[u] = {};
+            }
+        }
         if (p.randomStart)
         {
             v.travel = rng.uni();
@@ -1072,7 +1179,10 @@ private:
         }
         bool reverse = p.shimmer > 0.0f && rng.uni() < p.shimmer * 0.3f;
         if (reverse && kind == 0) kind = 2;
-        const double ratio = baseRatio * std::exp2 (cents / 1200.0);
+        // 1.0 VOICE: the grain takes the pitch, side and weight of one unison copy (no extra grains)
+        int uni = -1;
+        if (uniN > 1) uni = std::min (uniN - 1, (int) (rng.uni() * (float) uniN));
+        const double ratio = baseRatio * std::exp2 (cents / 1200.0) * (uni >= 0 ? uniRatio[(size_t) uni] : 1.0);
 
         // position: POSITION + travel + SCATTER/SMEAR/BLOOM jitter + DRIFT wander
         const float jitter = scatter * 0.15f + scatter * scatter * 0.45f + smear * 0.12f + bloom * 0.08f;
@@ -1087,7 +1197,7 @@ private:
         const float width = std::clamp (scatter + bloom * 0.35f + smear * 0.2f, 0.0f, 1.0f);
         const float away = std::abs ((0.85f + 0.15f * width) * rng.bipolar()) + drift * 0.4f * std::abs (v.walk[3]);
         v.panSide = ! v.panSide;
-        const float pan = std::clamp ((v.panSide ? away : -away) * std::clamp (p.spread, 0.0f, 1.0f), -1.0f, 1.0f);
+        const float pan = std::clamp ((v.panSide ? away : -away) * std::clamp (p.spread, 0.0f, 1.0f) + (uni >= 0 ? uniPan[(size_t) uni] * 0.6f : 0.0f), -1.0f, 1.0f);
         const float a = (pan + 1.0f) * 0.25f * (float) kPi;
 
         g->active = true;
@@ -1119,8 +1229,9 @@ private:
         g->inc = reverse ? -ratio : ratio;
         g->mc = {};
         g->pos = reverse ? start + ratio * (double) length : start;
-        g->gainL = std::cos (a) * 1.41421356f;
-        g->gainR = std::sin (a) * 1.41421356f;
+        const float uw = uni >= 0 ? uniGrainW[(size_t) uni] : 1.0f;
+        g->gainL = std::cos (a) * 1.41421356f * uw;
+        g->gainR = std::sin (a) * 1.41421356f * uw;
         g->pan = pan;
         g->kind = kind;
         g->perc = perc;

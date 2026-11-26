@@ -655,6 +655,15 @@ void Knob::resized()
         refreshMods();
         return;
     }
+    if (size == Size::Mini)
+    {
+        // 1.0: tiny dial with its name underneath, no value box (the value pops up while turning / shows as a tooltip)
+        r.removeFromBottom (8);
+        slider.setTextBoxStyle (Slider::NoTextBox, false, 0, 0);
+        slider.setBounds (r);
+        refreshMods();
+        return;
+    }
     r.removeFromTop (titleH);
     if (compact) slider.setTextBoxStyle (Slider::NoTextBox, false, 0, 0);
     else         slider.setTextBoxStyle (Slider::TextBoxBelow, false, jmin (getWidth() - 2, 90), boxH);
@@ -668,6 +677,12 @@ void Knob::paint (Graphics& g)
     g.setColour (size == Size::Hero ? Palette::text : Palette::label);
     g.setFont (uiFont (size == Size::Hero ? 13.5f : size == Size::Small ? 10.0f : 11.0f, size == Size::Hero, 0.08f));
     if (inlineMode) { g.drawText (title.toUpperCase(), getLocalBounds().removeFromLeft (26), Justification::centredLeft); return; }
+    if (size == Size::Mini)
+    {
+        g.setFont (uiFont (6.2f, true, 0.1f));
+        g.drawText (title.toUpperCase(), getLocalBounds().removeFromBottom (8).expanded (6, 0), Justification::centred, false);
+        return;
+    }
     g.drawText (title.toUpperCase(), getLocalBounds().removeFromTop (titleH), Justification::centred);
 }
 
@@ -5116,6 +5131,7 @@ GranulumEditor::GranulumEditor (GranulumProcessor& p)
     eqFlat.setTooltip ("Reset the whole EQ (every band back to 0 dB)");
     eqFlat.onClick = [this] { eqView.flat(); };
     addChildComponent (compView);
+    addAndMakeVisible (voiceBox);
     viewSwitch.onChange = [this] (int view)
     {
         // the screen shows the grains, the master EQ or the compressor (0.99.9)
@@ -6127,7 +6143,10 @@ void GranulumEditor::resized()
 
         auto a1 = osc1Area.reduced (S (8), S (5));
         auto h1 = a1.removeFromTop (S (26));
-        rndBars.setBounds (h1.removeFromRight (S (70)).reduced (0, S (1)));
+        // 1.0: RANDOM (ADDITIVE) and the wave buttons (WAVE) share the same slot on the right, so nothing else moves
+        const auto slot = h1.removeFromRight (S (74)).reduced (0, S (1));
+        rndBars.setBounds (slot.withTrimmedLeft (S (4)));
+        wavePicker.setBounds (slot);
         h1.removeFromRight (S (6));
         osc1Grain.setBounds (h1.removeFromRight (S (60)).reduced (0, S (1)));
         h1.removeFromRight (S (6));
@@ -6137,9 +6156,11 @@ void GranulumEditor::resized()
         // TEST: ADDITIVE | WAVE keeps its place in both modes; the wave buttons appear to its left
         osc1Mode.setBounds (h1.removeFromRight (S (122)).reduced (0, S (1)));   // ADDITIVE | WAVE
         wavePicker.setVisible (osc1WaveMode (proc));
-        if (osc1WaveMode (proc)) { h1.removeFromRight (S (4)); wavePicker.setBounds (h1.removeFromRight (S (88)).reduced (0, S (1))); }
         osc1Lamp.sub = {};                         // the ADDITIVE | WAVE switch says what OSC 1 is
-        osc1Lamp.setBounds (h1);
+        // 1.0: the VOICE window sits right after the OSC 1 name, in both modes
+        osc1Lamp.setBounds (h1.removeFromLeft (S (60)));
+        h1.removeFromLeft (S (2));
+        voiceBox.setBounds (h1.removeFromLeft (S (90)).withSizeKeepingCentre (S (90), S (28)));
         rndBars.setVisible (! osc1WaveMode (proc));   // RANDOM sticks: only in ADDITIVE
         a1.removeFromTop (S (4));
         auto k1 = a1.removeFromRight (S (200));   // 5 knobs (TUNE added) in about the old width, so the sticks and GRAIN switches keep their size
@@ -7489,4 +7510,101 @@ void GranulumEditor::setupTour()
           "Three LFOs: drag an LFO tab onto any knob to modulate it. ADSR shapes every note. VOICE sets POLY or MONO and the glide time." },
         { [this, u] { return u (globalKnobs[2]->getBounds(), u (globalKnobs[1]->getBounds(), gemsArea)); }, "Pitch, Output & Clip",
           "Master PITCH, the OUTPUT level and the meter. Push OUTPUT for really loud sounds. Enjoy GRAIN FORM!" } };
+}
+
+// ============================================================================
+// 1.0 VOICE window: OSC 1 unison (1..9 copies), DETUNE and BLEND as mini knobs
+
+VoiceBox::VoiceBox (GranulumProcessor& p)
+    : proc (p), detune (p, ParamID::osc1Detune, "Detune", Knob::Size::Mini), blend (p, ParamID::osc1Blend, "Blend", Knob::Size::Mini)
+{
+    for (auto* k : { &detune, &blend })
+    {
+        addAndMakeVisible (*k);
+        k->slider.setPopupDisplayEnabled (true, false, nullptr);
+    }
+    setTooltip ("VOICE: how many copies of OSC 1 play together (1 = off). Drag up/down or mouse wheel, double-click = 1");
+    startTimerHz (15);
+}
+
+int VoiceBox::voices() const { return juce::jlimit (1, 9, (int) std::round (proc.apvts.getRawParameterValue (ParamID::osc1Voices)->load())); }
+
+void VoiceBox::setVoices (int n)
+{
+    if (auto* prm = proc.apvts.getParameter (ParamID::osc1Voices))
+        prm->setValueNotifyingHost (prm->convertTo0to1 ((float) juce::jlimit (1, 9, n)));
+    timerCallback();
+}
+
+Rectangle<float> VoiceBox::countArea() const { return getLocalBounds().toFloat().removeFromLeft (34.0f); }
+
+void VoiceBox::resized()
+{
+    auto r = getLocalBounds();
+    r.removeFromLeft (34);
+    r = r.reduced (1, 1);
+    const int w = r.getWidth() / 2;
+    detune.setBounds (r.removeFromLeft (w));
+    blend.setBounds (r);
+}
+
+void VoiceBox::timerCallback()
+{
+    const int n = voices();
+    if (n != shown)
+    {
+        shown = n;
+        const float a = n > 1 ? 1.0f : 0.45f;   // one voice: DETUNE / BLEND have nothing to do
+        detune.setAlpha (a);
+        blend.setAlpha (a);
+        repaint();
+    }
+    // hover shows the value as a tooltip (no room for value boxes here)
+    detune.slider.setTooltip ("DETUNE " + detune.slider.getTextFromValue (detune.slider.getValue()) + "  -  how far the voices drift apart in pitch");
+    blend.slider.setTooltip ("BLEND " + blend.slider.getTextFromValue (blend.slider.getValue()) + "  -  level of the side voices against the centre one");
+}
+
+void VoiceBox::paint (Graphics& g)
+{
+    auto r = getLocalBounds().toFloat().reduced (0.5f);
+    g.setColour (Colour (0xff1b1c1e));
+    g.fillRoundedRectangle (r, 6.0f);
+    g.setColour (Colours::white.withAlpha (isMouseOver (true) ? 0.16f : 0.1f));
+    g.drawRoundedRectangle (r, 6.0f, 1.0f);
+    auto c = countArea().reduced (2.0f, 2.0f);
+    g.setColour (Palette::textDim);
+    g.setFont (uiFont (6.4f, true, 0.16f));
+    g.drawText ("VOICE", c.removeFromTop (9.0f), Justification::centred, false);
+    const int n = voices();
+    g.setColour (n > 1 ? Palette::accent.brighter (0.35f) : Palette::label);
+    g.setFont (uiFont (12.5f, true, 0.0f));
+    g.drawText (String (n), c, Justification::centred, false);
+}
+
+void VoiceBox::mouseDown (const MouseEvent& e)
+{
+    if (! countArea().contains (e.position)) return;
+    dragStart = voices(); dragY = e.position.y; dragging = true;
+    if (auto* prm = proc.apvts.getParameter (ParamID::osc1Voices)) prm->beginChangeGesture();
+}
+
+void VoiceBox::mouseDrag (const MouseEvent& e)
+{
+    if (! dragging) return;
+    setVoices (dragStart + (int) std::round ((dragY - e.position.y) / 8.0f));   // 8 px per voice
+}
+
+void VoiceBox::mouseUp (const MouseEvent&)
+{
+    if (! dragging) return;
+    dragging = false;
+    if (auto* prm = proc.apvts.getParameter (ParamID::osc1Voices)) prm->endChangeGesture();
+}
+
+void VoiceBox::mouseDoubleClick (const MouseEvent& e) { if (countArea().contains (e.position)) setVoices (1); }
+
+void VoiceBox::mouseWheelMove (const MouseEvent& e, const MouseWheelDetails& w)
+{
+    if (! countArea().contains (e.position)) return;
+    if (w.deltaY != 0.0f) setVoices (voices() + (w.deltaY > 0.0f ? 1 : -1));
 }

@@ -44,7 +44,8 @@ namespace
         ParamID::subTune, ParamID::bpWidth, ParamID::bpWidth2,
         "eq1Freq", "eq1Gain", "eq1Q", "eq2Freq", "eq2Gain", "eq2Q", "eq3Freq", "eq3Gain", "eq3Q",
         "eq4Freq", "eq4Gain", "eq4Q", "eq5Freq", "eq5Gain", "eq5Q",
-        ParamID::compThresh, ParamID::compRatio, ParamID::compAttack, ParamID::compRelease, ParamID::compGain, ParamID::compMix
+        ParamID::compThresh, ParamID::compRatio, ParamID::compAttack, ParamID::compRelease, ParamID::compGain, ParamID::compMix,
+        ParamID::osc1Detune, ParamID::osc1Blend
     };
 
     String hzWithNote (float hz)
@@ -796,6 +797,11 @@ AudioProcessorValueTreeState::ParameterLayout GranulumProcessor::createLayout()
         ps.push_back (std::make_unique<P> (ParameterID { ParamID::compMix, 1 },     "Comp Mix", NormalisableRange<float> (0.0f, 1.0f), 1.0f, pct));
     }
 
+    // 1.0: OSC 1 VOICE (unison). 1 = off, old presets stay as they were
+    ps.push_back (std::make_unique<juce::AudioParameterInt> (ParameterID { ParamID::osc1Voices, 1 }, "OSC 1 Voices", 1, 9, 1));
+    ps.push_back (std::make_unique<P> (ParameterID { ParamID::osc1Detune, 1 }, "OSC 1 Detune", NormalisableRange<float> (0.0f, 1.0f), 0.25f, pct));
+    ps.push_back (std::make_unique<P> (ParameterID { ParamID::osc1Blend, 1 },  "OSC 1 Blend",  NormalisableRange<float> (0.0f, 1.0f), 0.6f, pct));
+
     // FILTER (key-tracked from C3 under the hood)
     ps.push_back (std::make_unique<B> (ParameterID { ParamID::filterOn, 1 }, "Filter On", false));
     ps.push_back (std::make_unique<P> (ParameterID { ParamID::cutoff, 1 }, "Cutoff", skewed (20.0f, 20000.0f, 1000.0f), 2000.0f,
@@ -1372,6 +1378,13 @@ granulum::Params GranulumProcessor::voiceParams (const float* v, int osc) const
         const auto iv = chordIntervals ((int) pChord->load());
         p.chordSize = (int) iv.size();
         for (size_t i = 0; i < iv.size() && i < p.chord.size(); ++i) p.chord[i] = iv[i];
+    }
+    if (osc == 0)
+    {
+        // 1.0 VOICE: unison copies of OSC 1 (ADDITIVE and WAVE alike)
+        p.uniVoices = jlimit (1, 9, (int) std::round (apvts.getRawParameterValue (ParamID::osc1Voices)->load()));
+        p.uniDetune = v[mtOsc1Detune];
+        p.uniBlend  = v[mtOsc1Blend];
     }
     if (osc > 0)
     {
@@ -2142,7 +2155,10 @@ void GranulumProcessor::timerCallback()
     {
         // OSC 1 WAVE: build the band-limited mips of the chosen waveform when it (or the sample rate) changes
         const int wv = jlimit (0, 3, (int) apvts.getRawParameterValue (ParamID::osc1Wave)->load());
-        const bool used = apvts.getRawParameterValue (ParamID::osc1Mode)->load() > 0.5f || apvts.getRawParameterValue (ParamID::osc1WaveMix)->load() > 0.0001f;
+        // 0.99.10 fix: an LFO on MIX WAVE counts as "used" too (before, the table was only built once the pill was moved off 0)
+        bool lfoOnMix = false;
+        for (int l = 0; l < kNumLfos; ++l) lfoOnMix = lfoOnMix || hasModulation (mtOsc1WaveMix, l);
+        const bool used = apvts.getRawParameterValue (ParamID::osc1Mode)->load() > 0.5f || apvts.getRawParameterValue (ParamID::osc1WaveMix)->load() > 0.0001f || lfoOnMix;
         const double rate = getSampleRate() > 0.0 ? getSampleRate() : 44100.0;
         if (used && (wv != builtWave || rate != builtWaveRate))
         {
@@ -2154,7 +2170,9 @@ void GranulumProcessor::timerCallback()
     {
         // TEST: AIR mips (fixed spectrum), built once per sample rate when AIR is used
         const double rate = getSampleRate() > 0.0 ? getSampleRate() : 44100.0;
-        if (apvts.getRawParameterValue (ParamID::osc1Air)->load() > 0.0001f && rate != builtAirRate)
+        bool lfoOnAir = false;   // 0.99.10 fix: an LFO on AIR builds the table too (it used to stay silent until AIR was moved)
+        for (int l = 0; l < kNumLfos; ++l) lfoOnAir = lfoOnAir || hasModulation (mtOsc1Air, l);
+        if ((apvts.getRawParameterValue (ParamID::osc1Air)->load() > 0.0001f || lfoOnAir) && rate != builtAirRate)
         {
             builtAirRate = rate;
             airSlot.push (std::make_shared<granulum::SampleData> (granulum::renderAirMips (rate)));

@@ -33,6 +33,9 @@ int main (int argc, char** argv)
     if (off.contains ("bloom")) S (ParamID::bloom, 0);
     if (off.contains ("drift")) S (ParamID::drift, 0);
     if (off.contains ("smear")) S (ParamID::smear, 0);
+    if (const char* vv = std::getenv ("VOICES")) S (ParamID::osc1Voices, (float) atoi (vv));
+    if (std::getenv ("CLEAN")) { S (ParamID::osc1Grain, 0); S (ParamID::osc3On, 0); }
+    if (std::getenv ("WAVE")) S (ParamID::osc1Mode, 1);
     if (auto* mm = MessageManager::getInstanceWithoutCreating()) mm->runDispatchLoopUntil (200);
     std::cout << "size " << p.apvts.getParameter (ParamID::gsize)->getCurrentValueAsText() << "  dens " << p.apvts.getParameter (ParamID::density)->getCurrentValueAsText() << "  rel " << relMs << std::endl;
     // pattern in beats: (start, len, note)
