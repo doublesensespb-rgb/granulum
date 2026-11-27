@@ -1434,6 +1434,7 @@ granulum::Params GranulumProcessor::subParams (const float* v) const
     p.chordSize = 1;
     p.chord = { 0, 0, 0, 0, 0 };
     p.chime = 0.0f;
+    p.uniVoices = 1;   // 1.0.2 fix: the sub took OSC 1's VOICE (unison) - detuned copies beat against each other, the low end wobbled
     p.transpose = std::round (pSubOct->load()) * 12.0f + v[mtSubSemi] + v[mtSubTune] + v[mtPitch];   // OCT + SEMI (SEMI glides under an LFO)
     // the 3 sticks are layers: their level (incl. LFO) moves at play time
     for (int k = 0; k < kSubHarms; ++k) { p.harmGain[(size_t) k] = jlimit (0.0f, 1.0f, v[mtSubH1 + k]); p.harmGainPrev[(size_t) k] = subGainPrev[(size_t) k]; }
