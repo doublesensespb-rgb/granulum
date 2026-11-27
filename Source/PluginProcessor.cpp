@@ -1393,8 +1393,9 @@ void GranulumProcessor::advanceLfos (int endSample, int len, const float* v)
         const float rise = pLfoRise[L]->load();
         const float riseGain = rise > 0.01f ? (float) jmin (1.0, sinceTrigger / (double) rise) : 1.0f;
         lfoValue[L] = lfoShapeAt (l, (float) ph) * riseGain;
-        lfoValueOut[L].store (lfoValue[L], std::memory_order_relaxed);
-        lfoPhaseOut[L].store ((float) ph, std::memory_order_relaxed);
+        // 1.0.5.1: in silence the LFO's playhead and lamp rest at the start of the shape (the sound is not touched)
+        lfoValueOut[L].store (uiSounding ? lfoValue[L] : lfoShapeAt (l, 0.0f), std::memory_order_relaxed);
+        lfoPhaseOut[L].store (uiSounding ? (float) ph : 0.0f, std::memory_order_relaxed);
         lfoRiseOut[L].store (riseGain, std::memory_order_relaxed);
     }
 }
@@ -2069,8 +2070,13 @@ void GranulumProcessor::processChunk (int from, int len)
     }
     {
         const double srU = getSampleRate() > 0 ? getSampleRate() : 44100.0;
-        uiQuiet = (jmax (pl, pr) > 1.0e-4f || heldNotes > 0) ? 0.0 : uiQuiet + (double) len / srU;
-        uiSounding = uiQuiet < 0.15;
+        // 1.0.5.1: "sounding" = a note is held or still fading out (its release); reverb / delay tails do not count,
+        // so everything stands still as soon as the notes are over
+        const bool voices = heldNotes > 0 || engineAdd.anyActive() || engineAddClean.anyActive() || engineWave.anyActive()
+                            || engineSmp.anyActive() || engineNoise.anyActive() || engineSub.anyActive();
+        uiQuiet = voices ? 0.0 : uiQuiet + (double) len / srU;
+        uiSounding = uiQuiet < 0.03;
+        ignoreUnused (pl, pr);
     }
     if (pl > peakL.load (std::memory_order_relaxed)) peakL.store (pl, std::memory_order_relaxed);
     if (pr > peakR.load (std::memory_order_relaxed)) peakR.store (pr, std::memory_order_relaxed);
