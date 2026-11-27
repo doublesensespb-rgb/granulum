@@ -419,6 +419,7 @@ void GranulumLook::drawComboBox (Graphics& g, int w, int h, bool, int, int, int,
     g.fillRoundedRectangle (r, 6.0f);
     g.setColour (Palette::theme >= 5 ? Palette::edge : Colours::white.withAlpha (0.10f));
     g.drawRoundedRectangle (r.reduced (0.5f), 6.0f, 1.0f);
+    if ((bool) box.getProperties()["noArrow"]) return;   // 1.0.2: the filter type has < > arrows instead
     Path arrow;
     const float ax = r.getRight() - 12.0f, ay = r.getCentreY();
     arrow.addTriangle (ax - 4.0f, ay - 2.0f, ax + 4.0f, ay - 2.0f, ax, ay + 3.0f);
@@ -427,6 +428,18 @@ void GranulumLook::drawComboBox (Graphics& g, int w, int h, bool, int, int, int,
 }
 
 Font GranulumLook::getComboBoxFont (ComboBox&) { return uiFont (12.0f, false, 0.05f); }
+
+void GranulumLook::positionComboBoxText (ComboBox& box, Label& label)
+{
+    if ((bool) box.getProperties()["noArrow"])
+    {
+        label.setBounds (2, 1, box.getWidth() - 4, box.getHeight() - 2);
+        label.setFont (getComboBoxFont (box));
+        label.setJustificationType (Justification::centred);
+        return;
+    }
+    LookAndFeel_V4::positionComboBoxText (box, label);
+}
 Font GranulumLook::getPopupMenuFont()          { return uiFont (14.0f); }
 
 void GranulumLook::drawCallOutBoxBackground (CallOutBox&, Graphics& g, const Path& path, Image&)
@@ -5062,11 +5075,8 @@ GranulumEditor::GranulumEditor (GranulumProcessor& p)
     addAndMakeVisible (osc4Lamp);
     addAndMakeVisible (osc1Mode);
     osc1Mode.onChange = [this] { resized(); repaint(); harmonics.repaint(); wavePicker.repaint(); };
-    for (int i = 0; i < 3; ++i)
-    {
-        addAndMakeVisible (foldBtn[i]);
-        foldBtn[i].onClick = [this, i] { setFold (i, ! proc.uiFold[i]); };
-    }
+    // 1.0.2: OSC 2-4 can no longer be folded (the fold buttons are gone, every oscillator is always open)
+    for (int i = 0; i < 3; ++i) { proc.uiFold[i] = false; addChildComponent (foldBtn[i]); }
     addAndMakeVisible (subBars);
     osc4Lamp.setTooltip ("OSC 2 SUB: a clean low layer, never granulated. Filters and effects only where their digit 2 is lit.");
 
@@ -5095,6 +5105,21 @@ GranulumEditor::GranulumEditor (GranulumProcessor& p)
     distType.addItemList (Distortion::typeNames(), 1);
     delayDiv.addItemList (GranulumProcessor::divisionNames(), 1);
     for (auto* c : { &filterType, &filterType2, &distType, &delayDiv }) addAndMakeVisible (*c);
+    // 1.0.2: < / > step through the filter types of the filter that is shown (FILTER 1 or FILTER 2)
+    for (auto* a : { &filtPrev, &filtNext })
+    {
+        addAndMakeVisible (*a);
+        a->setTooltip (a->dir < 0 ? "Previous filter type" : "Next filter type");
+        a->onClick = [this, a]
+        {
+            auto& box = filterType2.isVisible() ? filterType2 : filterType;
+            const int n = box.getNumItems();
+            if (n <= 0) return;
+            box.setSelectedItemIndex ((box.getSelectedItemIndex() + a->dir + n) % n, sendNotificationSync);
+        };
+    }
+    filterType.getProperties().set ("noArrow", true);
+    filterType2.getProperties().set ("noArrow", true);
     filterTypeA  = std::make_unique<ComboAtt> (s, ParamID::ftype, filterType);
     filterType2A = std::make_unique<ComboAtt> (s, ParamID::ftype2, filterType2);
     filterType.setTooltip ("COMB rings at the played note. VOWEL: CUTOFF morphs A-E-I-O-U, RESO sharpens it.");
@@ -6181,6 +6206,9 @@ void GranulumEditor::resized()
         // fold buttons sit at the right end of every OSC 2-4 row (open or folded)
         auto takeFold = [&] (int i, Rectangle<int>& a)
         {
+            ignoreUnused (a);
+            foldBtn[i].setVisible (false);   // 1.0.2: no folding any more
+            if (true) return;
             foldBtn[i].folded = proc.uiFold[i];
             foldBtn[i].setTooltip (proc.uiFold[i] ? "Open this oscillator" : "Fold this oscillator into a strip");
             foldBtn[i].setBounds (a.removeFromRight (S (26)).withSizeKeepingCentre (S (24), S (22)));
@@ -6310,11 +6338,25 @@ void GranulumEditor::resized()
         f.removeFromTop (S (4));
         filterScope.setBounds (f.removeFromTop (S (38)).reduced (S (4), 0));
         auto row2 = f.withSizeKeepingCentre (f.getWidth(), S (28));
-        routes[0]->setBounds (row2.removeFromRight (S (66)));
+        routes[0]->setBounds (row2.removeFromRight (S (60)));
         routes[4]->setBounds (routes[0]->getBounds());
-        row2.removeFromRight (S (6));
+        row2.removeFromRight (S (5));
+        filtNext.setBounds (row2.removeFromRight (S (17)).withSizeKeepingCentre (S (17), S (24)));
+        row2.removeFromRight (S (2));
+        filtPrev.setBounds (row2.removeFromLeft (S (17)).withSizeKeepingCentre (S (17), S (24)));
+        row2.removeFromLeft (S (2));
         filterType.setBounds (row2);
         filterType2.setBounds (row2);
+        // 1.0.2: full names when they fit (LOW PASS 24), else short ones (LP 24) - never squeezed or cut with "..."
+        static const StringArray shortNames { "LP 12", "LP 24", "LP 48", "HP 12", "HP 24", "HP 48", "BP", "PEAK", "COMB", "VOWEL" };
+        const int need = GlyphArrangement::getStringWidthInt (getLookAndFeel().getComboBoxFont (filterType), "HIGH PASS 48") + 8;
+        const bool useShort = row2.getWidth() - 4 < need;
+        for (auto* box : { &filterType, &filterType2 })
+        {
+            for (int k = 0; k < FilterUnit::typeNames().size(); ++k)
+                box->changeItemText (k + 1, useShort ? shortNames[k] : FilterUnit::typeNames()[k]);
+            if (box->getSelectedItemIndex() >= 0) box->setText (box->getItemText (box->getSelectedItemIndex()), dontSendNotification);
+        }
     }
     {
         auto e = fxArea.withTrimmedTop (S (32));
@@ -7616,4 +7658,24 @@ void VoiceBox::mouseWheelMove (const MouseEvent& e, const MouseWheelDetails& w)
 {
     if (! countArea().contains (e.position)) return;
     if (w.deltaY != 0.0f) setVoices (voices() + (w.deltaY > 0.0f ? 1 : -1));
+}
+
+// ============================================================================
+// 1.0.2 StepArrow: < / > next to the filter type
+
+void StepArrow::paint (Graphics& g)
+{
+    auto r = getLocalBounds().toFloat().reduced (0.5f);
+    const bool over = isMouseOver();
+    g.setColour (over ? Palette::field.brighter (0.12f) : Palette::field);
+    g.fillRoundedRectangle (r, 5.0f);
+    g.setColour (Colours::white.withAlpha (over ? 0.16f : 0.08f));
+    g.drawRoundedRectangle (r, 5.0f, 1.0f);
+    const auto c = r.getCentre();
+    const float s = jmin (r.getWidth(), r.getHeight()) * 0.2f;
+    Path p;
+    if (dir < 0) p.addTriangle (c.x - s * 0.8f, c.y, c.x + s * 0.6f, c.y - s, c.x + s * 0.6f, c.y + s);
+    else         p.addTriangle (c.x + s * 0.8f, c.y, c.x - s * 0.6f, c.y - s, c.x - s * 0.6f, c.y + s);
+    g.setColour (over ? Palette::text : Palette::label);
+    g.fillPath (p);
 }

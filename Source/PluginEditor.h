@@ -124,6 +124,7 @@ public:
     void drawButtonBase (juce::Graphics&, juce::Button&, bool over, bool down);
     void drawButtonText (juce::Graphics&, juce::TextButton&, bool over, bool down) override;
     void drawComboBox (juce::Graphics&, int w, int h, bool down, int bx, int by, int bw, int bh, juce::ComboBox&) override;
+    void positionComboBoxText (juce::ComboBox&, juce::Label&) override;   // 1.0.2: "noArrow" boxes use the full width
     juce::Font getComboBoxFont (juce::ComboBox&) override;
     juce::Font getPopupMenuFont() override;
     juce::Label* createSliderTextBox (juce::Slider&) override;
@@ -220,6 +221,19 @@ private:
     bool dragHover = false, anyMod = false, compact = false;
     std::array<std::unique_ptr<ModChip>, kNumLfos> chips;
     std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> attachment;
+};
+
+// 1.0.2: small < / > step button (filter type)
+class StepArrow final : public juce::Component, public juce::SettableTooltipClient
+{
+public:
+    explicit StepArrow (int d) : dir (d) {}
+    std::function<void()> onClick;
+    void paint (juce::Graphics&) override;
+    void mouseUp (const juce::MouseEvent& e) override { if (! e.mods.isPopupMenu() && getLocalBounds().contains (e.getPosition()) && onClick) onClick(); }
+    void mouseEnter (const juce::MouseEvent&) override { repaint(); }
+    void mouseExit (const juce::MouseEvent&) override { repaint(); }
+    int dir;
 };
 
 // 1.0 VOICE window (OSC 1 header): unison count + two mini knobs DETUNE / BLEND
@@ -1055,6 +1069,7 @@ private:
     ViewSwitch viewSwitch { proc };
     CompView compView { proc };
     VoiceBox voiceBox { proc };   // 1.0: OSC 1 unison
+    StepArrow filtPrev { -1 }, filtNext { 1 };   // 1.0.2: step through the filter types
     juce::Time lastBoxClick;   // 0.99.9: one click on the sample box / x is handled once
     juce::TextButton eqFlat { "FLAT" };
     bool eqMode = false;

@@ -2963,7 +2963,8 @@ void GranulumProcessor::setStateInformation (const void* data, int sizeInBytes)
     }
     {
         const String fo = state.getProperty ("oscFold", "000").toString();
-        for (int i = 0; i < 3; ++i) uiFold[i] = fo.length() > i && fo[i] == '1';
+        for (int i = 0; i < 3; ++i) uiFold[i] = false;   // 1.0.2: folding was removed - every oscillator stays open
+        ignoreUnused (fo);
     }
     const uint32_t gm = (uint32_t) (int) state.getProperty ("grainMask", 0xffff);
     // 0.99.9: a parameter the preset does not know yet (COMP, EQ lamp, ...) starts at its default
