@@ -210,6 +210,7 @@ public:
     bool inlineMode = false;
 
     FineSlider slider;
+    int boxWidth = 0;               // 1.0.9: a narrower value box (0 = normal)
     std::function<bool()> synced;   // 1.0.5 SYNC BPM: true = the value is a note value (copper dot + copper text)
     bool shownSynced = false;
     const int target;       // modulation target index, -1 if not modulatable
@@ -1141,6 +1142,9 @@ private:
     LoopModeBar loopBar { proc };
     GrainSwitch freezeSwitch { proc, ParamID::grainSync, { "SYNC BPM" }, {},   // 1.0.5: SYNC BPM took FREEZE's place (SPEED 0 = freeze)
                                "SYNC BPM: SIZE and DENSITY follow the project tempo in note values - grains start on the grid. Off = free (ms and grains per second)." };
+    // 1.0.9 KEY: the cutoff follows the note (lit) or stays put - one per filter, right above the filter picture
+    GrainSwitch keySwitch  { proc, ParamID::filterKey,  { "KEY" }, {}, "KEY lit: the cutoff follows the note you play (set at C3). Off: the cutoff stays put - every note gets the same filter." };
+    GrainSwitch keySwitch2 { proc, ParamID::filterKey2, { "KEY" }, {}, "KEY lit: the cutoff follows the note you play (set at C3). Off: the cutoff stays put - every note gets the same filter." };
     GrainSwitch shimmerSwitch { proc, ParamID::shimmerMode, { "FREE", "5TH", "OCT" }, "SHIMMER",
                                 "SHIMMER intervals: FREE = octaves, fifths and thirds (as before), 5TH = octaves and fifths, OCT = only octaves." };
     WavePicker wavePicker { proc };

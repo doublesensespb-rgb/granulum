@@ -679,7 +679,7 @@ void Knob::resized()
     }
     r.removeFromTop (titleH);
     if (compact) slider.setTextBoxStyle (Slider::NoTextBox, false, 0, 0);
-    else         slider.setTextBoxStyle (Slider::TextBoxBelow, false, jmin (getWidth() - 2, 90), boxH);
+    else         slider.setTextBoxStyle (Slider::TextBoxBelow, false, boxWidth > 0 ? jmin (getWidth() - 2, boxWidth) : jmin (getWidth() - 2, 90), boxH);
     slider.setBounds (r);
     refreshMods();
 }
@@ -3907,7 +3907,8 @@ void FilterScope::paint (Graphics& g)
     const bool isPeak = type == FilterUnit::Peak;
     const char* resId  = isPeak ? (which == 0 ? ParamID::peakQ : ParamID::peakQ2) : (which == 0 ? ParamID::reso : ParamID::reso2);
     const char* gainId = which == 0 ? ParamID::peakGain : ParamID::peakGain2;
-    const float keyMul = type == FilterUnit::Peak ? 1.0f : std::exp2 ((proc.engineAdd.lastNote.load (std::memory_order_relaxed) - 60.0f) / 12.0f);
+    const bool keyOn = s.getRawParameterValue (which == 0 ? ParamID::filterKey : ParamID::filterKey2)->load() > 0.5f;   // 1.0.9
+    const float keyMul = type == FilterUnit::Peak || ! keyOn ? 1.0f : std::exp2 ((proc.engineAdd.lastNote.load (std::memory_order_relaxed) - 60.0f) / 12.0f);
     const float fc  = modulated (cutId)  ? (which == 0 ? proc.keyCutoff : proc.keyCutoff2).load (std::memory_order_relaxed)
                                          : s.getRawParameterValue (cutId)->load() * keyMul;
     const float q   = modulated (resId)  ? (isPeak ? (which == 0 ? proc.viewPeakQ1 : proc.viewPeakQ2) : (which == 0 ? proc.viewReso1 : proc.viewReso2)).load (std::memory_order_relaxed)
@@ -3938,7 +3939,7 @@ void FilterScope::paint (Graphics& g)
     {
         const float x = a.getX() + (float) i;
         const float hz = xToHz ((float) i * (float) getWidth() / (float) n);
-        const float resp = on ? Decibels::gainToDecibels (FilterUnit::response (type, hz, fc, q, sr, pk, widthNow), -100.0f) : 0.0f;
+        const float resp = on ? Decibels::gainToDecibels (FilterUnit::response (type, hz, fc, q, sr, pk, widthNow, proc.classicFilter.load()), -100.0f) : 0.0f;
         const float sp = specDb[(size_t) jlimit (0, (int) specDb.size() - 1, (int) (x))];
         inSpec.lineTo (x, yOfSpec (sp));
         outSpec.lineTo (x, yOfSpec (sp + resp));
@@ -5538,6 +5539,8 @@ GranulumEditor::GranulumEditor (GranulumProcessor& p)
     addChildComponent (sampleMenu);
     addAndMakeVisible (loopBar);
     addAndMakeVisible (freezeSwitch);
+    addChildComponent (keySwitch);
+    addChildComponent (keySwitch2);
     addAndMakeVisible (shimmerSwitch);
     addAndMakeVisible (wavePicker);
     sampleMenu.onPick = [this] (const File& f)
@@ -5964,6 +5967,10 @@ void GranulumEditor::timerCallback()
         widthKnobs[1]->setAlpha (f2On ? 1.0f : 0.38f);
         const int l1 = p1 ? 1 : b1 ? 2 : 0, l2 = p2 ? 1 : b2 ? 2 : 0;
         if (l1 != filtLayout[0] || l2 != filtLayout[1]) { filtLayout[0] = l1; filtLayout[1] = l2; peakLayout[0] = p1; peakLayout[1] = p2; layoutFilterKnobs(); }
+        vis (keySwitch,  selectedFilter == 0 && ! p1);   // PEAK never follows the note
+        vis (keySwitch2, selectedFilter == 1 && ! p2);
+        keySwitch.setAlpha (fOn ? 1.0f : 0.38f);
+        keySwitch2.setAlpha (f2On ? 1.0f : 0.38f);
         filterKnobs[0]->slider.setTooltip (p1 ? "PEAK frequency (does not follow the note)" : "Cutoff follows the note you play (set at C3). The readout shows the note where it cuts.");
     }
     dimK (filter2Knobs, f2On); dim ({ &filterType2, routes[4].get() }, f2On);
@@ -6416,6 +6423,17 @@ void GranulumEditor::layoutFilterKnobs()
     };
     place (filterKnobs,  *peakKnobs[0], *peakQKnobs[0], *widthKnobs[0], filtLayout[0]);
     place (filter2Knobs, *peakKnobs[1], *peakQKnobs[1], *widthKnobs[1], filtLayout[1]);
+    // 1.0.9 KEY: right end of the value row, the right knob's value box made narrower to give it room
+    {
+        const float sc = (float) getWidth() / 1080.0f;
+        auto S = [sc] (float v) { return (int) std::round (v * sc); };
+        for (auto* k : { filterKnobs[1].get(), filter2Knobs[1].get(), peakQKnobs[0].get(), peakQKnobs[1].get(), widthKnobs[0].get(), widthKnobs[1].get(), peakKnobs[0].get(), peakKnobs[1].get() })
+            { k->boxWidth = S (36); k->resized(); }
+        const auto row = filterRow1;
+        const auto kb = Rectangle<int> (row.getRight() - S (27), row.getBottom() - S (18), S (27), S (16));
+        keySwitch.setBounds (kb);
+        keySwitch2.setBounds (kb);
+    }
 }
 
 void GranulumEditor::resized()
@@ -8022,7 +8040,7 @@ void GranulumEditor::setupTour()
           "SYNC BPM (copper = on): SIZE and DENSITY turn into note values and the grains start on the project grid - rhythmic chops in time. With it, SCATTER swings them off the grid and, turned up, skips some. Off = free (ms and grains per second).\n"
           "Grains are random: the same note never sounds exactly the same twice - that is the life of the sound, not a bug. For a punch that hits the same every time, leave the first stick or the SUB without GRAIN." },
         { [this] { return filterArea; }, "Filters",
-          "Two filters in a row: low-pass and high-pass up to 48 dB, band-pass with WIDTH, peak, comb and vowel. The arrows step through the types; 1 2 3 4 choose which oscillators go through (the same digits work on every effect). Drag inside the small picture: left / right = CUTOFF, up / down = RESO." },
+          "Two filters in a row: low-pass and high-pass up to 48 dB, band-pass with WIDTH, peak, comb and vowel. The arrows step through the types; 1 2 3 4 choose which oscillators go through (the same digits work on every effect). Drag inside the small picture: left / right = CUTOFF, up / down = RESO. KEY (lit) lets the cutoff follow the note; off = every note gets the same filter (no louder top notes). RESO lifts a peak at the cutoff and keeps the rest at full level." },
         { [this] { return fxArea; }, "Effects",
           "Distortion, delay and reverb, each with its own switch, MIX and routing. Distortion keeps its level steady while you turn DRIVE." },
         { [this, u] { return u (lfoFrame, voiceArea); }, "LFO & Envelope",

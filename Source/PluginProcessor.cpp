@@ -205,6 +205,7 @@ void FilterUnit::prepare (double sampleRate)
 
 void FilterUnit::reset()
 {
+    lastFc = -1.0f;
     for (auto* arr : { s1, s2, s3, s4 }) for (int c = 0; c < 2; ++c) { arr[c].ic1 = arr[c].ic2 = 0.0f; }
     for (auto& f : fm) for (auto& c : f) c.ic1 = c.ic2 = 0.0f;
     for (auto& c : comb) std::fill (c.begin(), c.end(), 0.0f);
@@ -223,7 +224,7 @@ static float bpMakeup (float widthOct, float q)
     return (float) jlimit (0.25, 4.0, 1.0 / jmax (1.0e-3, hp * lp));
 }
 
-float FilterUnit::response (int type, float hz, float fc, float q, double sr, float peakGainDb, float widthOct)
+float FilterUnit::response (int type, float hz, float fc, float q, double sr, float peakGainDb, float widthOct, bool classicMode)
 {
     using C = std::complex<double>;
     const double fcl = jlimit (10.0, sr * 0.45, (double) fc);
@@ -234,6 +235,27 @@ float FilterUnit::response (int type, float hz, float fc, float q, double sr, fl
         const C d = s * s + k * s + 1.0;
         switch (out) { case 0: return C (1.0) / d; case 1: return s * s / d; case 2: return k * s / d; case 4: return s / d; default: return (s * s + 1.0) / d; }
     };
+    if (! classicMode && (type == LP12 || type == LP24 || type == LP48 || type == HP12 || type == HP24 || type == HP48))
+    {
+        const double r = jmax (0.5, (double) q) / 0.70711;
+        const bool high = type == HP12 || type == HP24 || type == HP48;
+        const int stages = (type == LP12 || type == HP12) ? 1 : (type == LP24 || type == HP24) ? 2 : 4;
+        static const double q2[2] = { 0.54120, 1.30656 };
+        static const double q4[4] = { 0.50980, 0.60134, 0.89998, 2.56292 };
+        double m = 1.0;
+        for (int k = 0; k < stages; ++k)
+        {
+            const double base = stages == 1 ? 0.70711 : stages == 2 ? q2[k] : q4[k];
+            m *= std::abs (svf (hz, fcl, k == stages - 1 ? base * r : base, high ? 1 : 0));
+        }
+        return (float) m;
+    }
+    if (! classicMode && type == BP)
+    {
+        const double half = std::exp2 (0.5 * jlimit (0.1, 6.0, (double) widthOct));
+        return (float) (std::abs (svf (hz, jmax (10.0, fcl / half), q, 1)) * std::abs (svf (hz, jmin (sr * 0.45, fcl * half), q, 0))) * bpMakeup (widthOct, q);
+    }
+    ignoreUnused (classicMode);
     switch (type)
     {
         case LP12:  return (float) std::abs (svf (hz, fcl, q, 0)) * resoComp (q);
@@ -404,6 +426,67 @@ float ParamEq::bandDb (const Band& b, float hz, double sr)
 }
 
 void FilterUnit::process (float* L, float* R, int n, int type, float fc, float q, float peakGainDb, float widthOct)
+{
+    const bool modernType = type == LP12 || type == LP24 || type == LP48 || type == HP12 || type == HP24 || type == HP48 || type == BP;
+    if (classic || ! modernType) { processCore (L, R, n, type, fc, q, peakGainDb, widthOct); lastFc = fc; return; }
+    // 1.0.9: the cutoff glides from the last chunk's value in steps of 8 samples (smooth sweeps, no zipper)
+    const float from = lastFc > 0.0f ? lastFc : fc;
+    lastFc = fc;
+    if (std::abs (fc / from - 1.0f) < 1.0e-4f) { processModern (L, R, n, type, fc, q, widthOct); return; }
+    const float lr = std::log (fc / from);
+    for (int i = 0; i < n; i += 8)
+    {
+        const int m = jmin (8, n - i);
+        const float t = (float) (i + m) / (float) n;
+        processModern (L + i, R + i, m, type, from * std::exp (lr * t), q, widthOct);
+    }
+}
+
+void FilterUnit::processModern (float* L, float* R, int n, int type, float fc, float q, float widthOct)
+{
+    // Butterworth stages (flat at RESO 0.71); RESO scales the last stage only, so the peak at the cutoff equals RESO
+    // on 12, 24 and 48 alike and the pass band stays at 0 dB (like Serum). A soft ceiling above 0 dBFS tames
+    // a screaming peak without touching normal levels.
+    float* ch[2] = { L, R };
+    const float r = jmax (0.5f, q) / 0.70711f;
+    auto ceilingSoft = [] (float x) { const float a = std::abs (x); return a <= 1.0f ? x : std::copysign (1.0f + std::tanh (a - 1.0f), x); };
+    if (type == BP)
+    {
+        const float half = std::exp2 (0.5f * jlimit (0.1f, 6.0f, widthOct));
+        for (auto& s : s1) s.set (fc / half, q, sr);
+        for (auto& s : s2) s.set (fc * half, q, sr);
+        const float g = bpMakeup (widthOct, q);
+        for (int c = 0; c < 2; ++c)
+            for (int i = 0; i < n; ++i)
+            {
+                float lp, bp, hp, lp2;
+                s1[c].tick (ch[c][i], lp, bp, hp);
+                s2[c].tick (hp, lp2, bp, lp);
+                ch[c][i] = ceilingSoft (lp2 * g);
+            }
+        return;
+    }
+    const bool high = type == HP12 || type == HP24 || type == HP48;
+    const int stages = (type == LP12 || type == HP12) ? 1 : (type == LP24 || type == HP24) ? 2 : 4;
+    static const float q2[2] = { 0.54120f, 1.30656f };
+    static const float q4[4] = { 0.50980f, 0.60134f, 0.89998f, 2.56292f };
+    Svf* st[4] = { s1, s2, s3, s4 };
+    for (int k = 0; k < stages; ++k)
+    {
+        const float base = stages == 1 ? 0.70711f : stages == 2 ? q2[k] : q4[k];
+        const float qq = k == stages - 1 ? base * r : base;
+        for (int c = 0; c < 2; ++c) st[k][c].set (fc, qq, sr);
+    }
+    for (int c = 0; c < 2; ++c)
+        for (int i = 0; i < n; ++i)
+        {
+            float x = ch[c][i], lp, bp, hp;
+            for (int k = 0; k < stages; ++k) { st[k][c].tick (x, lp, bp, hp); x = high ? hp : lp; }
+            ch[c][i] = ceilingSoft (x);
+        }
+}
+
+void FilterUnit::processCore (float* L, float* R, int n, int type, float fc, float q, float peakGainDb, float widthOct)
 {
     float* ch[2] = { L, R };
     switch (type)
@@ -798,7 +881,9 @@ AudioProcessorValueTreeState::ParameterLayout GranulumProcessor::createLayout()
     ps.push_back (std::make_unique<P> (ParameterID { ParamID::gshape, 1 },  "Grain Shape", NormalisableRange<float> (0.0f, 1.0f), 0.5f,
                                        A().withStringFromValueFunction ([] (float v, int) { return v < 0.45f ? String ("SOFT ") + String (juce::roundToInt ((0.5f - v) * 200.0f)) : v > 0.55f ? String ("DROP ") + String (juce::roundToInt ((v - 0.5f) * 200.0f)) : String ("CLASSIC"); })));
     ps.push_back (std::make_unique<B> (ParameterID { ParamID::freeze, 1 }, "Freeze", false));   // 1.0.5: removed from the panel, ignored (old states -> SPEED 0)
-    ps.push_back (std::make_unique<B> (ParameterID { ParamID::grainSync, 1 }, "Grain Sync BPM", true));   // 1.0.5: on for new sounds, off for states saved before
+    ps.push_back (std::make_unique<B> (ParameterID { ParamID::grainSync, 1 }, "Grain Sync BPM", true));
+    ps.push_back (std::make_unique<B> (ParameterID { ParamID::filterKey, 1 },  "Filter Key Track", true));    // 1.0.9
+    ps.push_back (std::make_unique<B> (ParameterID { ParamID::filterKey2, 1 }, "Filter 2 Key Track", true));   // 1.0.5: on for new sounds, off for states saved before
     ps.push_back (std::make_unique<AudioParameterChoice> (ParameterID { ParamID::shimmerMode, 1 }, "Shimmer Intervals", StringArray { "FREE", "5TH", "OCT" }, 0));
 
     // TEST: master EQ, 5 bands (flat by default: every band at 0 dB)
@@ -1184,6 +1269,7 @@ void GranulumProcessor::resetToFactoryInit()
     for (int l = 0; l < kNumLfos; ++l) setLfoPoints (l, lfoPreset (1));
     setGrainMask (0xffffu);
     clearSample();            // 0.99.5: INIT also forgets the audio file of OSC 3
+    classicFilter.store (false);   // 1.0.9: new sounds get the new filter
     presetName = "INIT";
     presetSub = {};
     soundReset.store (true);
@@ -1854,8 +1940,10 @@ void GranulumProcessor::processChunk (int from, int len)
     // ---- shared block settings ----
     const float note = engineAdd.lastNote.load (std::memory_order_relaxed);
     const float keyMul = std::exp2 ((note - 60.0f) / 12.0f);
-    const float cut  = jlimit (20.0f, (float) (sr * 0.45), v[mtCutoff]  * keyMul);
-    const float cut2 = jlimit (20.0f, (float) (sr * 0.45), v[mtCutoff2] * keyMul);
+    // 1.0.9 KEY: off = the cutoff stays where it is on every note
+    const float cut  = jlimit (20.0f, (float) (sr * 0.45), v[mtCutoff]  * (apvts.getRawParameterValue (ParamID::filterKey)->load()  > 0.5f ? keyMul : 1.0f));
+    const float cut2 = jlimit (20.0f, (float) (sr * 0.45), v[mtCutoff2] * (apvts.getRawParameterValue (ParamID::filterKey2)->load() > 0.5f ? keyMul : 1.0f));
+    const bool classicF = classicFilter.load (std::memory_order_relaxed);
     keyCutoff.store  ((int) pFtype->load()  == FilterUnit::Peak ? v[mtCutoff]  : cut,  std::memory_order_relaxed);
     keyCutoff2.store ((int) pFtype2->load() == FilterUnit::Peak ? v[mtCutoff2] : cut2, std::memory_order_relaxed);
     viewPeak1.store (v[mtPeakGain], std::memory_order_relaxed);
@@ -1975,6 +2063,7 @@ void GranulumProcessor::processChunk (int from, int len)
 
         auto routed = [this, o, isSub] (int block) { return (isSub ? pRouteSub[(size_t) block] : pRoute[(size_t) block][(size_t) o])->load() > 0.5f; };
 
+        c.filter.classic = c.filter2.classic = classicF;
         if (filterOn && routed (0))
             c.filter.process (L, R, len, ft, ft == FilterUnit::Peak ? jlimit (20.0f, (float) (sr * 0.45), v[mtCutoff]) : cut, ft == FilterUnit::Peak ? v[mtPeakQ] : v[mtReso], v[mtPeakGain], v[mtBpWidth]);
         if (filter2On && routed (4))
@@ -2256,6 +2345,7 @@ void GranulumProcessor::installFactoryPresets()
     const auto root = presetFolder();
     for (auto& line : lines)
     {
+        if (line.trimStart().startsWith ("#")) continue;
         const auto folder = line.upToFirstOccurrenceOf ("|", false, false).trim();
         const auto file = line.fromFirstOccurrenceOf ("|", false, false).trim();
         if (file.isEmpty()) continue;
@@ -2574,6 +2664,7 @@ const StringArray& GranulumProcessor::randTypeNames()
 
 void GranulumProcessor::randomize()
 {
+    classicFilter.store (false);   // 1.0.9
     // TEST: a chosen sound type builds a whole, playable sound of that kind (still only touching the ticked parts)
     if (const int t = randType.load(); t > 0) { randomizeTyped (t); return; }
     // 0.99.5: RANDOM ALL only touches the parts ticked in its menu (randMask)
@@ -2717,6 +2808,7 @@ void GranulumProcessor::randomizeSection (int section)
 // oscillators) is always set for the type; the ticked parts (sticks, grains, filters, FX, LFOs) get type-shaped values.
 void GranulumProcessor::randomizeTyped (int type)
 {
+    classicFilter.store (false);   // 1.0.9: a new sound gets the new filter
     enum { Bass = 1, Pad, Pluck, Chord, Texture };
     Random r;
     const int m = randMask.load();
@@ -3070,6 +3162,7 @@ void GranulumProcessor::getStateInformation (MemoryBlock& destData)
     state.setProperty ("oscFold", String ((int) uiFold[0]) + String ((int) uiFold[1]) + String ((int) uiFold[2]), nullptr);
     state.setProperty ("pluginVersion", GRAINFORM_VERSION, nullptr);
     state.setProperty ("grainMask", (int) grainMask.load(), nullptr);
+    state.setProperty ("filterVer", classicFilter.load() ? 1 : 2, nullptr);   // 1.0.9: 1 = the filter before 1.0.9
 
     StringArray ms;
     for (auto& m : mods)
@@ -3197,6 +3290,7 @@ void GranulumProcessor::setStateInformation (const void* data, int sizeInBytes)
         ignoreUnused (fo);
     }
     const uint32_t gm = (uint32_t) (int) state.getProperty ("grainMask", 0xffff);
+    classicFilter.store ((int) state.getProperty ("filterVer", 1) < 2);   // 1.0.9: sounds saved before keep their filter
     {
         // 1.0.5 migrations - an old preset / project must sound exactly as before:
         auto setChild = [&state] (const char* id, float value)

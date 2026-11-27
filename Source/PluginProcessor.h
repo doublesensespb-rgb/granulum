@@ -97,6 +97,8 @@ namespace ParamID
     inline constexpr const char* gshape    = "gshape";      // TEST: grain SHAPE 0 soft .. 0.5 classic .. 1 drops
     inline constexpr const char* freeze    = "freeze";      // TEST: FREEZE - the grains stay where they are (1.0.5: removed, loads as SPEED 0)
     inline constexpr const char* grainSync = "grainSync";   // 1.0.5 SYNC BPM: SIZE and DENSITY in note values
+    inline constexpr const char* filterKey  = "filterKey";  // 1.0.9 KEY: the cutoff follows the note (on) or stays (off)
+    inline constexpr const char* filterKey2 = "filterKey2";
     inline constexpr const char* shimmerMode = "shimmerMode"; // TEST: FREE / 5TH / OCT
     inline constexpr const char* subTune   = "subTune";     // TEST: SUB smooth pitch -48..+48
     inline constexpr const char* bpWidth   = "bpWidth";     // TEST: BAND PASS width in octaves (filter 1 / 2)
@@ -253,7 +255,10 @@ public:
     void reset();
     void process (float* L, float* R, int n, int type, float cutoffHz, float q, float peakGainDb = 0.0f, float widthOct = 1.0f);
     // magnitude (linear) of this filter at frequency hz, for the filter view
-    static float response (int type, float hz, float cutoffHz, float q, double sampleRate, float peakGainDb = 0.0f, float widthOct = 1.0f);
+    static float response (int type, float hz, float cutoffHz, float q, double sampleRate, float peakGainDb = 0.0f, float widthOct = 1.0f, bool classicMode = true);
+    // 1.0.9: classic = the filter of every sound saved before 1.0.9 (bit-identical). New sounds: Serum-like - the pass band
+    // stays at 0 dB, RESO only lifts a peak at the cutoff (same peak on 12 / 24 / 48), the cutoff glides inside a chunk.
+    bool classic = true;
     static float resoComp (float q);
 private:
     struct Svf
@@ -276,6 +281,9 @@ private:
     std::vector<float> comb[2];
     int combW = 0;
     float combLp[2] {};
+    float lastFc = -1.0f;
+    void processCore (float* L, float* R, int n, int type, float cutoffHz, float q, float peakGainDb, float widthOct);
+    void processModern (float* L, float* R, int n, int type, float cutoffHz, float q, float widthOct);
 };
 
 // TEST: 5-band parametric EQ at the very end (before OUTPUT / CLIP). Simper SVF bands: LOW CUT, LOW SHELF, BELL,
@@ -611,6 +619,9 @@ private:
     double sinceTrigger = 1.0e9;   // seconds since the first note of a phrase
     int heldNotes = 0;
     double uiQuiet = 1.0e9; bool uiSounding = false;
+public:
+    std::atomic<bool> classicFilter { false };   // 1.0.9: sounds saved before 1.0.9 keep the old filter (state "filterVer")
+private:
     int chunkFrom = 0;   // 1.0.5: sample of the block where the current chunk starts (SYNC BPM grid)
 public:
     static const juce::StringArray& syncRateNames();   // DENSITY with SYNC BPM
