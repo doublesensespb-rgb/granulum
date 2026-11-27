@@ -2072,8 +2072,13 @@ void GranulumProcessor::processChunk (int from, int len)
         const double srU = getSampleRate() > 0 ? getSampleRate() : 44100.0;
         // 1.0.5.1: "sounding" = a note is held or still fading out (its release); reverb / delay tails do not count,
         // so everything stands still as soon as the notes are over
-        const bool voices = heldNotes > 0 || engineAdd.anyActive() || engineAddClean.anyActive() || engineWave.anyActive()
-                            || engineSmp.anyActive() || engineNoise.anyActive() || engineSub.anyActive();
+        // 1.0.6.1 fix: only oscillators that are ON count - a switched-off oscillator is not rendered, its voice never
+        // finished its release and kept the animation running forever (seen on the SUB of many presets)
+        const bool voices = heldNotes > 0
+                            || (pOsc1On->load() > 0.5f && (engineAdd.anyActive() || engineAddClean.anyActive() || engineWave.anyActive()))
+                            || (pOsc2On->load() > 0.5f && engineSmp.anyActive())
+                            || (pOsc3On->load() > 0.5f && engineNoise.anyActive())
+                            || (pSubOn->load() > 0.5f && engineSub.anyActive());
         uiQuiet = voices ? 0.0 : uiQuiet + (double) len / srU;
         uiSounding = uiQuiet < 0.03;
         ignoreUnused (pl, pr);
