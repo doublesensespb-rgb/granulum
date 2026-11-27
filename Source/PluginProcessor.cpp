@@ -1042,6 +1042,7 @@ GranulumProcessor::GranulumProcessor()
 
     // factory sounds ship inside the plugin and are written to Documents/GRAIN FORM/Samples/Atmos once
     installFactorySamples();
+    installFactoryPresets();   // 1.0.8
 
     timerCallback();
     startTimerHz (30);
@@ -2234,6 +2235,43 @@ void GranulumProcessor::installFactorySamples()
             dir.createDirectory();
             target.replaceWithData (data, (size_t) size);
         }
+    }
+}
+
+// 1.0.8: the factory presets ship inside the plugin and are written to Documents/GRAIN FORM/Presets/<folder> once
+// (a file that is already there is never touched - a user's own edit stays)
+void GranulumProcessor::installFactoryPresets()
+{
+    static bool done = false;
+    if (done) return;
+    done = true;
+    int msize = 0;
+    const char* manifest = nullptr;
+    for (int i = 0; i < BinaryData::namedResourceListSize && manifest == nullptr; ++i)
+        if (String (BinaryData::getNamedResourceOriginalFilename (BinaryData::namedResourceList[i])) == "factory_presets.txt")
+            manifest = BinaryData::getNamedResource (BinaryData::namedResourceList[i], msize);
+    if (manifest == nullptr) return;
+    StringArray lines;
+    lines.addLines (String::fromUTF8 (manifest, msize));
+    const auto root = presetFolder();
+    for (auto& line : lines)
+    {
+        const auto folder = line.upToFirstOccurrenceOf ("|", false, false).trim();
+        const auto file = line.fromFirstOccurrenceOf ("|", false, false).trim();
+        if (file.isEmpty()) continue;
+        const auto target = (folder.isEmpty() ? root : root.getChildFile (folder)).getChildFile (file);
+        if (target.existsAsFile()) continue;
+        for (int i = 0; i < BinaryData::namedResourceListSize; ++i)
+            if (String (BinaryData::getNamedResourceOriginalFilename (BinaryData::namedResourceList[i])) == file)
+            {
+                int size = 0;
+                if (const char* data = BinaryData::getNamedResource (BinaryData::namedResourceList[i], size))
+                {
+                    target.getParentDirectory().createDirectory();
+                    target.replaceWithData (data, (size_t) size);
+                }
+                break;
+            }
     }
 }
 

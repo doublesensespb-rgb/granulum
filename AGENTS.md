@@ -1,7 +1,7 @@
 # GRAIN FORM (repo: granulum) — guide for AI agents and developers
 
 Read this whole file before changing anything. It describes the product, the code, the build
-pipeline and how the owner wants to work. Current version: **1.0.7** on branch `test` (main still 0.99.6; 0.99.7-test / 0.99.8 / 0.99.9 were the labels before) (`project(... VERSION 1.0.7)` + display label `set(GRAINFORM_LABEL "1.0.7")` in CMakeLists.txt).
+pipeline and how the owner wants to work. Current version: **1.0.8** on branch `test` (main still 0.99.6; 0.99.7-test / 0.99.8 / 0.99.9 were the labels before) (`project(... VERSION 1.0.8)` + display label `set(GRAINFORM_LABEL "1.0.8")` in CMakeLists.txt).
 The UI shows the version on a small plate next to the title (taken from CMake `GRAINFORM_VERSION`, "0.9.8" -> "v0.98").
 
 ## 1. Product
@@ -212,6 +212,10 @@ dry part under a dense cloud (grains on, MIX >= 85 %) uses a 3-copy lite set. rd
 1.0.2: subParams sets uniVoices = 1 (the sub inherited OSC 1's VOICE). OSC 2-4 folding removed (uiFold forced false,
 fold buttons hidden). `StepArrow` < > beside the filter type combos ("noArrow" combos, GranulumLook::positionComboBoxText);
 type names switch to LP/HP short forms when "HIGH PASS 48" does not fit.
+1.0.8: FACTORY PRESETS ship in BinaryData: Resources/presets/<folder>/*.gpreset (GLOB_RECURSE in CMakeLists) + factory_presets.txt
+(lines "folder|file", file names must be unique - BinaryData flattens folders). installFactoryPresets() (constructor, once per process)
+writes each one to presetFolder()/<folder>/<file> only if missing. The owner's set: 39 presets in 4 folders; their sample paths
+(OSC 3 off) were blanked. Local test: lsnap/genbd.py includes the presets, rdemo Inst.cpp with HOME=/tmp/fakehome.
 1.0.7: uiSounding counts only oscillators that are ON (a switched-off osc's voice never finished -> endless animation;
 found with tools/Still.cpp, which must show every preset standing still in silence). Hosts that stop calling processBlock:
 lastProcessMs; the editor calls restUiValues() after 200 ms without a block.

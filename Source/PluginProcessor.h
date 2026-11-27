@@ -411,6 +411,7 @@ public:
     // factory samples (stock atmospheres): Documents/GRAIN FORM/Samples, browsed with < > in OSC 2
     static juce::File factorySampleDir();
     static void installFactorySamples();
+    static void installFactoryPresets();   // 1.0.8 (once per run, never overwrites)
     bool isFactorySample() const;
     void loadAdjacentFactorySample (int direction);
     std::shared_ptr<const WaveformPeaks> getSamplePeaks() const { const juce::ScopedLock sl (infoLock); return smpPeaks; }
