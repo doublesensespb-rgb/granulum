@@ -930,6 +930,7 @@ public:
 class TourOverlay final : public juce::Component
 {
 public:
+    static inline int introStyle = 1;   // 1.0.3 design variants of the welcome page (A card, B split, C open)
     struct Step { std::function<juce::Rectangle<int>()> area; juce::String title, text; };
     std::vector<Step> steps;
     void nextForTest() { step = juce::jmin (step + 1, (int) steps.size() - 1); repaint(); }
@@ -938,6 +939,7 @@ public:
     void mouseDown (const juce::MouseEvent&) override;
 private:
     juce::Rectangle<float> cardRect() const;
+    void paintIntro (juce::Graphics&);   // 1.0.3: step with no area = the welcome page (what GRAIN FORM is)
     juce::Rectangle<float> btnBack, btnNext, btnSkip;
     int step = 0;
 };
@@ -946,14 +948,16 @@ private:
 class GuidePill final : public juce::Component, public juce::SettableTooltipClient, private juce::Timer
 {
 public:
-    GuidePill() { startTimerHz (30); }
+    // 1.0.3: quiet pill (no glow, no animation); also used for ABOUT (info = true)
+    explicit GuidePill (bool isInfo = false) : info (isInfo) {}
     std::function<void()> onClick;
     float glowForTest = -1.0f;
+    bool info = false;
     void paint (juce::Graphics&) override;
     void mouseUp (const juce::MouseEvent&) override { if (onClick) onClick(); }
 private:
-    void timerCallback() override { repaint(); }   // slow copper breathing (a few px, cheap)
-    double t0 = juce::Time::getMillisecondCounterHiRes();
+    void timerCallback() override {}
+    double t0 = 0.0;
 };
 
 // TEST: RANDOM ALL panel: SOUND TYPE (ANY BASS PAD PLUCK CHORD TEXTURE), what to randomize, and a RANDOM button
@@ -1062,6 +1066,7 @@ private:
     EqView eqView { proc };
     TitleBadge titleBadge;
     GuidePill guidePill;
+    GuidePill aboutPill { true };   // 1.0.3: ABOUT (who made it, version)
     AboutOverlay about;
     TourOverlay tour;
     RandomPanel randomPanel { proc };

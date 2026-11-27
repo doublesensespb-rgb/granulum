@@ -1,7 +1,7 @@
 # GRAIN FORM (repo: granulum) — guide for AI agents and developers
 
 Read this whole file before changing anything. It describes the product, the code, the build
-pipeline and how the owner wants to work. Current version: **1.0.2** on branch `test` (main still 0.99.6; 0.99.7-test / 0.99.8 / 0.99.9 were the labels before) (`project(... VERSION 1.0.2)` + display label `set(GRAINFORM_LABEL "1.0.2")` in CMakeLists.txt).
+pipeline and how the owner wants to work. Current version: **1.0.3** on branch `test` (main still 0.99.6; 0.99.7-test / 0.99.8 / 0.99.9 were the labels before) (`project(... VERSION 1.0.3)` + display label `set(GRAINFORM_LABEL "1.0.3")` in CMakeLists.txt).
 The UI shows the version on a small plate next to the title (taken from CMake `GRAINFORM_VERSION`, "0.9.8" -> "v0.98").
 
 ## 1. Product
@@ -210,6 +210,9 @@ dry part under a dense cloud (grains on, MIX >= 85 %) uses a 3-copy lite set. rd
 1.0.2: subParams sets uniVoices = 1 (the sub inherited OSC 1's VOICE). OSC 2-4 folding removed (uiFold forced false,
 fold buttons hidden). `StepArrow` < > beside the filter type combos ("noArrow" combos, GranulumLook::positionComboBoxText);
 type names switch to LP/HP short forms when "HIGH PASS 48" does not fit.
+1.0.3: GuidePill is quiet (outline, no glow / timer) and doubles as ABOUT (`aboutPill`, info = true); both sit under the meter in
+gemsArea. TourOverlay: a step whose area() is empty is the welcome page (`paintIntro`, `introStyle` 1 = split layout chosen by
+the owner; 0 card, 2 open kept for reference). setupTour has 10 steps (welcome text in English). Snapshot mode `intro`.
 Pills MIX WAVE / AIR: LFO chip (`pillChip`, `pillLfo`, `pillChipDrag`) = dot + depth, drag up/down / wheel = depth, right-click removes.
 CPU: `Params::maxOverlap` (14 tones, 6 noise, set in voiceParams) caps grains per voice; spawnGrain stretches `spacing`
 (by reference) to length/cap, and to 35-100 % of that in RELEASE by env; v.norm follows, so the level holds. Owner's heavy pad

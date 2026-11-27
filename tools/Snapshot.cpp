@@ -174,6 +174,20 @@ int main (int argc, char** argv)
         save (*base, outDir, "eq.png");
         return 0;
     }
+    if (argc > 2 && String (argv[2]) == "intro")
+    {
+        setP (ParamID::osc1On, 1.0f); setP (ParamID::osc1Grain, 1.0f);
+        p.keyboardState.noteOn (1, 52, 0.9f);
+        run (p, ed, 30);
+        for (int v = 0; v < 3; ++v)
+        {
+            TourOverlay::introStyle = v;
+            ed->showOverlayForTest (2, 0); run (p, ed, 3);
+            save (*base, outDir, ("intro-" + String (v) + ".png").toRawUTF8());
+        }
+        for (int st : { 2, 4, 9 }) { ed->showOverlayForTest (2, st); run (p, ed, 3); save (*base, outDir, ("step-" + String (st + 1) + ".png").toRawUTF8()); }
+        return 0;
+    }
     if (argc > 2 && String (argv[2]) == "voice")
     {
         setP (ParamID::osc1On, 1.0f); setP (ParamID::osc1Voices, 5.0f);

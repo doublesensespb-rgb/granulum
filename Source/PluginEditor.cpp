@@ -5207,6 +5207,10 @@ GranulumEditor::GranulumEditor (GranulumProcessor& p)
         guidePill.setRepaintsOnMouseActivity (true);
         guidePill.setTooltip ("A short tour of GRAIN FORM");
         guidePill.onClick = [this] { tour.start(); };
+        addAndMakeVisible (aboutPill);
+        aboutPill.setRepaintsOnMouseActivity (true);
+        aboutPill.setTooltip ("Who made GRAIN FORM, version");
+        aboutPill.onClick = [this] { about.version = versionString(); about.setVisible (true); about.toFront (false); };
         addChildComponent (about);
         addChildComponent (tour);
         addChildComponent (randomPanel);
@@ -6107,8 +6111,15 @@ void GranulumEditor::resized()
 
     // ---- header ----
     auto header = r.removeFromTop (S (66));
-    gemsArea = header.removeFromRight (S (150)).withSizeKeepingCentre (S (150), S (44));
-    meterView.setBounds (gemsArea.withTrimmedTop (S (14)));
+    gemsArea = header.removeFromRight (S (150));
+    {
+        // 1.0.3: meter on top, GUIDE and ABOUT under it (next to CLIP), quiet
+        auto ga = gemsArea;
+        meterView.setBounds (ga.removeFromTop (S (40)).withTrimmedTop (S (6)));
+        auto pills = ga.removeFromTop (S (24)).withTrimmedTop (S (3));
+        guidePill.setBounds (pills.removeFromLeft (pills.getWidth() / 2).reduced (S (2), 0));
+        aboutPill.setBounds (pills.reduced (S (2), 0));
+    }
     header.removeFromRight (S (6));
     globalKnobs[1]->setBounds (header.removeFromRight (S (62)));   // output
     globalKnobs[2]->setBounds (header.removeFromRight (S (58)));   // master pitch, next to output
@@ -6131,7 +6142,6 @@ void GranulumEditor::resized()
         const int tw = GlyphArrangement::getStringWidthInt (tf, "GRAIN FORM") + S (6);
         titleBadge.scale = sc;
         titleBadge.setBounds (titleArea.getX(), titleArea.getY(), jmin (tw, titleArea.getWidth()), S (46));
-        guidePill.setBounds (S (304), S (58), S (90), S (32));
     }
     for (Component* o : { (Component*) &about, (Component*) &tour, (Component*) &randomPanel }) o->setBounds (getLocalBounds());
     randomPanel.anchor = randomMenuButton.getBounds();
@@ -7308,41 +7318,29 @@ void AboutOverlay::paint (Graphics& g)
 
 void GuidePill::paint (Graphics& g)
 {
-    // copper pill that invites a click: a soft glow breathes around it (3.2 s), brighter on hover
-    const float pad = (float) getHeight() * 0.22f;
-    auto r = getLocalBounds().toFloat().reduced (pad);
+    // 1.0.3: quiet - a thin copper outline on the panel colour, no glow, no animation; brighter only on hover
+    auto r = getLocalBounds().toFloat().reduced (1.0f);
     const float rad = r.getHeight() * 0.5f;
     const bool over = isMouseOver();
-    const auto orange = Palette::accent.withMultipliedSaturation (1.25f).withMultipliedBrightness (1.08f);
-    const double t = (Time::getMillisecondCounterHiRes() - t0) / 1000.0;
-    const float breath = glowForTest >= 0.0f ? glowForTest : 0.5f - 0.5f * std::cos ((float) (t * MathConstants<double>::twoPi / 3.2));
-    const float glow = over ? 1.0f : 0.35f + 0.65f * breath;
-    for (int i = 3; i >= 1; --i)
-    {
-        g.setColour (orange.withAlpha (0.09f * glow * (float) (4 - i)));
-        g.fillRoundedRectangle (r.expanded (pad * (float) i / 3.0f), rad + pad * (float) i / 3.0f);
-    }
-    const auto top = orange.brighter (over ? 0.45f : 0.25f), bottom = orange.darker (over ? 0.0f : 0.12f);
-    g.setGradientFill (ColourGradient (top, 0.0f, r.getY(), bottom, 0.0f, r.getBottom(), false));
+    g.setColour (over ? Palette::field.brighter (0.1f) : Palette::field);
     g.fillRoundedRectangle (r, rad);
-    g.setColour (Colours::white.withAlpha (over ? 0.45f : 0.25f));
+    g.setColour (Palette::accent.withAlpha (over ? 0.8f : 0.38f));
     g.drawRoundedRectangle (r.reduced (0.5f), rad, 1.0f);
-    auto dot = r.removeFromLeft (r.getHeight()).reduced (r.getHeight() * 0.16f);
-    g.setColour (Colours::white);
-    g.fillEllipse (dot);
-    g.setColour (orange.darker (0.2f));
-    g.setFont (uiFont (dot.getHeight() * 0.82f, true, 0.0f));
-    g.drawText ("?", dot.translated (0.0f, 0.5f), Justification::centred, false);
-    g.setColour (Colours::white);
-    g.setFont (uiFont (r.getHeight() * 0.56f, true, 0.16f));
-    g.drawText ("GUIDE", r.withTrimmedLeft (r.getHeight() * 0.18f).withTrimmedRight (r.getHeight() * 0.3f), Justification::centred, false);
+    auto dot = r.removeFromLeft (r.getHeight()).reduced (r.getHeight() * 0.2f);
+    g.setColour (Palette::accent.withAlpha (over ? 1.0f : 0.7f));
+    g.drawEllipse (dot.reduced (0.5f), 1.0f);
+    g.setFont (uiFont (dot.getHeight() * 0.72f, true, 0.0f));
+    g.drawText (info ? "i" : "?", dot.translated (0.0f, 0.3f), Justification::centred, false);
+    g.setColour (over ? Palette::text : Palette::label);
+    g.setFont (uiFont (r.getHeight() * 0.46f, true, 0.14f));
+    g.drawText (info ? "ABOUT" : "GUIDE", r.withTrimmedRight (r.getHeight() * 0.35f), Justification::centred, false);
 }
 
 Rectangle<float> TourOverlay::cardRect() const
 {
     const float sc = (float) getWidth() / 1080.0f;
     const auto a = steps[(size_t) step].area().toFloat();
-    const float w = 300.0f * sc, h = 178.0f * sc, gap = 16.0f * sc;
+    const float w = 300.0f * sc, h = 196.0f * sc, gap = 16.0f * sc;
     const auto full = getLocalBounds().toFloat().reduced (10.0f * sc);
     Rectangle<float> c;
     if (a.getRight() + gap + w <= full.getRight())     c = { a.getRight() + gap, a.getY() + 10.0f * sc, w, h };
@@ -7355,6 +7353,7 @@ Rectangle<float> TourOverlay::cardRect() const
 void TourOverlay::paint (Graphics& g)
 {
     if (steps.empty()) return;
+    if (steps[(size_t) step].area().isEmpty()) { paintIntro (g); return; }
     const float sc = (float) getWidth() / 1080.0f;
     const auto& st = steps[(size_t) step];
     const auto a = st.area().toFloat().expanded (4.0f * sc);
@@ -7418,12 +7417,144 @@ void TourOverlay::paint (Graphics& g)
     }
 }
 
+// 1.0.3: the welcome page of the GUIDE - what GRAIN FORM is (English). Three looks to choose from (introStyle).
+void TourOverlay::paintIntro (Graphics& g)
+{
+    const float sc = (float) getWidth() / 1080.0f;
+    const auto& st = steps[(size_t) step];
+    const StringArray paras = StringArray::fromLines (st.text);
+    const bool open = introStyle == 2;
+    g.setColour (Colour (0xff0b0b0c).withAlpha (open ? 0.88f : 0.72f));
+    g.fillAll();
+
+    auto drawButtons = [&] (Rectangle<float> bottom, bool centred)
+    {
+        g.setFont (uiFont (9.5f * sc, true, 0.14f));
+        if (centred)
+        {
+            btnNext = bottom.withSizeKeepingCentre (130.0f * sc, bottom.getHeight());
+            btnSkip = btnNext.translated (0, btnNext.getHeight() + 8.0f * sc).withSizeKeepingCentre (110.0f * sc, 16.0f * sc);
+        }
+        else
+        {
+            btnNext = bottom.removeFromRight (120.0f * sc);
+            btnSkip = bottom;
+        }
+        btnBack = {};
+        g.setColour (Palette::accent);
+        g.fillRoundedRectangle (btnNext, 8.0f * sc);
+        g.setColour (Palette::onAccent());
+        g.drawText ("START TOUR", btnNext, Justification::centred, false);
+        g.setColour (Palette::textDim);
+        g.drawText ("SKIP TOUR", btnSkip, centred ? Justification::centred : Justification::centredLeft, false);
+    };
+    auto drawParas = [&] (Rectangle<float> area, float size, Justification j)
+    {
+        g.setFont (uiFont (size * sc, false, 0.0f));
+        for (int k = 0; k < paras.size(); ++k)
+        {
+            g.setColour (k == 0 ? Palette::text : Palette::label);
+            AttributedString as;
+            as.append (paras[k], uiFont (size * sc, k == 0, 0.0f), k == 0 ? Palette::text : Palette::label);
+            as.setJustification (j);
+            as.setLineSpacing (3.0f * sc);
+            TextLayout tl; tl.createLayout (as, area.getWidth());
+            tl.draw (g, area.withHeight (tl.getHeight()));
+            area.removeFromTop (tl.getHeight() + 11.0f * sc);
+        }
+    };
+    auto title = [&] (Rectangle<float> r, float size, Justification j)
+    {
+        g.setColour (Palette::text);
+        g.setFont (uiFont (size * sc, false, 0.12f));
+        g.drawText ("GRAIN FORM", r.removeFromTop (size * 1.25f * sc), j, false);
+        g.setColour (Palette::accent.brighter (0.3f));
+        g.setFont (uiFont (8.5f * sc, true, 0.42f));
+        g.drawText ("SELECTIVE GRANULATION", r.removeFromTop (14.0f * sc), j, false);
+    };
+    auto card = [&] (Rectangle<float> c)
+    {
+        g.setColour (Colours::black.withAlpha (0.4f));
+        g.fillRoundedRectangle (c.translated (0, 8.0f * sc).expanded (3.0f * sc), 18.0f * sc);
+        g.setColour (Palette::panel.darker (0.3f));
+        g.fillRoundedRectangle (c, 16.0f * sc);
+        g.setColour (Colours::white.withAlpha (0.09f));
+        g.drawRoundedRectangle (c.reduced (0.5f), 16.0f * sc, 1.0f);
+    };
+
+    if (introStyle == 0)          // A: a calm centred card
+    {
+        auto c = Rectangle<float> (520.0f * sc, 338.0f * sc).withCentre (getLocalBounds().toFloat().getCentre());
+        card (c);
+        auto in = c.reduced (34.0f * sc, 28.0f * sc);
+        g.setColour (Palette::accent.brighter (0.3f));
+        g.setFont (uiFont (9.0f * sc, true, 0.2f));
+        g.drawText ("WELCOME", in.removeFromTop (16.0f * sc), Justification::centredLeft, false);
+        title (in.removeFromTop (54.0f * sc), 30.0f, Justification::centredLeft);
+        in.removeFromTop (12.0f * sc);
+        g.setColour (Colours::white.withAlpha (0.08f)); g.fillRect (in.removeFromTop (1.0f));
+        in.removeFromTop (16.0f * sc);
+        auto bottom = in.removeFromBottom (32.0f * sc);
+        drawParas (in, 12.5f, Justification::topLeft);
+        drawButtons (bottom, false);
+    }
+    else if (introStyle == 1)     // B: split - name and makers on the left, the story on the right
+    {
+        auto c = Rectangle<float> (760.0f * sc, 320.0f * sc).withCentre (getLocalBounds().toFloat().getCentre());
+        card (c);
+        auto in = c.reduced (34.0f * sc, 30.0f * sc);
+        auto bottom = in.removeFromBottom (32.0f * sc);
+        in.removeFromBottom (14.0f * sc);
+        auto left = in.removeFromLeft (250.0f * sc);
+        in.removeFromLeft (30.0f * sc);
+        g.setColour (Palette::accent.withAlpha (0.35f));
+        g.fillRect (Rectangle<float> (in.getX() - 15.0f * sc, in.getY(), 1.0f, in.getHeight()));
+        g.setColour (Palette::text);
+        g.setFont (uiFont (38.0f * sc, false, 0.1f));
+        g.drawText ("GRAIN", left.removeFromTop (44.0f * sc), Justification::centredLeft, false);
+        g.drawText ("FORM", left.removeFromTop (44.0f * sc), Justification::centredLeft, false);
+        g.setColour (Palette::accent.brighter (0.3f));
+        g.setFont (uiFont (8.5f * sc, true, 0.42f));
+        g.drawText ("SELECTIVE GRANULATION", left.removeFromTop (18.0f * sc), Justification::centredLeft, false);
+        left.removeFromTop (22.0f * sc);
+        g.setColour (Palette::textDim);
+        g.setFont (uiFont (10.5f * sc, false, 0.02f));
+        g.drawText ("Made by producers", left.removeFromTop (16.0f * sc), Justification::centredLeft, false);
+        g.setColour (Palette::accent.brighter (0.25f));
+        g.setFont (uiFont (13.0f * sc, true, 0.04f));
+        g.drawText ("Thematic & Oddkut", left.removeFromTop (18.0f * sc), Justification::centredLeft, false);
+        drawParas (in, 12.5f, Justification::topLeft);
+        drawButtons (bottom, false);
+    }
+    else                          // C: open - no card, big name and centred text over the dimmed synth
+    {
+        auto in = Rectangle<float> (600.0f * sc, 372.0f * sc).withCentre (getLocalBounds().toFloat().getCentre());
+        title (in.removeFromTop (76.0f * sc), 46.0f, Justification::centred);
+        in.removeFromTop (18.0f * sc);
+        g.setColour (Palette::accent.withAlpha (0.5f));
+        g.fillRect (Rectangle<float> (60.0f * sc, 1.0f).withCentre ({ in.getCentreX(), in.getY() }));
+        in.removeFromTop (22.0f * sc);
+        auto bottom = in.removeFromBottom (58.0f * sc);
+        drawParas (in, 13.5f, Justification::centredTop);
+        drawButtons (bottom.removeFromTop (32.0f * sc), true);
+    }
+    // progress: same segments as the other steps
+    const float bw = 14.0f * sc, gap = 4.0f * sc, total = (float) steps.size() * (bw + gap) - gap;
+    const float y = open ? btnSkip.getBottom() + 14.0f * sc : btnNext.getBottom() + 14.0f * sc;
+    for (int i = 0; i < (int) steps.size(); ++i)
+    {
+        g.setColour (i == step ? Palette::accent.brighter (0.3f) : Colours::white.withAlpha (0.12f));
+        g.fillRoundedRectangle (Rectangle<float> ((float) getWidth() * 0.5f - total * 0.5f + (float) i * (bw + gap), y, bw, 3.0f * sc), 1.5f * sc);
+    }
+}
+
 void TourOverlay::mouseDown (const MouseEvent& e)
 {
     const auto p = e.position;
     if (btnNext.contains (p)) { if (++step >= (int) steps.size()) { setVisible (false); return; } repaint(); return; }
     if (! btnBack.isEmpty() && btnBack.contains (p)) { step = jmax (0, step - 1); repaint(); return; }
     if (btnSkip.contains (p) && step < (int) steps.size() - 1) { setVisible (false); return; }
+    ignoreUnused (p);
 }
 
 Rectangle<float> RandomPanel::panel() const
@@ -7543,24 +7674,28 @@ void GranulumEditor::setupTour()
 {
     auto u = [] (Rectangle<int> a, Rectangle<int> b) { return a.isEmpty() ? b : b.isEmpty() ? a : a.getUnion (b); };
     tour.steps = {
+        { [] { return Rectangle<int>(); }, "Welcome",
+          "GRAIN FORM opens up a new way of making sound: it turns the familiar process of synthesis into working with living, ever-changing sonic textures.\n"
+          "Create deep basses, atmospheric pads, expressive leads and complex experimental textures. Turn ordinary sounds into something entirely new by shaping their movement, character and structure.\n"
+          "From subtle changes to radical transformations, GRAIN FORM gives you the tools to build a sound of your own." },
         { [this, u] { return u (u (presetBar.getBounds(), undoButton.getBounds()), u (randomButton.getBounds(), randomMenuButton.getBounds())); },
-          "Presets & Random", "Browse sounds with the arrows or the name. INIT starts clean (right-click to make your own INIT). RANDOM makes a new sound; the arrow next to it picks a SOUND TYPE (bass, pad, pluck...) and what may change." },
+          "Presets & Random", "Browse with the arrows or the name. SAVE keeps your sound, NEW VERSION saves a numbered copy (_02, _03). INIT starts clean - right-click to make your own INIT. The arrow next to RANDOM picks a SOUND TYPE." },
         { [this] { return osc1Area; }, "Oscillator 1",
-          "The heart of the synth. ADDITIVE draws harmonics with the sticks, WAVE plays a classic shape. MIX WAVE and AIR blend in a wave and bright air. Drop an LFO on any knob or pill." },
-        { [this, u] { return u (u (osc2Area, osc3Area), osc4Area); }, "Osc 2, Noise & Sub",
-          "A second oscillator, a noise layer and a sub with its own TUNE. Power each one with its switch; each can be granulated or stay clean." },
+          "ADDITIVE draws 16 harmonics with the sticks, WAVE plays a classic shape. MIX WAVE and AIR add a wave and bright air. VOICE stacks up to 16 voices with DETUNE and BLEND for a wide, thick sound." },
+        { [this, u] { return u (u (osc2Area, osc3Area), osc4Area); }, "Sub, Sample & Noise",
+          "OSC 2 SUB keeps the low end clean and mono. OSC 3 plays your own WAV (drag it in) or the built-in SOUNDS. OSC 4 adds one of 12 noises. GRAIN on each decides if it turns into grains." },
         { [this] { return screenFrame; }, "The screen",
-          "GRAINS shows every grain as it plays. Switch to EQ for a 5-band equalizer: drag the dots, click one to edit it, wheel for Q." },
+          "GRAINS shows every grain as it plays. EQ is a 5-band equalizer: drag the dots. COMP is a compressor with GAIN to win the level back. The lamps switch EQ and COMP on and off - compare before and after." },
         { [this] { return grainArea; }, "Granular",
-          "SIZE, DENSITY and SPREAD shape the grain cloud. FREEZE holds the moment, SHIMMER adds octaves or fifths, SHAPE sets the grain window." },
+          "BLOOM, SMEAR, SCATTER, SHIMMER, DRIFT and CHIME give the cloud its character; SIZE, DENSITY and SPREAD shape it. FREEZE holds the moment, SHAPE sets the grain window." },
         { [this] { return filterArea; }, "Filters",
-          "Two filters in a row: low-pass, high-pass, band-pass with WIDTH, peak, comb and vowel. Steeper slopes for a harder cut." },
+          "Two filters in a row: low-pass and high-pass up to 48 dB, band-pass with WIDTH, peak, comb and vowel. The arrows step through the types; 1 2 3 4 choose which oscillators go through." },
         { [this] { return fxArea; }, "Effects",
-          "Distortion, delay and reverb. Each has its own switch and MIX, so you can keep the dry sound punchy." },
+          "Distortion, delay and reverb, each with its own switch, MIX and routing. Distortion keeps its level steady while you turn DRIVE." },
         { [this, u] { return u (lfoFrame, voiceArea); }, "LFO & Envelope",
-          "Three LFOs: drag an LFO tab onto any knob to modulate it. ADSR shapes every note. VOICE sets POLY or MONO and the glide time." },
-        { [this, u] { return u (globalKnobs[2]->getBounds(), u (globalKnobs[1]->getBounds(), gemsArea)); }, "Pitch, Output & Clip",
-          "Master PITCH, the OUTPUT level and the meter. Push OUTPUT for really loud sounds. Enjoy GRAIN FORM!" } };
+          "Drag an LFO onto any knob, stick or pill: it swings from the knob's value to the top. ADSR shapes every note. MONO plays every note cleanly; PORTA slides between them." },
+        { [this, u] { return u (globalKnobs[2]->getBounds(), u (globalKnobs[1]->getBounds(), gemsArea)); }, "Output, CLIP & help",
+          "PITCH moves the whole synth, OUTPUT sets the level. CLIP cuts everything over 0 dB and nothing else. GUIDE opens this tour again, ABOUT shows who made GRAIN FORM. Enjoy!" } };
 }
 
 // ============================================================================
