@@ -1,7 +1,7 @@
 # GRAIN FORM (repo: granulum) — guide for AI agents and developers
 
 Read this whole file before changing anything. It describes the product, the code, the build
-pipeline and how the owner wants to work. Current version: **1.0.4** on branch `test` (main still 0.99.6; 0.99.7-test / 0.99.8 / 0.99.9 were the labels before) (`project(... VERSION 1.0.4)` + display label `set(GRAINFORM_LABEL "1.0.4")` in CMakeLists.txt).
+pipeline and how the owner wants to work. Current version: **1.0.5** on branch `test` (main still 0.99.6; 0.99.7-test / 0.99.8 / 0.99.9 were the labels before) (`project(... VERSION 1.0.5)` + display label `set(GRAINFORM_LABEL "1.0.5")` in CMakeLists.txt).
 The UI shows the version on a small plate next to the title (taken from CMake `GRAINFORM_VERSION`, "0.9.8" -> "v0.98").
 
 ## 1. Product
@@ -56,6 +56,8 @@ Amp envelope: ADSR tab (with on/off lamp; off = plain gate) in the modulation st
 - **After EVERY build, without being asked:** send the versioned zips, the links (builds branch, README-RU.md, AGENTS.md,
   commit history) and a fresh offline archive `GRAIN-FORM-<version>-offline.zip` (single-branch clone of main with history,
   JUCE 8.0.10, both builds, the handbook). The owner insists on this so he can continue without the agent.
+- **GUIDE rule (owner, Nov 27):** every new feature or hidden move (modifier keys, right-click, double-click, drag targets)
+  must be explained in the GUIDE (`setupTour`, English) in the same change - otherwise users report it as a bug.
 - He writes in Russian, often with typos or wrong keyboard layout. Reply in Russian.
 - Design (NEXT STEP, owner still deciding): a 'real hardware' look based on `docs/design/hardware-reference-gemini.png`
   (take ONLY the style, ignore its layout mistakes): worn black metal faceplate, metal frame, screws, chrome knurled knobs
@@ -210,6 +212,19 @@ dry part under a dense cloud (grains on, MIX >= 85 %) uses a 3-copy lite set. rd
 1.0.2: subParams sets uniVoices = 1 (the sub inherited OSC 1's VOICE). OSC 2-4 folding removed (uiFold forced false,
 fold buttons hidden). `StepArrow` < > beside the filter type combos ("noArrow" combos, GranulumLook::positionComboBoxText);
 type names switch to LP/HP short forms when "HIGH PASS 48" does not fit.
+1.0.5: SYNC BPM (`grainSync`, default ON; states without it are set OFF in setStateInformation so old presets do not change):
+Params::sync / syncSpacing / syncHoldMs / syncToNext (samples to the next grid line per chunk, from hostPpq + chunkFrom; -1 = free
+from the note); engine: Voice::syncGrid countdown, a grain per grid line, SCATTER = late start (swing) + skipped lines, nextGrainIn =
+1e30 waits for the grid; length = exactly syncHoldMs (overlap cap shortens grains instead of moving them). Names/beats:
+syncRateNames / syncLenNames / syncRateBeats / syncLenBeats / syncIndex. SIZE / DENSITY knobs show note values in copper with a copper
+dot (Knob::synced, syncTick, textFromValueFunction; GranulumLook::drawLabel uses the slider's textBoxTextColourId). The SYNC BPM button
+reuses `freezeSwitch` (GrainSwitch on grainSync). FREEZE param kept but ignored; freeze=1 states load as speed 0 (bit-identical, same
+code path). LOOP bar: OFF / LOOP / ONE-SHOT (segments -> param indexes 0, 1, 3); loopMode 2 states load as 1. RANDOM sets grainSync 0.
+LINKS: `LinksTab` + `LinksView` (selectedLfo 4; refreshed only on modVersion change), GranulumProcessor::listModulations / copyLfo.
+ALT + drag an LfoTab starts "lfocopy:<n>"; LfoTab is a DragAndDropTarget for it (copper "COPY HERE"). uiSounding: modNorm / harmLive
+show plain values after 0.15 s of silence. SubBars: right-click on a stick with an LFO removes it. LFO MODE default RETRIG.
+TourOverlay card height follows its text (TextLayout). Snapshot modes `links`, `tourall`. rdemo PRen.cpp = preset regression
+(renders every preset, compare raw files bit by bit before / after a change).
 1.0.4: RANDOM BASS rebuilt from the owner's 12 reference basses (randomizeTyped, type Bass): osc1Oct and subOct both -2 (FL E4 = MIDI 52
 -> E1 41 Hz; FL names middle C C5), sparse sticks (3 recipes) or WAVE saw/square (forces SUB), first ticked LFO = PUNCH (RETRIG, 1/4 or 1/1,
 fast peak + fall) linked to subVol / closed cutoff / distDrive / osc3Vol / pitch (2-4), second LFO one gentle target; DIST 80 % MIX .8-1,

@@ -95,7 +95,8 @@ namespace ParamID
     inline constexpr const char* osc1WaveMix = "osc1WaveMix"; // MIX mode: 0 = sticks only .. 1 = wave only
     inline constexpr const char* osc1Air   = "osc1Air";     // TEST: harmonics above the 16 sticks (ADDITIVE)
     inline constexpr const char* gshape    = "gshape";      // TEST: grain SHAPE 0 soft .. 0.5 classic .. 1 drops
-    inline constexpr const char* freeze    = "freeze";      // TEST: FREEZE - the grains stay where they are
+    inline constexpr const char* freeze    = "freeze";      // TEST: FREEZE - the grains stay where they are (1.0.5: removed, loads as SPEED 0)
+    inline constexpr const char* grainSync = "grainSync";   // 1.0.5 SYNC BPM: SIZE and DENSITY in note values
     inline constexpr const char* shimmerMode = "shimmerMode"; // TEST: FREE / 5TH / OCT
     inline constexpr const char* subTune   = "subTune";     // TEST: SUB smooth pitch -48..+48
     inline constexpr const char* bpWidth   = "bpWidth";     // TEST: BAND PASS width in octaves (filter 1 / 2)
@@ -477,6 +478,8 @@ public:
     static const char* modTargetId (int target);
     static int modIndexOf (const juce::String& paramId);
     void setModulation (int target, int lfo, float depth);
+    std::vector<std::pair<int, int>> listModulations() const;   // 1.0.5 LINKS: every {target, lfo}, LFO by LFO
+    void copyLfo (int from, int to);                             // 1.0.5 ALT + drag: all settings of one LFO onto another (not its links)
     void removeModulation (int target, int lfo);
     bool hasModulation (int target, int lfo) const;
     float getModulationDepth (int target, int lfo) const;
@@ -603,7 +606,15 @@ private:
     std::array<bool, kNumLfos>   lfoDone {};
     double sinceTrigger = 1.0e9;   // seconds since the first note of a phrase
     int heldNotes = 0;
-    double uiQuiet = 1.0e9; bool uiSounding = false;   // 1.0.5: modulation is drawn moving only while sound plays
+    double uiQuiet = 1.0e9; bool uiSounding = false;
+    int chunkFrom = 0;   // 1.0.5: sample of the block where the current chunk starts (SYNC BPM grid)
+public:
+    static const juce::StringArray& syncRateNames();   // DENSITY with SYNC BPM
+    static const juce::StringArray& syncLenNames();    // SIZE with SYNC BPM
+    static double syncRateBeats (int i);
+    static double syncLenBeats (int i);
+    static int syncIndex (float norm, int n) { return juce::jlimit (0, n - 1, (int) std::lround (norm * (float) (n - 1))); }
+private:   // 1.0.5: modulation is drawn moving only while sound plays
     double hostBpm = 120.0, hostPpq = -1.0;
     bool hostPlaying = false;
 

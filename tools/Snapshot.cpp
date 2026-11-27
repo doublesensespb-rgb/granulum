@@ -213,6 +213,19 @@ int main (int argc, char** argv)
         save (*base, outDir, "eq-lamp.png");
         return 0;
     }
+    if (argc > 2 && String (argv[2]) == "links")
+    {
+        setP (ParamID::osc1On, 1.0f); setP (ParamID::osc1Grain, 1.0f); setP (ParamID::subOn, 1.0f);
+        p.setModulation (mtCutoff, 0, 0.3f); p.setModulation (mtSubH1 + 1, 0, 0.5f); p.setModulation (kHarmTarget0 + 2, 0, 0.45f);
+        p.setModulation (mtDistDrive, 1, -0.2f); p.setModulation (mtEq3Gain, 1, 0.41f); p.setModulation (mtPitch, 2, 0.06f);
+        p.setModulation (mtSize, 2, -0.25f);
+        p.keyboardState.noteOn (1, 52, 0.9f);
+        run (p, ed, 30);
+        save (*base, outDir, "main-sync.png");
+        ed->showLinks(); run (p, ed, 5);
+        save (*base, outDir, "links.png");
+        return 0;
+    }
     if (argc > 2 && String (argv[2]) == "pill")
     {
         setP (ParamID::osc1On, 1.0f); setP (ParamID::osc1WaveMix, 0.3f); setP (ParamID::osc1Air, 0.5f);

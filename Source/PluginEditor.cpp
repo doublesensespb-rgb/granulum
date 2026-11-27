@@ -473,7 +473,7 @@ void GranulumLook::drawLabel (Graphics& g, Label& l)
         auto r = l.getLocalBounds().toFloat().withSizeKeepingCentre (jmin ((float) l.getWidth(), jmax (48.0f, tw)), (float) l.getHeight() - 1.0f);
         g.setColour (Palette::field);
         g.fillRoundedRectangle (r, 4.0f);
-        g.setColour (Palette::text);
+        g.setColour (l.getParentComponent()->findColour (Slider::textBoxTextColourId));   // 1.0.5: copper for SYNC BPM note values
         g.drawText (text, r, Justification::centred, false);
         return;
     }
@@ -697,6 +697,13 @@ void Knob::paint (Graphics& g)
         return;
     }
     g.drawText (title.toUpperCase(), getLocalBounds().removeFromTop (titleH), Justification::centred);
+    if (shownSynced)
+    {
+        // SYNC BPM: a small copper dot before the name
+        const float tw = (float) GlyphArrangement::getStringWidthInt (g.getCurrentFont(), title.toUpperCase());
+        g.setColour (Palette::accent);
+        g.fillEllipse (Rectangle<float> (4.0f, 4.0f).withCentre ({ getWidth() * 0.5f - tw * 0.5f - 6.0f, titleH * 0.5f }));
+    }
 }
 
 void FoldButton::paint (Graphics& g)
@@ -814,6 +821,19 @@ void Knob::refreshMods()
         c->repaint();
     }
     repaint();
+}
+
+void Knob::syncTick()
+{
+    if (synced)
+        if (const bool s = synced(); s != shownSynced)
+        {
+            shownSynced = s;
+            slider.setColour (Slider::textBoxTextColourId, s ? Palette::accent : Palette::text);
+            slider.lookAndFeelChanged();
+            slider.updateText();
+            repaint();
+        }
 }
 
 void Knob::tick()
@@ -1351,7 +1371,7 @@ void GrainField::paint (Graphics& g)
         }
         g.setColour (Palette::accent.withAlpha (0.9f));
         g.setFont (uiFont (9.0f, true, 0.12f));
-        const char* tag = lm == 1 ? "LOOP" : lm == 2 ? "PING-PONG" : "ONE-SHOT";
+        const char* tag = lm == 1 || lm == 2 ? "LOOP" : "ONE-SHOT";
         g.drawText (tag, Rectangle<float> (xa + 14.0f, r.getY() + 3.0f, jmax (10.0f, xb - xa - 20.0f), 14.0f), Justification::centredLeft, true);
     }
 
@@ -1875,14 +1895,17 @@ int LoopModeBar::mode() const { return (int) proc.apvts.getRawParameterValue (Pa
 
 void LoopModeBar::paint (Graphics& g)
 {
-    static const char* names[] = { "OFF", "LOOP", "PING-PONG", "ONE-SHOT" };
-    static const float widths[] = { 0.17f, 0.22f, 0.32f, 0.29f };
+    // 1.0.5: PING-PONG removed (loads as LOOP); segments map to the parameter's indexes 0, 1, 3
+    static const char* names[] = { "OFF", "LOOP", "ONE-SHOT" };
+    static const int idxOf[] = { 0, 1, 3 };
+    static const float widths[] = { 0.25f, 0.32f, 0.43f };
     auto r = getLocalBounds().toFloat();
     g.setColour (Palette::field);
     g.fillRoundedRectangle (r, 7.0f);
-    const int m = mode();
+    const int m = mode() == 2 ? 1 : mode() == 3 ? 2 : mode();
+    ignoreUnused (idxOf);
     float x = r.getX();
-    for (int i = 0; i < 4; ++i)
+    for (int i = 0; i < 3; ++i)
     {
         auto seg = Rectangle<float> (x, r.getY(), r.getWidth() * widths[i], r.getHeight());
         x += seg.getWidth();
@@ -1899,9 +1922,10 @@ void LoopModeBar::paint (Graphics& g)
 
 void LoopModeBar::mouseDown (const MouseEvent& e)
 {
-    static const float widths[] = { 0.17f, 0.22f, 0.32f, 0.29f };
+    static const float widths[] = { 0.25f, 0.32f, 0.43f };
+    static const int idxOf[] = { 0, 1, 3 };
     float x = 0.0f; int idx = 3;
-    for (int i = 0; i < 4; ++i) { x += widths[i] * (float) getWidth(); if (e.position.x < x) { idx = i; break; } }
+    for (int i = 0; i < 3; ++i) { x += widths[i] * (float) getWidth(); if (e.position.x < x) { idx = idxOf[i]; break; } }
     if (auto* p = proc.apvts.getParameter (ParamID::loopMode))
     {
         p->beginChangeGesture();
@@ -3301,7 +3325,7 @@ void ChordPicker::paint (Graphics& g)
 LfoTab::LfoTab (GranulumProcessor& p, int i) : index (i), proc (p)
 {
     setMouseCursor (MouseCursor::NormalCursor);
-    setTooltip ("Click the light: switch this LFO on/off everywhere (routings are kept).\nDrag onto any knob to modulate it.");
+    setTooltip ("Click the light: switch this LFO on/off everywhere (routings are kept).\nDrag onto any knob to modulate it.\nALT + drag onto another LFO tab: copy all its settings there.");
 }
 
 void LfoTab::paint (Graphics& g)
@@ -3325,6 +3349,15 @@ void LfoTab::paint (Graphics& g)
         g.drawEllipse (ledR.reduced (0.5f), 1.2f);
     }
 
+    if (copyHover)
+    {
+        // ALT + drag target: copper frame and what will happen
+        g.setColour (Palette::accent);
+        g.drawRoundedRectangle (r.reduced (0.5f), 6.0f, 2.0f);
+        g.setFont (uiFont (11.0f, true, 0.08f));
+        g.drawText ("COPY HERE", r.withTrimmedLeft (24.0f), Justification::centredLeft, false);
+        return;
+    }
     g.setColour ((selected ? Palette::hi : Palette::text).withAlpha (on ? 1.0f : 0.45f));
     g.setFont (uiFont (13.0f, true, 0.08f));
     g.drawText ("LFO " + String (index + 1), r.withTrimmedLeft (24.0f), Justification::centredLeft, false);
@@ -3369,11 +3402,257 @@ void LfoTab::mouseDrag (const MouseEvent& e)
     if (auto* c = DragAndDropContainer::findParentDragContainerFor (this))
     {
         dragging = true;
-        c->startDragging ("lfo:" + String (index), this);
+        c->startDragging ((e.mods.isAltDown() ? "lfocopy:" : "lfo:") + String (index), this);
     }
 }
 
 void LfoTab::mouseUp (const MouseEvent&) { dragging = false; }
+
+void LfoTab::itemDropped (const SourceDetails& s)
+{
+    copyHover = false;
+    const int from = s.description.toString().fromFirstOccurrenceOf (":", false, false).getIntValue();
+    proc.copyLfo (from, index);
+    if (onSelect) onSelect (index);
+    repaint();
+}
+
+// ============================================================================
+// 1.0.5 LINKS
+
+void LinksTab::paint (Graphics& g)
+{
+    auto r = getLocalBounds().toFloat().reduced (1.0f);
+    g.setColour (selected ? Palette::button : Palette::field);
+    g.fillRoundedRectangle (r, 6.0f);
+    if (selected) { g.setColour (Palette::accent); g.drawRoundedRectangle (r.reduced (0.5f), 6.0f, 1.2f); }
+    for (int l = 0; l < kNumLfos; ++l)
+    {
+        g.setColour (Palette::lfo (l));
+        g.fillEllipse (Rectangle<float> (4.5f, 4.5f).withCentre ({ r.getX() + 8.0f + 4.5f * (float) l, r.getCentreY() }));
+    }
+    g.setColour (selected ? Palette::hi : Palette::text);
+    g.setFont (uiFont (13.0f, true, 0.08f));
+    g.drawText ("LINKS", r.withTrimmedLeft (24.0f), Justification::centredLeft, false);
+    int n = 0;
+    for (int l = 0; l < kNumLfos; ++l) n += proc.countModulations (l);
+    if (n > 0)
+    {
+        auto b = Rectangle<float> (18.0f, 13.0f).withCentre ({ r.getRight() - 13.0f, r.getCentreY() });
+        g.setColour (Palette::accent);
+        g.fillRoundedRectangle (b, 6.5f);
+        g.setColour (Palette::onAccent());
+        g.setFont (uiFont (9.5f, true));
+        g.drawText (String (n), b, Justification::centred, false);
+    }
+}
+
+std::vector<std::pair<int, int>> LinksView::shown() const
+{
+    std::vector<std::pair<int, int>> out;
+    for (auto& rw : rows) if (filter < 0 || rw.second == filter) out.push_back (rw);
+    return out;
+}
+
+void LinksView::clampScroll()
+{
+    const int n = (int) shown().size();
+    const int maxScroll = jmax (0, (n - kVisible + 1) / 2 * 2);   // scrolls by one row in each column
+    scroll = jlimit (0, maxScroll, scroll);
+}
+
+Rectangle<float> LinksView::chip (int i) const
+{
+    const auto b = getLocalBounds().toFloat().reduced (8.0f, 6.0f);
+    const float w = 34.0f, gap = 5.0f;
+    const float x0 = b.getRight() - 84.0f - 4.0f * w - 3.0f * gap;
+    return { x0 + (float) i * (w + gap), b.getY() + 1.0f, w, 15.0f };
+}
+
+Rectangle<float> LinksView::removeAll() const
+{
+    const auto b = getLocalBounds().toFloat().reduced (8.0f, 6.0f);
+    return { b.getRight() - 78.0f, b.getY() + 1.0f, 78.0f, 15.0f };
+}
+
+LinksView::Geo LinksView::geo (int slot) const
+{
+    auto b = getLocalBounds().toFloat().reduced (8.0f, 6.0f);
+    b.removeFromTop (22.0f);
+    const float colW = (b.getWidth() - 14.0f) / 2.0f, rh = b.getHeight() / (float) kPerCol;
+    const int col = slot / kPerCol, row = slot % kPerCol;
+    Geo g;
+    g.row = { b.getX() + (float) col * (colW + 14.0f), b.getY() + rh * (float) row, colW, rh };
+    auto r = g.row;
+    g.dot = Rectangle<float> (12.0f, 12.0f).withCentre ({ r.getX() + 7.0f, r.getCentreY() });
+    g.close = Rectangle<float> (14.0f, 14.0f).withCentre ({ r.getRight() - 8.0f, r.getCentreY() });
+    g.value = Rectangle<float> (34.0f, rh).withPosition (g.close.getX() - 38.0f, r.getY());
+    const float tx = r.getX() + r.getWidth() * 0.42f;
+    g.track = Rectangle<float> (tx, r.getCentreY() - 6.0f, g.value.getX() - 6.0f - tx, 12.0f);
+    return g;
+}
+
+String LinksView::targetName (int t) const
+{
+    if (isHarmTarget (t)) return "OSC 1  HARM " + String (t - kHarmTarget0 + 1);
+    if (t >= mtSubH1 && t < mtSubH1 + 5) return "SUB " + String (t - mtSubH1 + 1);
+    if (auto* p = proc.apvts.getParameter (GranulumProcessor::modTargetId (t))) return p->getName (40).toUpperCase();
+    return GranulumProcessor::modTargetId (t);
+}
+
+void LinksView::paint (Graphics& g)
+{
+    auto b = getLocalBounds().toFloat();
+    g.setColour (Palette::screen);
+    g.fillRoundedRectangle (b, 8.0f);
+    const auto all = shown();
+    auto head = b.reduced (8.0f, 6.0f).removeFromTop (17.0f);
+    g.setColour (Palette::text);
+    g.setFont (uiFont (11.0f, true, 0.1f));
+    g.drawText ("LINKS", head, Justification::centredLeft, false);
+    g.setColour (Palette::textDim);
+    g.setFont (uiFont (9.5f, false, 0.04f));
+    g.drawText (String ((int) rows.size()) + ((int) rows.size() == 1 ? " link" : " links"), head.withTrimmedLeft (46.0f), Justification::centredLeft, false);
+    for (int i = 0; i < 4; ++i)
+    {
+        const auto c = chip (i);
+        const auto col = i == 0 ? Palette::accent : Palette::lfo (i - 1);
+        const bool on = filter == i - 1;
+        g.setColour (on ? col : Palette::field);
+        g.fillRoundedRectangle (c, 7.5f);
+        g.setColour (col.withAlpha (on ? 1.0f : 0.7f));
+        g.drawRoundedRectangle (c.reduced (0.5f), 7.5f, 1.0f);
+        g.setColour (on ? Palette::screen : col);
+        g.setFont (uiFont (9.0f, true, 0.06f));
+        g.drawText (i == 0 ? "ALL" : String (i), c, Justification::centred, false);
+    }
+    g.setColour (all.empty() ? Palette::textDim.withAlpha (0.4f) : Palette::textDim);
+    g.setFont (uiFont (8.5f, true, 0.1f));
+    g.drawText ("REMOVE ALL", removeAll(), Justification::centredRight, false);
+
+    if (all.empty())
+    {
+        g.setColour (Palette::textDim);
+        g.setFont (uiFont (11.0f, false, 0.02f));
+        g.drawText ("No links yet - drag an LFO tab onto a knob, stick or pill.", b.withTrimmedTop (20.0f), Justification::centred, false);
+        return;
+    }
+    g.setColour (Colours::white.withAlpha (0.05f));
+    g.drawVerticalLine ((int) (geo (kPerCol).row.getX() - 7.0f), geo (0).row.getY(), geo (kPerCol - 1).row.getBottom());
+    for (int s = 0; s < kVisible; ++s)
+    {
+        const int i = scroll + s;
+        if (i >= (int) all.size()) break;
+        const auto [t, l] = all[(size_t) i];
+        const auto gm = geo (s);
+        const auto col = Palette::lfo (l).withMultipliedAlpha (proc.isLfoOn (l) ? 1.0f : 0.45f);
+        g.setColour (col);
+        g.fillEllipse (gm.dot);
+        g.setColour (Palette::screen);
+        g.setFont (uiFont (8.0f, true));
+        g.drawText (String (l + 1), gm.dot.translated (0.0f, 0.5f), Justification::centred, false);
+        g.setColour (Palette::text);
+        g.setFont (uiFont (10.0f, true, 0.04f));
+        g.drawText (targetName (t), Rectangle<float> (gm.dot.getRight() + 6.0f, gm.row.getY(), gm.track.getX() - gm.dot.getRight() - 10.0f, gm.row.getHeight()),
+                    Justification::centredLeft, true);
+        const float d = proc.getModulationDepth (t, l);
+        const auto tr = gm.track;
+        const float cy = tr.getCentreY(), cx = tr.getCentreX(), xv = cx + tr.getWidth() * 0.5f * jlimit (-1.0f, 1.0f, d);
+        g.setColour (Colours::white.withAlpha (0.09f));
+        g.fillRoundedRectangle (tr.getX(), cy - 2.0f, tr.getWidth(), 4.0f, 2.0f);
+        g.setColour (Palette::textDim.withAlpha (0.6f));
+        g.fillRect (cx - 0.5f, cy - 5.0f, 1.0f, 10.0f);
+        g.setColour (col);
+        g.fillRoundedRectangle (jmin (cx, xv), cy - 2.0f, std::abs (xv - cx), 4.0f, 2.0f);
+        g.setColour (Palette::text);
+        g.fillEllipse (Rectangle<float> (9.0f, 9.0f).withCentre ({ xv, cy }));
+        const int pc = roundToInt (d * 100.0f);
+        g.setFont (uiFont (10.0f, true, 0.0f));
+        g.drawText ((pc > 0 ? "+" : "") + String (pc), gm.value, Justification::centredRight, false);
+        g.setColour (Palette::textDim);
+        g.drawEllipse (gm.close.reduced (0.5f), 1.0f);
+        const auto x = gm.close.reduced (4.2f);
+        g.setColour (Palette::text);
+        g.drawLine (x.getX(), x.getY(), x.getRight(), x.getBottom(), 1.2f);
+        g.drawLine (x.getX(), x.getBottom(), x.getRight(), x.getY(), 1.2f);
+    }
+    if ((int) all.size() > kVisible)
+    {
+        // a thin scroll mark on the right
+        const float h = b.getHeight() - 36.0f, frac = (float) kVisible / (float) all.size();
+        const float pos = (float) scroll / (float) jmax (1, (int) all.size() - kVisible);
+        g.setColour (Colours::white.withAlpha (0.15f));
+        g.fillRoundedRectangle (b.getRight() - 4.0f, b.getY() + 28.0f + (h * (1.0f - frac)) * jlimit (0.0f, 1.0f, pos), 2.0f, h * frac, 1.0f);
+    }
+}
+
+void LinksView::mouseDown (const MouseEvent& e)
+{
+    for (int i = 0; i < 4; ++i) if (chip (i).contains (e.position)) { filter = i - 1; scroll = 0; repaint(); return; }
+    const auto all = shown();
+    if (removeAll().contains (e.position))
+    {
+        for (auto [t, l] : all) proc.removeModulation (t, l);
+        refresh();
+        return;
+    }
+    for (int s = 0; s < kVisible && scroll + s < (int) all.size(); ++s)
+    {
+        const auto gm = geo (s);
+        const auto [t, l] = all[(size_t) (scroll + s)];
+        if (gm.close.expanded (3.0f).contains (e.position) || (e.mods.isPopupMenu() && gm.row.contains (e.position)))
+        {
+            proc.removeModulation (t, l);
+            refresh();
+            return;
+        }
+        if (gm.track.expanded (6.0f, 4.0f).contains (e.position))
+        {
+            dragRow = scroll + s;
+            dragStartDepth = proc.getModulationDepth (t, l);
+            dragStartX = e.position.x;
+            // a click on the track jumps there
+            proc.setModulation (t, l, jlimit (-1.0f, 1.0f, (e.position.x - gm.track.getCentreX()) / (gm.track.getWidth() * 0.5f)));
+            dragStartDepth = proc.getModulationDepth (t, l);
+            repaint();
+            return;
+        }
+    }
+}
+
+void LinksView::mouseDrag (const MouseEvent& e)
+{
+    const auto all = shown();
+    if (dragRow < 0 || dragRow >= (int) all.size()) return;
+    const auto [t, l] = all[(size_t) dragRow];
+    const auto gm = geo (dragRow - scroll);
+    const float k = e.mods.isShiftDown() ? 0.25f : 1.0f;
+    float d = dragStartDepth + (e.position.x - dragStartX) / (gm.track.getWidth() * 0.5f) * k;
+    d = std::round (jlimit (-1.0f, 1.0f, d) * 100.0f) / 100.0f;
+    proc.setModulation (t, l, d);
+    repaint();
+}
+
+void LinksView::mouseDoubleClick (const MouseEvent& e)
+{
+    // double-click a slider: back to a full swing from the knob
+    const auto all = shown();
+    for (int s = 0; s < kVisible && scroll + s < (int) all.size(); ++s)
+        if (geo (s).track.expanded (6.0f, 4.0f).contains (e.position))
+        {
+            const auto [t, l] = all[(size_t) (scroll + s)];
+            proc.setModulation (t, l, proc.getModulationDepth (t, l) < 0.0f ? -1.0f : 1.0f);
+            repaint();
+            return;
+        }
+}
+
+void LinksView::mouseWheelMove (const MouseEvent&, const MouseWheelDetails& w)
+{
+    scroll += w.deltaY < 0.0f ? 2 : -2;
+    clampScroll();
+    repaint();
+}
 
 // ============================================================================
 // LFO editor — 4 points, bendable segments
@@ -5006,6 +5285,23 @@ GranulumEditor::GranulumEditor (GranulumProcessor& p)
     add (smallKnobs, ParamID::spread,   "Spread",   Knob::Size::Small);
     add (smallKnobs, ParamID::gmix,     "Mix",      Knob::Size::Small);
     add (smallKnobs, ParamID::gshape,   "Shape",    Knob::Size::Small);   // TEST
+    // 1.0.5 SYNC BPM: SIZE and DENSITY read as note values while it is on
+    for (auto& k : smallKnobs)
+    {
+        const bool isSize = k->target == mtSize, isDens = k->target == mtDensity;
+        if (! isSize && ! isDens) continue;
+        auto* prm = proc.apvts.getParameter (isSize ? ParamID::gsize : ParamID::density);
+        auto syncOn = [this] { return proc.apvts.getRawParameterValue (ParamID::grainSync)->load() > 0.5f; };
+        k->synced = syncOn;
+        auto old = k->slider.textFromValueFunction;
+        k->slider.textFromValueFunction = [prm, syncOn, isSize, old] (double val)
+        {
+            if (! syncOn()) return old ? old (val) : String (val);
+            const auto& names = isSize ? GranulumProcessor::syncLenNames() : GranulumProcessor::syncRateNames();
+            return names[GranulumProcessor::syncIndex (prm->convertTo0to1 ((float) val), names.size())];
+        };
+        k->slider.updateText();
+    }
 
     add (osc1Knobs, ParamID::osc1Vol,  "Vol",  Knob::Size::Small);
     add (osc1Knobs, ParamID::osc1Oct,  "Oct",  Knob::Size::Small);
@@ -5307,6 +5603,9 @@ GranulumEditor::GranulumEditor (GranulumProcessor& p)
     ampTab.param = proc.apvts.getParameter (ParamID::ampOn);
     addAndMakeVisible (ampTab);
     ampTab.onSelect = [this] { selectLfo (3); };
+    addAndMakeVisible (linksTab);
+    linksTab.onSelect = [this] { selectLfo (4); };
+    addChildComponent (linksView);
     for (auto [id, nm] : { std::pair<const char*, const char*> { ParamID::ampA, "A" }, { ParamID::ampD, "D" },
                            { ParamID::ampS, "S" }, { ParamID::ampR, "R" } })
     {
@@ -5350,11 +5649,15 @@ GranulumEditor::~GranulumEditor()
 void GranulumEditor::selectLfo (int i)
 {
     selectedLfo = i;
-    const bool amp = i == 3;
+    const bool amp = i == 3, links = i == 4;
     ampTab.selected = amp;
     ampTab.repaint();
+    linksTab.selected = links;
+    linksTab.repaint();
+    linksView.setVisible (links);
+    if (links) linksView.refresh();
     ampEditor.setVisible (amp);
-    lfoEditor.setVisible (! amp);
+    lfoEditor.setVisible (! amp && ! links);
     for (auto& k : ampKnobs) k->setVisible (amp);
     repaint();
     for (int l = 0; l < kNumLfos; ++l)
@@ -5369,7 +5672,7 @@ void GranulumEditor::selectLfo (int i)
         c.rate->setVisible (l == i && ! sync);
         c.div->setVisible (l == i && sync);
     }
-    if (! amp) lfoEditor.setLfo (i);
+    if (i < kNumLfos) lfoEditor.setLfo (i);
 }
 
 void GranulumEditor::selectFx (int i)
@@ -5693,10 +5996,12 @@ void GranulumEditor::timerCallback()
         shownModVersion = v;
         for (auto* k : allKnobs) k->refreshMods();
         for (auto& t : lfoTabs) t->repaint();
+        linksTab.repaint();
+        if (linksView.isVisible()) linksView.refresh();
     }
-    for (auto* k : allKnobs) if (k->isShowing()) k->tick();
+    for (auto* k : allKnobs) { k->syncTick(); if (k->isShowing()) k->tick(); }
     if (selectedLfo < kNumLfos) lfoTabs[(size_t) selectedLfo]->repaint();   // its lamp pulses with the LFO
-    else repaint (adsrReadout);
+    else if (selectedLfo == kNumLfos) repaint (adsrReadout);
 
     meter    = jmax (proc.outputLevel.load(), meter * 0.85f);
     activity = jmax ((float) proc.vizEngine().vizCount.load() / 20.0f, activity * 0.8f);
@@ -6323,7 +6628,7 @@ void GranulumEditor::resized()
     rndGrains.setBounds (grainArea.getRight() - S (74), grainArea.getY(), S (74), S (26));
     grainLabel = { grainArea.getX(), grainArea.getY(), grainArea.getWidth() - S (80), S (26) };
     // TEST: GRANULAR  [FREEZE]   SHIMMER [FREE|5TH|OCT]   [RANDOM]
-    freezeSwitch.setBounds (grainArea.getX() + S (96), grainArea.getY() + S (2), S (62), S (22));
+    freezeSwitch.setBounds (grainArea.getX() + S (96), grainArea.getY() + S (2), S (76), S (22));
     shimmerSwitch.setBounds (rndGrains.getX() - S (8) - S (186), grainArea.getY() + S (2), S (186), S (22));
     {
         auto tabs = filterArea.withHeight (S (30));
@@ -6423,15 +6728,19 @@ void GranulumEditor::resized()
         auto lf = lfoFrame.reduced (S (14), S (10));
         auto tabs = lf.removeFromLeft (S (100));
         const int gapT = S (5);
-        const int th = (tabs.getHeight() - gapT * kNumLfos) / (kNumLfos + 1);
+        const int gapT5 = S (3);
+        const int th = (tabs.getHeight() - gapT5 * (kNumLfos + 1)) / (kNumLfos + 2);   // 1.0.5: ADSR, LFO 1-3, LINKS
         ampTab.setBounds (tabs.getX(), tabs.getY(), tabs.getWidth(), th);          // ADSR first
         for (int l = 0; l < kNumLfos; ++l)
-            lfoTabs[(size_t) l]->setBounds (tabs.getX(), tabs.getY() + (l + 1) * (th + gapT), tabs.getWidth(), th);
+            lfoTabs[(size_t) l]->setBounds (tabs.getX(), tabs.getY() + (l + 1) * (th + gapT5), tabs.getWidth(), th);
+        linksTab.setBounds (tabs.getX(), tabs.getY() + (kNumLfos + 1) * (th + gapT5), tabs.getWidth(), th);
+        ignoreUnused (gapT);
         lf.removeFromLeft (S (12));
 
         voiceArea = lf.removeFromRight (S (180));
         lf.removeFromRight (S (18));
 
+        linksView.setBounds (lf.withHeight (lf.getHeight()));                    // 1.0.5: LINKS covers the editor + its controls
         lfoEditor.setBounds (lf.removeFromLeft (S (330)));
         {
             // ADSR: the curve on top, the four knobs right under their letters
@@ -7706,14 +8015,15 @@ void GranulumEditor::setupTour()
         { [this] { return screenFrame; }, "The screen",
           "GRAINS shows every grain as it plays; LOOP: drag the two flags to pick the part of the sample. EQ is a 5-band equalizer: drag a dot (SHIFT = fine), mouse wheel = width, double-click = reset, right-click = filter type and band on / off. COMP is a compressor with GAIN to win the level back. Click a lamp to switch EQ or COMP on and off, click the name to look at it." },
         { [this] { return grainArea; }, "Granular",
-          "BLOOM, SMEAR, SCATTER, SHIMMER, DRIFT and CHIME give the cloud its character; SIZE, DENSITY and SPREAD shape it. FREEZE holds the moment, SHAPE sets the grain window.\n"
+          "BLOOM, SMEAR, SCATTER, SHIMMER, DRIFT and CHIME give the cloud its character; SIZE, DENSITY and SPREAD shape it, SHAPE sets the grain window. SPEED 0 holds the grains on one spot.\n"
+          "SYNC BPM (copper = on): SIZE and DENSITY turn into note values and the grains start on the project grid - rhythmic chops in time. With it, SCATTER swings them off the grid and, turned up, skips some. Off = free (ms and grains per second).\n"
           "Grains are random: the same note never sounds exactly the same twice - that is the life of the sound, not a bug. For a punch that hits the same every time, leave the first stick or the SUB without GRAIN." },
         { [this] { return filterArea; }, "Filters",
           "Two filters in a row: low-pass and high-pass up to 48 dB, band-pass with WIDTH, peak, comb and vowel. The arrows step through the types; 1 2 3 4 choose which oscillators go through (the same digits work on every effect). Drag inside the small picture: left / right = CUTOFF, up / down = RESO." },
         { [this] { return fxArea; }, "Effects",
           "Distortion, delay and reverb, each with its own switch, MIX and routing. Distortion keeps its level steady while you turn DRIVE." },
         { [this, u] { return u (lfoFrame, voiceArea); }, "LFO & Envelope",
-          "Drag an LFO (the dots on its tab) onto any knob, stick or pill: it swings from the value to the top. Depth: mouse wheel over the knob or stick, or drag the LFO mark - hold SHIFT for fine steps. Right-click the mark = remove; REMOVE LINKS takes this LFO off everything, its lamp only pauses it. The movement is drawn only while sound plays - in silence everything stands still, easy to grab.\n"
+          "Drag an LFO (the dots on its tab) onto any knob, stick or pill: it swings from the value to the top. Depth: mouse wheel over the knob or stick, or drag the LFO mark - hold SHIFT for fine steps. Right-click the mark = remove; REMOVE LINKS takes this LFO off everything, its lamp only pauses it. LINKS (under LFO 3) lists every link: drag a slider for depth, x removes. ALT + drag an LFO tab onto another LFO tab copies all its settings. The movement is drawn only while sound plays - in silence everything stands still, easy to grab.\n"
           "Shape: double-click = add or delete a point, drag the small handles to bend a line. RETRIG restarts on every note, ENV plays once. ADSR shapes every note. MONO plays every note cleanly; PORTA (above 0) slides between them." },
         { [this, u] { return u (globalKnobs[2]->getBounds(), u (globalKnobs[1]->getBounds(), gemsArea)); }, "Output, CLIP & help",
           "PITCH moves the whole synth, OUTPUT sets the level. CLIP cuts everything over 0 dB and nothing else. Every knob: double-click = default, SHIFT or CTRL = fine. UNDO = Ctrl+Z, redo = Ctrl+Shift+Z. GUIDE opens this tour again, ABOUT shows who made GRAIN FORM. Enjoy!" } };

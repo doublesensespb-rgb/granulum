@@ -202,6 +202,7 @@ public:
 
     void refreshMods();
     void tick();
+    void syncTick();   // 1.0.5 SYNC BPM look (cheap, runs even when hidden)
     // no value box: the value pops up while dragging, inside the plugin window (a desktop popup lags / misbehaves in some hosts)
     void setCompact (bool c, juce::Component* popupParent = nullptr) { compact = c; slider.setPopupDisplayEnabled (c, false, popupParent); resized(); }
     // 0.99.3: one-line knob for a folded oscillator strip:  VOL (o) [70 %]
@@ -209,6 +210,8 @@ public:
     bool inlineMode = false;
 
     FineSlider slider;
+    std::function<bool()> synced;   // 1.0.5 SYNC BPM: true = the value is a note value (copper dot + copper text)
+    bool shownSynced = false;
     const int target;       // modulation target index, -1 if not modulatable
     DepthReadout readout;   // LFO depth number over the value box (while the mouse is on an LFO chip)
 private:
@@ -475,7 +478,7 @@ private:
 };
 
 // LFO tab: click = select, drag onto any knob = modulate it
-class LfoTab final : public juce::Component, public juce::SettableTooltipClient
+class LfoTab final : public juce::Component, public juce::SettableTooltipClient, public juce::DragAndDropTarget
 {
 public:
     LfoTab (GranulumProcessor&, int index);
@@ -488,9 +491,14 @@ public:
     std::function<void (int)> onSelect;
     bool selected = false;
     const int index;
+    // 1.0.5: ALT + drag one LFO tab onto another copies all its settings
+    bool isInterestedInDragSource (const SourceDetails& s) override { return s.description.toString().startsWith ("lfocopy:"); }
+    void itemDragEnter (const SourceDetails&) override { copyHover = true; repaint(); }
+    void itemDragExit (const SourceDetails&) override { copyHover = false; repaint(); }
+    void itemDropped (const SourceDetails&) override;
 private:
     GranulumProcessor& proc;
-    bool dragging = false;
+    bool dragging = false, copyHover = false;
 };
 
 // Tiny filter view: response curve of the selected filter over a faint live spectrum of what comes in.
@@ -766,14 +774,14 @@ private:
     int shown = -1;
 };
 
-// LOOP mode selector in the GRAIN FIELD title row: OFF | LOOP | PING-PONG | ONE-SHOT
+// LOOP mode selector in the GRAIN FIELD title row: OFF | LOOP | ONE-SHOT (1.0.5: PING-PONG removed)
 class LoopModeBar final : public juce::Component, public juce::SettableTooltipClient, private juce::Timer
 {
 public:
     explicit LoopModeBar (GranulumProcessor& p) : proc (p)
     {
         setTooltip ("LOOP: grains use only the part between the two flags on the screen (OSC 2 and OSC 3).\n"
-                    "LOOP repeats, PING-PONG goes back and forth, ONE-SHOT plays it once and holds the end.");
+                    "LOOP repeats it, ONE-SHOT plays it once and holds the end.");
         startTimerHz (10);
     }
     void paint (juce::Graphics&) override;
@@ -796,6 +804,47 @@ public:
     std::function<void()> onSelect;
     bool selected = false;
     juce::RangedAudioParameter* param = nullptr;
+};
+
+// 1.0.5 LINKS tab (under LFO 3): three LFO dots + the number of links
+class LinksTab final : public juce::Component, public juce::SettableTooltipClient
+{
+public:
+    explicit LinksTab (GranulumProcessor& p) : proc (p) { setTooltip ("LINKS: every LFO link in one list - change the depth or remove it."); }
+    void paint (juce::Graphics&) override;
+    void mouseDown (const juce::MouseEvent&) override { if (onSelect) onSelect(); }
+    std::function<void()> onSelect;
+    bool selected = false;
+private:
+    GranulumProcessor& proc;
+};
+
+// 1.0.5 LINKS view: all modulations as rows (LFO dot, target, bipolar depth slider, value, x). Nothing runs in the
+// background: it is rebuilt only when the links change (the editor's modVersion check) and while you drag a slider.
+class LinksView final : public juce::Component
+{
+public:
+    explicit LinksView (GranulumProcessor& p) : proc (p) {}
+    void refresh() { rows = proc.listModulations(); clampScroll(); repaint(); }
+    void paint (juce::Graphics&) override;
+    void mouseDown (const juce::MouseEvent&) override;
+    void mouseDrag (const juce::MouseEvent&) override;
+    void mouseUp (const juce::MouseEvent&) override { dragRow = -1; }
+    void mouseWheelMove (const juce::MouseEvent&, const juce::MouseWheelDetails&) override;
+    void mouseDoubleClick (const juce::MouseEvent&) override;
+private:
+    struct Geo { juce::Rectangle<float> row, dot, track, value, close; };
+    std::vector<std::pair<int, int>> shown() const;
+    Geo geo (int slot) const;   // slot = position on screen (0..7)
+    juce::Rectangle<float> chip (int i) const;   // 0 ALL, 1..3 LFO
+    juce::Rectangle<float> removeAll() const;
+    juce::String targetName (int t) const;
+    void clampScroll();
+    GranulumProcessor& proc;
+    std::vector<std::pair<int, int>> rows;
+    int filter = -1, scroll = 0, dragRow = -1;
+    float dragStartDepth = 0.0f, dragStartX = 0.0f;
+    static constexpr int kPerCol = 4, kVisible = 8;
 };
 
 // ADSR drawn as a curve; drag the three points (attack peak, decay/sustain corner, release end)
@@ -1049,6 +1098,7 @@ public:
     void selectFx (int i);
     void selectFilter (int i);
     void showAmp() { selectLfo (3); }
+    void showLinks() { selectLfo (4); }   // 1.0.5 (Snapshot)
     static inline int removeStyle = 0;   // 0 = SYNC | CLEAR halves, 1 = SYNC + small X
 
 private:
@@ -1089,8 +1139,8 @@ private:
     FilterScope filterScope { proc };
     SampleMenu sampleMenu { proc };
     LoopModeBar loopBar { proc };
-    GrainSwitch freezeSwitch { proc, ParamID::freeze, { "FREEZE" }, {},
-                               "FREEZE: the grains stay on one spot of the sound (SPEED is ignored) while you play with the rest." };
+    GrainSwitch freezeSwitch { proc, ParamID::grainSync, { "SYNC BPM" }, {},   // 1.0.5: SYNC BPM took FREEZE's place (SPEED 0 = freeze)
+                               "SYNC BPM: SIZE and DENSITY follow the project tempo in note values - grains start on the grid. Off = free (ms and grains per second)." };
     GrainSwitch shimmerSwitch { proc, ParamID::shimmerMode, { "FREE", "5TH", "OCT" }, "SHIMMER",
                                 "SHIMMER intervals: FREE = octaves, fifths and thirds (as before), 5TH = octaves and fifths, OCT = only octaves." };
     WavePicker wavePicker { proc };
@@ -1179,8 +1229,10 @@ private:
     LfoEditor lfoEditor;
     AmpTab ampTab;
     AmpEditor ampEditor;
+    LinksTab linksTab { proc };
+    LinksView linksView { proc };
     std::vector<std::unique_ptr<Knob>> ampKnobs;
-    int selectedLfo = 0;     // 0..2 = LFO, 3 = AMP
+    int selectedLfo = 0;     // 0..2 = LFO, 3 = AMP, 4 = LINKS (1.0.5)
 
     juce::Rectangle<int> titleArea, gemsArea, screenFrame, osc1Area, osc2Area, osc3Area, osc4Area, subTag, dropZone,
                          grainArea, filterArea, fxArea, ledArea, lfoFrame, voiceArea, fxContent,

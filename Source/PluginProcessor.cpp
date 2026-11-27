@@ -707,6 +707,28 @@ LfoShape GranulumProcessor::lfoPreset (int i)
     }
 }
 
+// 1.0.5 SYNC BPM: note values for DENSITY (how often a grain starts) and SIZE (how long it is), in beats
+const StringArray& GranulumProcessor::syncRateNames()
+{
+    static const StringArray s { "1/1", "1/2", "1/4", "1/8", "1/8T", "1/16", "1/16T", "1/32", "1/32T", "1/64" };
+    return s;
+}
+const StringArray& GranulumProcessor::syncLenNames()
+{
+    static const StringArray s { "1/64", "1/32T", "1/32", "1/16T", "1/16", "1/8T", "1/8", "1/4", "1/2" };
+    return s;
+}
+double GranulumProcessor::syncRateBeats (int i)
+{
+    static const double b[] { 4.0, 2.0, 1.0, 0.5, 1.0 / 3.0, 0.25, 1.0 / 6.0, 0.125, 1.0 / 12.0, 0.0625 };
+    return b[jlimit (0, 9, i)];
+}
+double GranulumProcessor::syncLenBeats (int i)
+{
+    static const double b[] { 0.0625, 1.0 / 12.0, 0.125, 1.0 / 6.0, 0.25, 1.0 / 3.0, 0.5, 1.0, 2.0 };
+    return b[jlimit (0, 8, i)];
+}
+
 // ===========================================================================
 
 AudioProcessorValueTreeState::ParameterLayout GranulumProcessor::createLayout()
@@ -775,7 +797,8 @@ AudioProcessorValueTreeState::ParameterLayout GranulumProcessor::createLayout()
     ps.push_back (std::make_unique<P> (ParameterID { ParamID::chime, 1 },   "Chime",   NormalisableRange<float> (0.0f, 1.0f), 0.0f, pct));
     ps.push_back (std::make_unique<P> (ParameterID { ParamID::gshape, 1 },  "Grain Shape", NormalisableRange<float> (0.0f, 1.0f), 0.5f,
                                        A().withStringFromValueFunction ([] (float v, int) { return v < 0.45f ? String ("SOFT ") + String (juce::roundToInt ((0.5f - v) * 200.0f)) : v > 0.55f ? String ("DROP ") + String (juce::roundToInt ((v - 0.5f) * 200.0f)) : String ("CLASSIC"); })));
-    ps.push_back (std::make_unique<B> (ParameterID { ParamID::freeze, 1 }, "Freeze", false));
+    ps.push_back (std::make_unique<B> (ParameterID { ParamID::freeze, 1 }, "Freeze", false));   // 1.0.5: removed from the panel, ignored (old states -> SPEED 0)
+    ps.push_back (std::make_unique<B> (ParameterID { ParamID::grainSync, 1 }, "Grain Sync BPM", true));   // 1.0.5: on for new sounds, off for states saved before
     ps.push_back (std::make_unique<AudioParameterChoice> (ParameterID { ParamID::shimmerMode, 1 }, "Shimmer Intervals", StringArray { "FREE", "5TH", "OCT" }, 0));
 
     // TEST: master EQ, 5 bands (flat by default: every band at 0 dB)
@@ -1239,6 +1262,34 @@ void GranulumProcessor::setModulation (int target, int lfo, float depth)
         }
 }
 
+std::vector<std::pair<int, int>> GranulumProcessor::listModulations() const
+{
+    std::vector<std::pair<int, int>> out;
+    for (int l = 0; l < kNumLfos; ++l)
+        for (auto& m : mods)
+        {
+            const int t = m.target.load();
+            if (t >= 0 && m.lfo.load() == l) out.push_back ({ t, l });
+        }
+    return out;
+}
+
+void GranulumProcessor::copyLfo (int from, int to)
+{
+    if (from == to || from < 0 || to < 0 || from >= kNumLfos || to >= kNumLfos) return;
+    for (const char* what : { "Rate", "Sync", "Div", "Mode", "Rise", "Grains" })   // the lamp stays as it is
+        if (auto* a = apvts.getParameter (ParamID::lfo (from, what)))
+            if (auto* b = apvts.getParameter (ParamID::lfo (to, what)))
+            { b->beginChangeGesture(); b->setValueNotifyingHost (a->getValue()); b->endChangeGesture(); }
+    LfoShape pts;
+    {
+        const ScopedLock sl (lfoLock);
+        pts = lfoPoints[(size_t) from];
+    }
+    setLfoPoints (to, pts);
+    ++modVersion;
+}
+
 void GranulumProcessor::removeModulation (int target, int lfo)
 {
     for (auto& m : mods)
@@ -1368,7 +1419,23 @@ granulum::Params GranulumProcessor::voiceParams (const float* v, int osc) const
     p.density  = v[mtDensity];
     p.mix      = v[mtGmix];
     p.shape    = v[mtShape];
-    p.freeze   = apvts.getRawParameterValue (ParamID::freeze)->load() > 0.5f;
+    p.freeze   = false;   // 1.0.5: FREEZE is gone (old states load it as SPEED 0)
+    p.sync     = apvts.getRawParameterValue (ParamID::grainSync)->load() > 0.5f;
+    if (p.sync)
+    {
+        const double sr = getSampleRate() > 0 ? getSampleRate() : 44100.0;
+        const double bpm = hostBpm > 1.0 ? hostBpm : 120.0;
+        const double rb = syncRateBeats (syncIndex (v[mtDensity], syncRateNames().size()));
+        p.syncSpacing = rb * 60.0 / bpm * sr;
+        p.syncHoldMs  = syncLenBeats (syncIndex (v[mtSize], syncLenNames().size())) * 60000.0 / bpm;
+        p.syncToNext  = -1.0;
+        if (hostPlaying && hostPpq >= 0.0)
+        {
+            const double ppq = hostPpq + (double) chunkFrom / sr * bpm / 60.0;
+            const double frac = ppq / rb - std::floor (ppq / rb);
+            p.syncToNext = frac < 1.0e-6 ? 0.5 : (1.0 - frac) * p.syncSpacing;
+        }
+    }
     {
         const int sm = (int) apvts.getRawParameterValue (ParamID::shimmerMode)->load();
         p.shimmerMode = sm == 2 ? 1 : sm == 1 ? 2 : 0;   // menu FREE / 5TH / OCT -> engine 0 / 2 / 1
@@ -1576,6 +1643,7 @@ void GranulumProcessor::renderRange (int from, int to)
 
 void GranulumProcessor::processChunk (int from, int len)
 {
+    chunkFrom = from;
     float v[kNumModTargets];
     computeModulated (v);
     std::copy (v, v + kNumModTargets, lastV.begin());
@@ -2760,9 +2828,9 @@ void GranulumProcessor::randomizeTyped (int type)
         set (ParamID::density, R (x.dens)); set (ParamID::speed, R (x.speed)); set (ParamID::gmix, R (x.mix));
         set (ParamID::gshape, R (x.shape)); set (ParamID::chime, R (x.chime));
         set (ParamID::position, rr (0.0f, 0.8f));
+        set (ParamID::grainSync, 0.0f);   // 1.0.5: random sounds start with free grains (SYNC BPM is a choice you make)
         set (ParamID::spread, type == Bass ? rr (0.1f, 0.35f) : type == Pluck ? rr (0.4f, 0.8f) : rr (0.3f, 0.65f));     // a bass stays narrow, nothing goes phasey
         set (ParamID::shimmerMode, (float) (type == Bass || type == Chord ? pick ({ 1, 2 }) : pick ({ 0, 1, 2 })));
-        if (type == Texture && chance (0.3f)) set (ParamID::freeze, 1.0f);
     }
 
     // ---------------- filters
@@ -3066,6 +3134,26 @@ void GranulumProcessor::setStateInformation (const void* data, int sizeInBytes)
         ignoreUnused (fo);
     }
     const uint32_t gm = (uint32_t) (int) state.getProperty ("grainMask", 0xffff);
+    {
+        // 1.0.5 migrations - an old preset / project must sound exactly as before:
+        auto setChild = [&state] (const char* id, float value)
+        {
+            auto c = state.getChildWithProperty ("id", id);
+            if (! c.isValid()) { c = ValueTree ("PARAM"); c.setProperty ("id", id, nullptr); state.appendChild (c, nullptr); }
+            c.setProperty ("value", value, nullptr);
+        };
+        auto valueOf = [&state] (const char* id, float def)
+        {
+            const auto c = state.getChildWithProperty ("id", id);
+            return c.isValid() && c.hasProperty ("value") ? (float) c.getProperty ("value") : def;
+        };
+        // SYNC BPM did not exist: grains stay free
+        if (! state.getChildWithProperty ("id", ParamID::grainSync).isValid()) setChild (ParamID::grainSync, 0.0f);
+        // FREEZE is gone: it did exactly what SPEED 0 does
+        if (valueOf (ParamID::freeze, 0.0f) > 0.5f) { setChild (ParamID::speed, 0.0f); setChild (ParamID::freeze, 0.0f); }
+        // PING-PONG is gone: LOOP (choice index 2 was PING-PONG; the list keeps 4 entries so the indexes stay)
+        if (std::lround (valueOf (ParamID::loopMode, 0.0f)) == 2) setChild (ParamID::loopMode, 1.0f);
+    }
     // 0.99.9: a parameter the preset does not know yet (COMP, EQ lamp, ...) starts at its default
     // (before, it kept whatever the previous sound had, e.g. COMP stayed on when loading an old preset)
     for (auto* ap : getParameters())

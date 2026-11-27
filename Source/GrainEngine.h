@@ -293,6 +293,10 @@ struct Params
     float shape = 0.5f;
     bool  freeze = false;
     int   shimmerMode = 0;
+    // 1.0.5 SYNC BPM: grains start on the project grid (syncSpacing samples apart), each syncHoldMs long;
+    // syncToNext = samples from this chunk's start to the next grid line while the host plays (-1: free, from the note)
+    bool   sync = false;
+    double syncSpacing = 0.0, syncHoldMs = 0.0, syncToNext = -1.0;
 
     // oscillator
     float transpose = 0.0f;  // semitones
@@ -512,6 +516,8 @@ public:
     // Adds into outL/outR. sample == nullptr keeps voices/glides running silently.
     void render (float* outL, float* outR, int numSamples, const Params& p, const SampleData* sample)
     {
+        if (p.sync && p.syncToNext >= 0.0)
+            for (auto& vv : voices) if (vv.active) vv.syncGrid = std::max (0.5, p.syncToNext);   // follow the project grid
         const bool hasSample = sample != nullptr && sample->numFrames() >= 4;
         const int    N        = hasSample ? sample->numFrames() : 1;
         const double fileRate = hasSample ? sample->sampleRate / sr : 1.0;
@@ -793,6 +799,33 @@ public:
                 const float ev = p.evolve > 0.01f ? (float) std::min (1.0, (double) v.age / (p.evolve * sr)) : 1.0f;
                 const float bloom = p.bloom * ev;
 
+                if (p.sync)
+                {
+                    // SYNC BPM: a grain on every grid line; SCATTER pushes it late (swing) and, high up, skips some (holes)
+                    v.syncGrid -= 1.0;
+                    if (v.syncGrid <= 0.0)
+                    {
+                        v.syncGrid += std::max (8.0, p.syncSpacing);
+                        const float brk = std::clamp ((p.scatter - 0.4f) / 0.6f, 0.0f, 1.0f);
+                        if (! (brk > 0.0f && rng.uni() < 0.3f * brk))
+                            v.nextGrainIn = (double) p.scatter * 0.45 * p.syncSpacing * (double) rng.uni();
+                    }
+                    v.nextGrainIn -= 1.0;
+                    if (v.nextGrainIn <= 0.0)
+                    {
+                        double spacing = std::max (8.0, p.syncSpacing);
+                        spawnGrain (v, p, *sample, ratio, spacing, fileRate, bloom);
+                        const double loopLen = p.loopMode == 0 ? 1.0 : std::max (0.005, (double) (p.loopB - p.loopA));
+                        v.travel += (double) p.speed * spacing * fileRate / (double) N / loopLen;
+                        if (p.loopMode == 3) v.travel = std::clamp (v.travel, -1.0, 1.0);
+                        else if (p.loopMode == 2) v.travel -= 2.0 * std::floor (v.travel * 0.5);
+                        else v.travel -= std::floor (v.travel);
+                        v.nextGrainIn = 1.0e30;   // the next one waits for the grid
+                    }
+                }
+                else
+                {
+                if (v.nextGrainIn > 1.0e20) v.nextGrainIn = 0.0;   // SYNC BPM was just switched off
                 v.nextGrainIn -= 1.0;
                 if (v.nextGrainIn <= 0.0)
                 {
@@ -814,6 +847,7 @@ public:
                         else if (u < 0.60f * brk)  spacing *= 0.18 + 0.2 * (double) rng.uni();  // burst
                     }
                     v.nextGrainIn += std::max (8.0, spacing);
+                }
                 }
 
                 float sumL = 0.0f, sumR = 0.0f;
@@ -1014,6 +1048,7 @@ private:
         int      glideLen = 0, glideAge = 0;
         double   travel = 0.0;
         double   nextGrainIn = 0.0;
+        double   syncGrid = 0.0;    // 1.0.5: samples to the next grid line (SYNC BPM)
         float    strike = 0.0f;       // CHIME hammer: a short click every time a grain is born
         float    strikeLp = 0.0f;
         double   playPos = 0.0;
@@ -1044,7 +1079,7 @@ private:
         v.active = true; v.note = note; v.velocity = velocity;
         v.curNote = v.glideFrom = v.glideTarget = note; v.glideLen = v.glideAge = 0;
         v.stage = Stage::Attack; v.startStamp = ++stamp;
-        v.travel = 0.0; v.nextGrainIn = 0.0; v.age = 0; v.normSm = -1.0f;
+        v.travel = 0.0; v.nextGrainIn = 0.0; v.age = 0; v.normSm = -1.0f; v.syncGrid = p.sync ? std::max (8.0, p.syncSpacing) : 0.0;
         v.playPos = loopHead ((double) std::clamp (p.position, 0.0f, 0.9999f), p) * (double) lastNumFrames;
         v.playDir = 1; v.playDone = false;
         // 1.0 VOICE: the centre copy starts with the voice, the others at random points of the cycle (no phasing "zip")
@@ -1184,8 +1219,16 @@ private:
         double holdMs = 12.0 * std::pow (80.0, (double) p.size);
         holdMs *= (1.0 + 1.5 * bloom) * (1.0 + 3.0 * smear * smear);
         holdMs *= 1.0 + 0.4 * drift * v.walk[2];
+        if (p.sync) holdMs = p.syncHoldMs;   // SYNC BPM: exactly one note value long (the rhythm stays tight)
         holdMs = std::min (holdMs, 2500.0);
         int length = std::max (32, (int) (holdMs * 0.001 * sr));
+        if (p.sync)
+        {
+            // the grid must not move: too many overlapping grains -> shorter grains instead of later ones
+            const float cap = std::max (2.0f, p.maxOverlap);
+            length = std::max (32, std::min (length, (int) (spacing * (double) cap)));
+        }
+        else
         {
             // CPU cap: long grains x high density used to stack up to 48 grains per voice (x every note, x every osc).
             // Keep at most maxOverlap of them (fewer while a note fades out); v.norm below follows, so the level stays.
