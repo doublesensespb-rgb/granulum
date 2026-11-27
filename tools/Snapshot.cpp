@@ -222,6 +222,13 @@ int main (int argc, char** argv)
         save (*base, outDir, "pill.png");
         return 0;
     }
+    if (argc > 2 && String (argv[2]) == "tourall")
+    {
+        setP (ParamID::osc1On, 1.0f);
+        run (p, ed, 20);
+        for (int st = 1; st < 10; ++st) { ed->showOverlayForTest (2, st); run (p, ed, 3); save (*base, outDir, ("t" + String (st + 1) + ".png").toRawUTF8()); }
+        return 0;
+    }
     if (argc > 2 && String (argv[2]) == "final")
     {
         // TEST final: header, RANDOM panel, tour steps, About

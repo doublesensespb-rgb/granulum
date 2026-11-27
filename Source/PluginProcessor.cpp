@@ -1291,7 +1291,7 @@ void GranulumProcessor::computeModulated (float* v)
         else      off[t] += d;
     }
     for (int k = 0; k < granulum::kNumHarmonics; ++k)
-        harmLive[(size_t) k].store (jlimit (0.0f, 1.0f, harmNow[(size_t) k].load (std::memory_order_relaxed) + harmOff[(size_t) k]), std::memory_order_relaxed);
+        harmLive[(size_t) k].store (jlimit (0.0f, 1.0f, harmNow[(size_t) k].load (std::memory_order_relaxed) + (uiSounding ? harmOff[(size_t) k] : 0.0f)), std::memory_order_relaxed);
     // TEST: every modulated value glides (~4 ms): LFO shapes with vertical edges and fast hand moves no longer click
     // (filters, DRIVE, grains, volume); one chunk is 32 samples, so this is a few chunks
     const double srNow = getSampleRate() > 0 ? getSampleRate() : 44100.0;
@@ -1303,7 +1303,9 @@ void GranulumProcessor::computeModulated (float* v)
         float& sm = normSm[(size_t) t];
         sm = normSmInit ? sm + (norm - sm) * slew : norm;
         v[t] = p->convertFrom0to1 (sm);   // not snapped: Oct/Semi glide smoothly under modulation
-        modNorm[(size_t) t].store (norm, std::memory_order_relaxed);
+        // 1.0.5: the UI shows modulation moving only while there is sound; in silence knobs / sticks / EQ dots
+        // stand on their own value, so they are easy to grab (the sound itself is not touched)
+        modNorm[(size_t) t].store (uiSounding ? norm : p->getValue(), std::memory_order_relaxed);
     }
     normSmInit = true;
 }
@@ -1996,6 +1998,11 @@ void GranulumProcessor::processChunk (int from, int len)
         pl = jmax (pl, std::abs (outL[i]));
         pr = jmax (pr, std::abs (outR[i]));
         blockPeak = jmax (blockPeak, std::abs (outL[i]), std::abs (outR[i]));
+    }
+    {
+        const double srU = getSampleRate() > 0 ? getSampleRate() : 44100.0;
+        uiQuiet = (jmax (pl, pr) > 1.0e-4f || heldNotes > 0) ? 0.0 : uiQuiet + (double) len / srU;
+        uiSounding = uiQuiet < 0.15;
     }
     if (pl > peakL.load (std::memory_order_relaxed)) peakL.store (pl, std::memory_order_relaxed);
     if (pr > peakR.load (std::memory_order_relaxed)) peakR.store (pr, std::memory_order_relaxed);

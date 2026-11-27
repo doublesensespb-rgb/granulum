@@ -603,6 +603,7 @@ private:
     std::array<bool, kNumLfos>   lfoDone {};
     double sinceTrigger = 1.0e9;   // seconds since the first note of a phrase
     int heldNotes = 0;
+    double uiQuiet = 1.0e9; bool uiSounding = false;   // 1.0.5: modulation is drawn moving only while sound plays
     double hostBpm = 120.0, hostPpq = -1.0;
     bool hostPlaying = false;
 

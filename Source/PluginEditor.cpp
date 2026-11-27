@@ -1621,6 +1621,14 @@ void SubBars::mouseDown (const MouseEvent& e)
         chipStartY = e.position.y;
         return;
     }
+    if (e.mods.isPopupMenu())
+    {
+        // 1.0.5: right-click anywhere on a stick that has an LFO takes the LFO off (no need to hit the small mark)
+        const int col = colAt (e.position.x);
+        bool had = false;
+        for (int l = 0; l < kNumLfos; ++l) if (proc.hasModulation (mtSubH1 + col, l)) { proc.removeModulation (mtSubH1 + col, l); had = true; }
+        if (had) { repaint(); return; }
+    }
     const auto pl = plot();
     dragging = jlimit (0, kN - 1, (int) ((e.position.x - pl.getX()) / (pl.getWidth() / (float) kN)));
     param (dragging)->beginChangeGesture();
@@ -7340,7 +7348,13 @@ Rectangle<float> TourOverlay::cardRect() const
 {
     const float sc = (float) getWidth() / 1080.0f;
     const auto a = steps[(size_t) step].area().toFloat();
-    const float w = 300.0f * sc, h = 196.0f * sc, gap = 16.0f * sc;
+    const float w = 320.0f * sc, gap = 16.0f * sc;
+    // 1.0.5: the card grows with its text (the tips made some steps longer)
+    AttributedString as;
+    as.append (steps[(size_t) step].text, uiFont (12.0f * sc, false, 0.0f), Palette::label);
+    TextLayout tl;
+    tl.createLayout (as, w - 36.0f * sc);
+    const float h = jmax (196.0f * sc, 32.0f * sc + 14.0f * sc + 26.0f * sc + tl.getHeight() + 6.0f * sc + 14.0f * sc + 30.0f * sc);
     const auto full = getLocalBounds().toFloat().reduced (10.0f * sc);
     Rectangle<float> c;
     if (a.getRight() + gap + w <= full.getRight())     c = { a.getRight() + gap, a.getY() + 10.0f * sc, w, h };
@@ -7382,9 +7396,13 @@ void TourOverlay::paint (Graphics& g)
     g.drawText (st.title, in.removeFromTop (26.0f * sc), Justification::centredLeft, false);
     auto bottom = in.removeFromBottom (30.0f * sc);
     auto bars = in.removeFromBottom (14.0f * sc);
-    g.setColour (Palette::label);
-    g.setFont (uiFont (12.0f * sc, false, 0.0f));
-    g.drawFittedText (st.text, in.toNearestInt(), Justification::topLeft, 6, 1.0f);
+    {
+        AttributedString as;
+        as.append (st.text, uiFont (12.0f * sc, false, 0.0f), Palette::label);
+        TextLayout tl;
+        tl.createLayout (as, in.getWidth());
+        tl.draw (g, in);
+    }
     const float bw = (bars.getWidth() - 4.0f * sc * (float) (steps.size() - 1)) / (float) steps.size();
     for (int i = 0; i < (int) steps.size(); ++i)
     {
@@ -7679,23 +7697,26 @@ void GranulumEditor::setupTour()
           "Create deep basses, atmospheric pads, expressive leads and complex experimental textures. Turn ordinary sounds into something entirely new by shaping their movement, character and structure.\n"
           "From subtle changes to radical transformations, GRAIN FORM gives you the tools to build a sound of your own." },
         { [this, u] { return u (u (presetBar.getBounds(), undoButton.getBounds()), u (randomButton.getBounds(), randomMenuButton.getBounds())); },
-          "Presets & Random", "Browse with the arrows or the name. SAVE keeps your sound, NEW VERSION saves a numbered copy (_02, _03). INIT starts clean - right-click to make your own INIT. The arrow next to RANDOM picks a SOUND TYPE." },
+          "Presets & Random", "Browse with the arrows or the name. SAVE keeps your sound, NEW VERSION saves a numbered copy (_02, _03). INIT starts clean - right-click it to make your own INIT. The arrow next to RANDOM picks a SOUND TYPE and ticks which parts may change." },
         { [this] { return osc1Area; }, "Oscillator 1",
-          "ADDITIVE draws 16 harmonics with the sticks, WAVE plays a classic shape. MIX WAVE and AIR add a wave and bright air. VOICE stacks up to 16 voices with DETUNE and BLEND for a wide, thick sound." },
+          "ADDITIVE draws 16 harmonics: drag across the sticks to draw, drag with the RIGHT button to erase. The GRAIN dots under the sticks choose which harmonics turn into grains - the others stay clean and mono. WAVE plays a classic shape. MIX WAVE and AIR add a wave and bright air (double-click = 0). VOICE stacks up to 16 voices: drag or wheel the number, double-click = 1.\n"
+          "LFO on a stick: mouse wheel over the stick = depth (hold SHIFT for fine steps), right-click its LFO mark = remove." },
         { [this, u] { return u (u (osc2Area, osc3Area), osc4Area); }, "Sub, Sample & Noise",
-          "OSC 2 SUB keeps the low end clean and mono. OSC 3 plays your own WAV (drag it in) or the built-in SOUNDS. OSC 4 adds one of 12 noises. GRAIN on each decides if it turns into grains." },
+          "OSC 2 SUB keeps the low end clean and mono: draw its sticks, right-click a stick to take its LFO off. OSC 3 plays your own WAV (drop it on the box, the small x removes it) or the built-in SOUNDS. OSC 4 adds one of 12 noises. GRAIN on each decides if it turns into grains." },
         { [this] { return screenFrame; }, "The screen",
-          "GRAINS shows every grain as it plays. EQ is a 5-band equalizer: drag the dots. COMP is a compressor with GAIN to win the level back. The lamps switch EQ and COMP on and off - compare before and after." },
+          "GRAINS shows every grain as it plays; LOOP: drag the two flags to pick the part of the sample. EQ is a 5-band equalizer: drag a dot (SHIFT = fine), mouse wheel = width, double-click = reset, right-click = filter type and band on / off. COMP is a compressor with GAIN to win the level back. Click a lamp to switch EQ or COMP on and off, click the name to look at it." },
         { [this] { return grainArea; }, "Granular",
-          "BLOOM, SMEAR, SCATTER, SHIMMER, DRIFT and CHIME give the cloud its character; SIZE, DENSITY and SPREAD shape it. FREEZE holds the moment, SHAPE sets the grain window." },
+          "BLOOM, SMEAR, SCATTER, SHIMMER, DRIFT and CHIME give the cloud its character; SIZE, DENSITY and SPREAD shape it. FREEZE holds the moment, SHAPE sets the grain window.\n"
+          "Grains are random: the same note never sounds exactly the same twice - that is the life of the sound, not a bug. For a punch that hits the same every time, leave the first stick or the SUB without GRAIN." },
         { [this] { return filterArea; }, "Filters",
-          "Two filters in a row: low-pass and high-pass up to 48 dB, band-pass with WIDTH, peak, comb and vowel. The arrows step through the types; 1 2 3 4 choose which oscillators go through." },
+          "Two filters in a row: low-pass and high-pass up to 48 dB, band-pass with WIDTH, peak, comb and vowel. The arrows step through the types; 1 2 3 4 choose which oscillators go through (the same digits work on every effect). Drag inside the small picture: left / right = CUTOFF, up / down = RESO." },
         { [this] { return fxArea; }, "Effects",
           "Distortion, delay and reverb, each with its own switch, MIX and routing. Distortion keeps its level steady while you turn DRIVE." },
         { [this, u] { return u (lfoFrame, voiceArea); }, "LFO & Envelope",
-          "Drag an LFO onto any knob, stick or pill: it swings from the knob's value to the top. ADSR shapes every note. MONO plays every note cleanly; PORTA slides between them." },
+          "Drag an LFO (the dots on its tab) onto any knob, stick or pill: it swings from the value to the top. Depth: mouse wheel over the knob or stick, or drag the LFO mark - hold SHIFT for fine steps. Right-click the mark = remove; REMOVE LINKS takes this LFO off everything, its lamp only pauses it. The movement is drawn only while sound plays - in silence everything stands still, easy to grab.\n"
+          "Shape: double-click = add or delete a point, drag the small handles to bend a line. RETRIG restarts on every note, ENV plays once. ADSR shapes every note. MONO plays every note cleanly; PORTA (above 0) slides between them." },
         { [this, u] { return u (globalKnobs[2]->getBounds(), u (globalKnobs[1]->getBounds(), gemsArea)); }, "Output, CLIP & help",
-          "PITCH moves the whole synth, OUTPUT sets the level. CLIP cuts everything over 0 dB and nothing else. GUIDE opens this tour again, ABOUT shows who made GRAIN FORM. Enjoy!" } };
+          "PITCH moves the whole synth, OUTPUT sets the level. CLIP cuts everything over 0 dB and nothing else. Every knob: double-click = default, SHIFT or CTRL = fine. UNDO = Ctrl+Z, redo = Ctrl+Shift+Z. GUIDE opens this tour again, ABOUT shows who made GRAIN FORM. Enjoy!" } };
 }
 
 // ============================================================================
