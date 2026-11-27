@@ -2597,6 +2597,17 @@ void GranulumProcessor::randomizeTyped (int type)
     auto pick = [&r] (std::initializer_list<int> v) { return *(v.begin() + r.nextInt ((int) v.size())); };
     auto chance = [&r] (float c) { return r.nextFloat() < c; };
 
+    // 1.0.4 BASS (made from the author's reference basses): the first ticked LFO is a PUNCH envelope (RETRIG, instant
+    // peak then a fall) that hits the sub, the drive, the filter, the noise and the pitch at every note. Without it the
+    // levels it would add are set as plain values instead.
+    int punchLfo = -1;
+    {
+        const int bits[kNumLfos] = { rndLfo1Bit, rndLfo2Bit, rndLfo3Bit };
+        for (int l = 0; l < kNumLfos && punchLfo < 0; ++l) if (m & bits[l]) punchLfo = l;
+    }
+    const bool punch = type == Bass && punchLfo >= 0;
+    bool bassClosedFilter = false;
+
     // ---------------- body: pitch, voice, envelope, oscillators (always, it IS the type)
     set (ParamID::osc1On, 1.0f);
     set (ParamID::osc1Tune, 0.0f); set (ParamID::osc1Semi, 0.0f); set (ParamID::osc1Pan, 0.0f);
@@ -2609,19 +2620,22 @@ void GranulumProcessor::randomizeTyped (int type)
     switch (type)
     {
         case Bass:
-            set (ParamID::osc1Oct, (float) pick ({ -2, -2, -2, -3 }));  // E4 -> E2 (82 Hz) mostly, sometimes E1
+            // 1.0.4: always E2 on E4, the SUB in the SAME octave (it was an octave lower = 41 Hz mud)
+            set (ParamID::osc1Oct, -2.0f);
             set (ParamID::mono, 1.0f);
-            set (ParamID::porta, chance (0.4f) ? lr (15.0f, 90.0f) : 0.0f);
+            set (ParamID::porta, chance (0.2f) ? lr (5.0f, 15.0f) : 0.0f);
             set (ParamID::chord, 0.0f);
-            set (ParamID::ampA, rr (0.0f, 4.0f)); set (ParamID::ampD, lr (200.0f, 900.0f));
-            set (ParamID::ampS, rr (0.75f, 1.0f)); set (ParamID::ampR, lr (60.0f, 220.0f));
-            set (ParamID::osc1Vol, rr (0.7f, 0.85f));
-            set (ParamID::subOn, chance (0.75f) ? 1.0f : 0.0f);
-            set (ParamID::subOct, (float) jmin (-1, (int) std::round (apvts.getRawParameterValue (ParamID::osc1Oct)->load()) - 1));
-            set (ParamID::subVol, rr (0.3f, 0.55f));
-            set (ParamID::subH1, 1.0f); set (ParamID::subH2, rr (0.0f, 0.25f)); set (ParamID::subH3, 0.0f); set (ParamID::subH4, 0.0f); set (ParamID::subH5, 0.0f);
-            set (ParamID::osc3On, chance (0.25f) ? 1.0f : 0.0f);
-            set (ParamID::osc3Vol, rr (0.08f, 0.2f));
+            set (ParamID::ampA, 0.0f); set (ParamID::ampD, 300.0f);
+            set (ParamID::ampS, 1.0f); set (ParamID::ampR, lr (200.0f, 350.0f));
+            set (ParamID::osc1Vol, rr (0.6f, 0.8f));
+            set (ParamID::subOn, chance (0.8f) ? 1.0f : 0.0f);
+            set (ParamID::subOct, -2.0f);
+            set (ParamID::subVol, punch ? rr (0.0f, 0.2f) : rr (0.35f, 0.55f));   // with PUNCH the LFO gives it its body
+            set (ParamID::subH1, 1.0f); set (ParamID::subH2, chance (0.3f) ? rr (0.2f, 0.5f) : 0.0f);
+            set (ParamID::subH3, chance (0.2f) ? rr (0.1f, 0.35f) : 0.0f); set (ParamID::subH4, 0.0f); set (ParamID::subH5, 0.0f);
+            // the noise is a click at the note start (PUNCH lifts it from 0), without PUNCH a quiet bed
+            set (ParamID::osc3On, chance (punch ? 0.55f : 0.2f) ? 1.0f : 0.0f);
+            set (ParamID::osc3Vol, punch ? 0.0f : rr (0.05f, 0.12f));
             break;
         case Pad:
             set (ParamID::osc1Oct, (float) pick ({ -1, -1, 0 }));
@@ -2671,9 +2685,10 @@ void GranulumProcessor::randomizeTyped (int type)
     // OSC 1: additive mostly, sometimes the full wave
     const bool waveMode = type == Bass ? chance (0.35f) : type == Texture ? chance (0.2f) : chance (0.15f);
     set (ParamID::osc1Mode, waveMode ? 1.0f : 0.0f);
-    set (ParamID::osc1Wave, (float) (type == Bass ? pick ({ 1, 1, 2, 3 }) : pick ({ 1, 2, 3 })));
-    set (ParamID::osc1WaveMix, waveMode ? 0.0f : (chance (0.35f) ? rr (0.1f, 0.4f) : 0.0f));
-    set (ParamID::osc1Air, type == Bass ? (chance (0.4f) ? rr (0.05f, 0.2f) : 0.0f)
+    if (type == Bass && waveMode) set (ParamID::subOn, 1.0f);   // WAVE is all grains: the SUB keeps every note solid
+    set (ParamID::osc1Wave, (float) (type == Bass ? pick ({ 1, 1, 2 }) : pick ({ 1, 2, 3 })));
+    set (ParamID::osc1WaveMix, waveMode || type == Bass ? 0.0f : (chance (0.35f) ? rr (0.1f, 0.4f) : 0.0f));
+    set (ParamID::osc1Air, type == Bass ? (chance (0.15f) ? rr (0.05f, 0.15f) : 0.0f)
                          : type == Pad ? rr (0.1f, 0.4f) : type == Pluck ? rr (0.15f, 0.5f) : rr (0.0f, 0.3f));
     set (ParamID::osc1Grain, 1.0f);
 
@@ -2682,6 +2697,29 @@ void GranulumProcessor::randomizeTyped (int type)
     {
         std::array<float, granulum::kNumHarmonics> h {};
         h[0] = 1.0f;
+        if (type == Bass)
+        {
+            // 1.0.4: few sticks, like the reference basses: the fundamental alone, the odd ones, or 1-2 picked on top
+            const int recipe = r.nextInt (3);
+            if (recipe == 1)
+            {
+                const float s = rr (0.7f, 1.2f);
+                for (int k : { 2, 4, 6 }) h[(size_t) k] = chance (0.85f) ? jmin (1.0f, std::pow (1.0f / (float) (k + 1), s) * rr (0.9f, 1.8f)) : 0.0f;
+            }
+            else if (recipe == 2)
+            {
+                const int n = 1 + r.nextInt (2);
+                for (int i = 0; i < n; ++i) h[(size_t) (pick ({ 2, 3, 4, 4, 6, 10, 11, 12 }))] = rr (0.2f, 0.5f);
+            }
+            setHarmonics (h);
+            // without the SUB the clean fundamental is the anchor: every note then hits the same (grains alone vary)
+            const bool subOff = apvts.getRawParameterValue (ParamID::subOn)->load() < 0.5f;
+            uint32_t gm = 0xffffu;
+            if (subOff || chance (0.5f)) gm &= ~(chance (0.5f) ? 0x1u : 0x7u);
+            setGrainMask (gm);
+        }
+        else
+        {
         const bool oddOnly = chance (type == Bass ? 0.35f : 0.2f);
         const float slope = type == Bass ? rr (0.9f, 1.5f) : type == Pad ? rr (1.1f, 1.8f) : type == Pluck ? rr (0.6f, 1.1f) : rr (0.9f, 1.5f);
         const int top = type == Bass ? 6 + r.nextInt (6) : type == Pad ? 8 + r.nextInt (8) : type == Pluck ? 10 + r.nextInt (7) : 6 + r.nextInt (8);
@@ -2693,9 +2731,8 @@ void GranulumProcessor::randomizeTyped (int type)
         }
         setHarmonics (h);
         // grains: the fundamental of a BASS stays clean (punch), the upper sticks move
-        uint32_t gm = 0xffffu;
-        if (type == Bass) gm &= ~(chance (0.5f) ? 0x1u : 0x3u);
-        setGrainMask (gm);
+        setGrainMask (0xffffu);
+        }
     }
 
     // ---------------- grains
@@ -2704,7 +2741,7 @@ void GranulumProcessor::randomizeTyped (int type)
         struct G { float bloom[2], smear[2], scatter[2], shimmer[2], drift[2], size[2], dens[2], speed[2], mix[2], shape[2], chime[2]; };
         static const G g[6] = {
             {},
-            /* BASS    */ { { 0.0f, .30f }, { 0.0f, .25f }, { 0.0f, .20f }, { 0.0f, .12f }, { .10f, .40f }, { .35f, .65f }, { .55f, .80f }, { 0.0f, .30f }, { .30f, .60f }, { .40f, .60f }, { 0.0f, 0.0f } },
+            /* BASS    */ { { 0.0f, .75f }, { 0.0f, .30f }, { 0.0f, .40f }, { 0.0f, .40f }, { 0.0f, .40f }, { .15f, .90f }, { .10f, .80f }, { .30f, 1.0f }, { .70f, 1.0f }, { .40f, .60f }, { 0.0f, .40f } },   // 1.0.4
             /* PAD     */ { { .50f, .90f }, { .40f, .85f }, { .20f, .50f }, { .10f, .45f }, { .30f, .70f }, { .65f, .90f }, { .55f, .85f }, { 0.0f, .25f }, { .70f, 1.0f }, { .15f, .45f }, { 0.0f, .25f } },
             /* PLUCK   */ { { 0.0f, .25f }, { 0.0f, .20f }, { .20f, .55f }, { .15f, .55f }, { .10f, .35f }, { .20f, .45f }, { .40f, .70f }, { 0.0f, .60f }, { .50f, .85f }, { .60f, .90f }, { .15f, .55f } },
             /* CHORD   */ { { .20f, .55f }, { .15f, .45f }, { .10f, .40f }, { .05f, .35f }, { .20f, .50f }, { .45f, .75f }, { .45f, .75f }, { 0.0f, .30f }, { .50f, .85f }, { .35f, .60f }, { 0.0f, .25f } },
@@ -2727,7 +2764,23 @@ void GranulumProcessor::randomizeTyped (int type)
         set (ParamID::filterOn, 1.0f);
         switch (type)
         {
-            case Bass:  set (ParamID::ftype, (float) pick ({ FilterUnit::LP12, FilterUnit::LP24, FilterUnit::LP24 })); set (ParamID::cutoff, lr (280.0f, 1500.0f)); set (ParamID::reso, rr (0.6f, 1.6f)); break;
+            case Bass:
+                // 1.0.4: either closed low (the PUNCH LFO opens it at every note) or open with a gentle top cut
+                bassClosedFilter = punch && chance (0.5f);
+                set (ParamID::ftype, (float) pick ({ FilterUnit::LP12, FilterUnit::LP24, FilterUnit::LP24 }));
+                set (ParamID::cutoff, bassClosedFilter ? lr (40.0f, 300.0f) : lr (600.0f, 2500.0f));
+                set (ParamID::reso, bassClosedFilter ? rr (0.7f, 2.2f) : rr (0.6f, 1.2f));
+                // EQ: sometimes a low-mid lift (150-280 or 400-500 Hz) like the reference basses
+                for (int b : { 1, 2 }) { setS (eqId (b, "Gain"), 0.0f); }
+                if (chance (0.5f))
+                {
+                    const int b = chance (0.5f) ? 1 : 2;
+                    setS (eqId (b, "On"), 1.0f); setS (eqId (b, "Type"), 2.0f); setS (eqId (b, "Q"), 1.0f);
+                    setS (eqId (b, "Freq"), b == 1 ? lr (150.0f, 280.0f) : lr (400.0f, 500.0f));
+                    setS (eqId (b, "Gain"), rr (2.0f, 6.0f));
+                    set (ParamID::eqOn, 1.0f);
+                }
+                break;
             case Pad:   set (ParamID::ftype, (float) pick ({ FilterUnit::LP12, FilterUnit::LP24 })); set (ParamID::cutoff, lr (900.0f, 5000.0f)); set (ParamID::reso, rr (0.6f, 1.2f)); break;
             case Pluck: set (ParamID::ftype, (float) pick ({ FilterUnit::LP12, FilterUnit::LP24 })); set (ParamID::cutoff, lr (1500.0f, 7000.0f)); set (ParamID::reso, rr (0.7f, 1.8f)); break;
             case Chord: set (ParamID::ftype, (float) pick ({ FilterUnit::LP12, FilterUnit::LP24 })); set (ParamID::cutoff, lr (900.0f, 4500.0f)); set (ParamID::reso, rr (0.6f, 1.3f)); break;
@@ -2756,20 +2809,20 @@ void GranulumProcessor::randomizeTyped (int type)
     // ---------------- effects
     if (m & rndDistBit)
     {
-        const bool on = type == Bass ? chance (0.65f) : type == Texture ? chance (0.4f) : chance (0.25f);
+        const bool on = type == Bass ? chance (0.8f) : type == Texture ? chance (0.4f) : chance (0.25f);
         set (ParamID::distOn, on ? 1.0f : 0.0f);
         set (ParamID::distType, (float) r.nextInt (4));
-        set (ParamID::distDrive, type == Bass ? rr (0.12f, 0.4f) : rr (0.08f, 0.3f));
+        set (ParamID::distDrive, type == Bass ? (punch ? rr (0.0f, 0.4f) : rr (0.15f, 0.5f)) : rr (0.08f, 0.3f));
         set (ParamID::distTone, rr (0.45f, 1.0f));
-        set (ParamID::distMix, type == Bass ? rr (0.3f, 0.75f) : rr (0.2f, 0.6f));
+        set (ParamID::distMix, type == Bass ? rr (0.8f, 1.0f) : rr (0.2f, 0.6f));
     }
     if (m & rndReverbBit)
     {
-        const bool on = type == Bass ? chance (0.25f) : true;
+        const bool on = type == Bass ? chance (0.8f) : true;
         set (ParamID::revOn, on ? 1.0f : 0.0f);
-        set (ParamID::revMix, type == Bass ? rr (0.04f, 0.12f) : type == Pad ? rr (0.25f, 0.45f) : type == Texture ? rr (0.25f, 0.45f) : rr (0.15f, 0.3f));
-        set (ParamID::revSize, type == Bass ? rr (0.15f, 0.35f) : type == Pad || type == Texture ? rr (0.65f, 0.95f) : rr (0.35f, 0.75f));
-        set (ParamID::revLowCut, type == Bass ? rr (300.0f, 600.0f) : rr (150.0f, 400.0f));
+        set (ParamID::revMix, type == Bass ? rr (0.07f, 0.2f) : type == Pad ? rr (0.25f, 0.45f) : type == Texture ? rr (0.25f, 0.45f) : rr (0.15f, 0.3f));
+        set (ParamID::revSize, type == Bass ? rr (0.12f, 0.4f) : type == Pad || type == Texture ? rr (0.65f, 0.95f) : rr (0.35f, 0.75f));
+        set (ParamID::revLowCut, type == Bass ? lr (150.0f, 600.0f) : rr (150.0f, 400.0f));
     }
     if (m & rndDelayBit)
     {
@@ -2793,21 +2846,60 @@ void GranulumProcessor::randomizeTyped (int type)
             if (! (m & lfoBits[l])) continue;
             for (auto& slot : mods) if (slot.lfo.load() == l) slot.target.store (-1);   // this LFO's old links go
             ++modVersion;
-            setLfoPoints (l, lfoPreset (r.nextInt (lfoPresetNames().size())));
+            if (punch && l == punchLfo)
+            {
+                // PUNCH: instant (or very fast) peak, a curved fall, a short tail - the shapes of the reference basses
+                const float px = chance (0.4f) ? 0.0f : rr (0.02f, 0.15f);
+                const float mx = rr (0.35f, 0.55f), my = rr (0.15f, 0.5f);
+                setLfoPoints (l, { LfoPoint { 0, px > 0 ? 0.0f : 1.0f, 0 }, { px, 1.0f, rr (-0.4f, 0.0f) }, { mx, my, 0 }, { 1, 0, 0 } });
+            }
+            else
+                setLfoPoints (l, lfoPreset (r.nextInt (lfoPresetNames().size())));
             setS (ParamID::lfo (l, "On"), 1.0f);
             setS (ParamID::lfo (l, "Sync"), 1.0f);
             const char* slow[] = { "2/1", "1/1", "1/2" };
             const char* mid[]  = { "1/2", "1/4", "1/4D", "1/8D" };
             const char* fast[] = { "1/8", "1/8T", "1/16" };
             const char* d = type == Pad || type == Texture ? slow[r.nextInt (3)] : type == Bass ? mid[r.nextInt (4)] : (chance (0.5f) ? mid[r.nextInt (4)] : fast[r.nextInt (3)]);
+            if (punch && l == punchLfo) d = chance (0.6f) ? "1/4" : "1/1";
             setS (ParamID::lfo (l, "Div"), (float) divisionNames().indexOf (d));
-            setS (ParamID::lfo (l, "Mode"), type == Bass || type == Pluck ? 1.0f : 0.0f);   // RETRIG: every note starts the same
+            setS (ParamID::lfo (l, "Mode"), type == Pluck || (type == Bass && (l == punchLfo || chance (0.5f))) ? 1.0f : 0.0f);   // RETRIG: every note starts the same
         }
         int first = -1, second = -1;
         for (int l = 0; l < kNumLfos; ++l) if (m & lfoBits[l]) { if (first < 0) first = l; else if (second < 0) second = l; }
         switch (type)
         {
-            case Bass:    setModulation (mtCutoff, first, rr (0.12f, 0.3f)); if (second >= 0 && chance (0.5f)) setModulation (mtSize, second, rr (-0.25f, 0.25f)); break;
+            case Bass:
+            {
+                // PUNCH targets: the sub always (when on), the filter always when it is closed, then 1-3 more
+                auto onP = [this] (const char* id) { return apvts.getRawParameterValue (id)->load() > 0.5f; };
+                int n = 0;
+                if (onP (ParamID::subOn)) { setModulation (mtSubVol, first, rr (0.5f, 0.95f)); ++n; }
+                if (bassClosedFilter)     { setModulation (mtCutoff, first, rr (0.3f, 0.6f)); ++n; }
+                std::vector<int> extra;
+                if (onP (ParamID::distOn)) extra.push_back (mtDistDrive);
+                if (onP (ParamID::osc3On)) extra.push_back (mtOsc3Vol);
+                extra.push_back (mtPitch);
+                if (! bassClosedFilter) extra.push_back (mtCutoff);
+                for (int i = (int) extra.size() - 1; i > 0; --i) std::swap (extra[(size_t) i], extra[(size_t) r.nextInt (i + 1)]);
+                const int want = jlimit (2, 4, n + 1 + r.nextInt (2));
+                for (int t : extra)
+                {
+                    if (n >= want) break;
+                    const float dep = t == mtDistDrive ? rr (0.15f, 0.6f) : t == mtOsc3Vol ? rr (0.1f, 0.35f)
+                                    : t == mtPitch ? rr (0.02f, 0.06f) : rr (0.15f, 0.35f);
+                    setModulation (t, first, dep); ++n;
+                }
+                // a second LFO: one gentle movement
+                if (second >= 0)
+                {
+                    const int pickT = r.nextInt (3);
+                    if (pickT == 0)      setModulation (mtSize, second, rr (-0.25f, 0.25f));
+                    else if (pickT == 1) setModulation (mtPosition, second, rr (0.1f, 0.25f));
+                    else                 setModulation (mtCutoff, second, rr (0.08f, 0.15f));
+                }
+                break;
+            }
             case Pad:     setModulation (mtPosition, first, rr (0.1f, 0.3f)); if (second >= 0) setModulation (mtCutoff, second, rr (0.08f, 0.2f)); break;
             case Pluck:   setModulation (mtCutoff, first, rr (0.15f, 0.35f)); break;
             case Chord:   setModulation (mtCutoff, first, rr (0.1f, 0.25f)); if (second >= 0 && chance (0.5f)) setModulation (mtOsc1WaveMix, second, rr (0.1f, 0.3f)); break;
