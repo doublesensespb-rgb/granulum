@@ -1,7 +1,7 @@
 # GRAIN FORM (repo: granulum) — guide for AI agents and developers
 
 Read this whole file before changing anything. It describes the product, the code, the build
-pipeline and how the owner wants to work. Current version: **1.0.5** on branch `test` (main still 0.99.6; 0.99.7-test / 0.99.8 / 0.99.9 were the labels before) (`project(... VERSION 1.0.5)` + display label `set(GRAINFORM_LABEL "1.0.5")` in CMakeLists.txt).
+pipeline and how the owner wants to work. Current version: **1.0.6** on branch `test` (main still 0.99.6; 0.99.7-test / 0.99.8 / 0.99.9 were the labels before) (`project(... VERSION 1.0.6)` + display label `set(GRAINFORM_LABEL "1.0.6")` in CMakeLists.txt).
 The UI shows the version on a small plate next to the title (taken from CMake `GRAINFORM_VERSION`, "0.9.8" -> "v0.98").
 
 ## 1. Product
@@ -212,6 +212,8 @@ dry part under a dense cloud (grains on, MIX >= 85 %) uses a 3-copy lite set. rd
 1.0.2: subParams sets uniVoices = 1 (the sub inherited OSC 1's VOICE). OSC 2-4 folding removed (uiFold forced false,
 fold buttons hidden). `StepArrow` < > beside the filter type combos ("noArrow" combos, GranulumLook::positionComboBoxText);
 type names switch to LP/HP short forms when "HIGH PASS 48" does not fit.
+1.0.6: uiSounding = a note held or any engine voice active (release included; FX tails ignored), 30 ms hold; lfoPhaseOut /
+lfoValueOut rest at phase 0 in silence (lfoRiseOut untouched - the DSP reads it).
 1.0.5: SYNC BPM (`grainSync`, default ON; states without it are set OFF in setStateInformation so old presets do not change):
 Params::sync / syncSpacing / syncHoldMs / syncToNext (samples to the next grid line per chunk, from hostPpq + chunkFrom; -1 = free
 from the note); engine: Voice::syncGrid countdown, a grain per grid line, SCATTER = late start (swing) + skipped lines, nextGrainIn =
