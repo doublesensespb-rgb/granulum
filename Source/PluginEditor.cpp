@@ -817,12 +817,20 @@ bool Knob::isInterestedInDragSource (const SourceDetails& s)
 void Knob::itemDragEnter (const SourceDetails&) { dragHover = true;  repaint(); }
 void Knob::itemDragExit  (const SourceDetails&) { dragHover = false; repaint(); }
 
+// 1.0.1: an LFO dropped on a control swings it from where it is all the way to the top (like Serum);
+// a control already at the top swings all the way down instead
+static float fullSwingDepth (float norm)
+{
+    norm = jlimit (0.0f, 1.0f, norm);
+    return norm < 0.98f ? 1.0f - norm : -norm;
+}
+
 void Knob::itemDropped (const SourceDetails& s)
 {
     dragHover = false;
     const int l = s.description.toString().fromFirstOccurrenceOf ("lfo:", false, false).getIntValue();
     if (! proc.hasModulation (target, l))
-        proc.setModulation (target, l, 0.35f);
+        proc.setModulation (target, l, fullSwingDepth (slider.valueToProportionOfLength (slider.getValue())));
     refreshMods();
 }
 
@@ -1465,7 +1473,7 @@ void SubBars::itemDropped (const SourceDetails& s)
     dropCol = -1;
     for (int o = 0; o < kNumLfos; ++o) if (o != l && proc.hasModulation (mtSubH1 + i, o)) proc.removeModulation (mtSubH1 + i, o);   // one LFO per stick
     if (! proc.hasModulation (mtSubH1 + i, l))
-        proc.setModulation (mtSubH1 + i, l, param (i)->getValue() > 0.5f ? -0.5f : 0.5f);
+        proc.setModulation (mtSubH1 + i, l, fullSwingDepth (param (i)->getValue()));
     repaint();
 }
 
@@ -2045,7 +2053,7 @@ void HarmonicEditor::itemDropped (const SourceDetails& s)
         if (! proc.hasModulation (t, l))
         {
             const float v = proc.apvts.getParameter (pillParam (pk))->getValue();
-            proc.setModulation (t, l, v > 0.5f ? -0.4f : 0.4f);
+            proc.setModulation (t, l, fullSwingDepth (v));
         }
         pillDrop = -1; lfoDropBar = -1;
         repaint();
@@ -2058,7 +2066,7 @@ void HarmonicEditor::itemDropped (const SourceDetails& s)
     // one LFO per stick: a new one replaces the old one
     for (int o = 0; o < kNumLfos; ++o) if (o != l && proc.hasModulation (kHarmTarget0 + k, o)) proc.removeModulation (kHarmTarget0 + k, o);
     if (! proc.hasModulation (kHarmTarget0 + k, l))
-        proc.setModulation (kHarmTarget0 + k, l, h[(size_t) k] > 0.5f ? -0.5f : 0.5f);   // always audible: down from a tall stick, up from a short one
+        proc.setModulation (kHarmTarget0 + k, l, fullSwingDepth (h[(size_t) k]));   // up to the top (a full stick: down to 0)
     repaint();
 }
 
@@ -5022,6 +5030,7 @@ GranulumEditor::GranulumEditor (GranulumProcessor& p)
 
     add (globalKnobs, ParamID::porta,  "Porta",  Knob::Size::Small);
     add (globalKnobs, ParamID::output, "Output", Knob::Size::Small);
+    globalKnobs.back()->slider.baseSensitivity = 750;   // 1.0.1: OUTPUT 2.5x finer (Shift / Ctrl: 10x finer still)
     add (globalKnobs, ParamID::pitch,  "Pitch",  Knob::Size::Small);
     globalKnobs[2]->slider.setTooltip ("PITCH: moves the whole synth up or down, smoothly, up to 2 octaves each way (all oscillators, SUB and grains). Double-click = 0");
     for (auto* k : { osc1Knobs[3].get(), osc2Knobs[3].get() })
@@ -7527,12 +7536,12 @@ VoiceBox::VoiceBox (GranulumProcessor& p)
     startTimerHz (15);
 }
 
-int VoiceBox::voices() const { return juce::jlimit (1, 9, (int) std::round (proc.apvts.getRawParameterValue (ParamID::osc1Voices)->load())); }
+int VoiceBox::voices() const { return juce::jlimit (1, 16, (int) std::round (proc.apvts.getRawParameterValue (ParamID::osc1Voices)->load())); }
 
 void VoiceBox::setVoices (int n)
 {
     if (auto* prm = proc.apvts.getParameter (ParamID::osc1Voices))
-        prm->setValueNotifyingHost (prm->convertTo0to1 ((float) juce::jlimit (1, 9, n)));
+        prm->setValueNotifyingHost (prm->convertTo0to1 ((float) juce::jlimit (1, 16, n)));
     timerCallback();
 }
 

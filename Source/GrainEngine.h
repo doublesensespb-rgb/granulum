@@ -141,26 +141,43 @@ inline SampleData renderWaveMips (int wave, double outSampleRate)
             default: return (k % 2 == 1) ? ((((k - 1) / 2) % 2 == 0) ? 1.0 : -1.0) / ((double) k * k) : 0.0;
         }
     };
-    std::vector<double> cyc ((size_t) period);
-    for (int top = period / 2; top >= 1; top /= 2)
+    // 1.0.1: a band-limited copy every QUARTER octave (was every octave) and all at ONE gain. Before, a note just above an
+    // octave step lost its whole top octave (e.g. a saw on E2 was cut at ~10 kHz while C2 went up to ~17 kHz) and the
+    // thinner copy was turned up - lower notes sounded brighter than higher ones. Each mip keeps one cycle (read via
+    // readCycle); the full-length buffer is only made once for channels[0].
+    std::vector<double> cyc ((size_t) period), sinTab ((size_t) period);
+    for (int i = 0; i < period; ++i) sinTab[(size_t) i] = std::sin (2.0 * kPi * (double) i / period);
+    double g = 0.0;
+    std::vector<int> tops;
+    for (double t = period / 2; t >= 1.0; t /= 1.189207115)          // 2^(1/4)
+        if (tops.empty() || (int) t < tops.back()) tops.push_back ((int) t);
+    for (int top : tops)
     {
         std::fill (cyc.begin(), cyc.end(), 0.0);
         for (int k = 1; k <= top; ++k)
         {
             const double a = amp (k);
             if (a == 0.0) continue;
-            for (int i = 0; i < period; ++i) cyc[(size_t) i] += a * std::sin (2.0 * kPi * (double) k * i / period);
+            for (int i = 0; i < period; ++i) cyc[(size_t) i] += a * sinTab[(size_t) ((k * i) & (period - 1))];   // exact: k*i mod period
         }
-        double peak = 0.0;
-        for (double v : cyc) peak = std::max (peak, std::abs (v));
-        const double g = peak > 1.0e-9 ? 0.7 / peak : 0.0;   // every mip at the same loudness
-        std::vector<float> buf ((size_t) N);
-        for (int i = 0; i < N; ++i) buf[(size_t) i] = (float) (cyc[(size_t) (i % period)] * g);
+        if (g == 0.0)
+        {
+            double peak = 0.0;
+            for (double v : cyc) peak = std::max (peak, std::abs (v));
+            g = peak > 1.0e-9 ? 0.7 / peak : 0.0;           // the full wave peaks at 0.7; thinner copies are NOT turned up
+        }
+        if (d.mips.empty())
+        {
+            std::vector<float> full ((size_t) N);
+            for (int i = 0; i < N; ++i) full[(size_t) i] = (float) (cyc[(size_t) (i % period)] * g);
+            d.channels.assign (1, std::move (full));
+        }
+        std::vector<float> buf ((size_t) period);
+        for (int i = 0; i < period; ++i) buf[(size_t) i] = (float) (cyc[(size_t) i] * g);
         d.mips.push_back (std::move (buf));
         d.mipTop.push_back (top);
         if (wave == 0) break;                               // a sine needs only one
     }
-    d.channels.assign (1, d.mips.front());
     d.mipLimit = 19000.0 * period / outSampleRate;
     d.mipPeriod = period;
     d.level = 0.7f;
@@ -179,15 +196,24 @@ inline SampleData renderAirMips (double outSampleRate)
     std::vector<double> ph (513);
     uint32_t seed = 0x9e3779b9u;
     for (auto& x : ph) { seed = seed * 1664525u + 1013904223u; x = 2.0 * kPi * (double) (seed >> 8) / 16777216.0; }
-    std::vector<double> cyc ((size_t) period);
+    std::vector<double> cyc ((size_t) period), sinTab ((size_t) period), cosTab ((size_t) period);
+    for (int i = 0; i < period; ++i) { sinTab[(size_t) i] = std::sin (2.0 * kPi * (double) i / period); cosTab[(size_t) i] = std::cos (2.0 * kPi * (double) i / period); }
     double g = 0.0;
-    for (int top = period / 2; top >= 1; top /= 2)
+    std::vector<int> tops;                                    // 1.0.1: a copy every quarter octave (smooth, no top-octave jumps)
+    for (double t = period / 2; t >= 1.0; t /= 1.189207115)
+        if (tops.empty() || (int) t < tops.back()) tops.push_back ((int) t);
+    for (int top : tops)
     {
         std::fill (cyc.begin(), cyc.end(), 0.0);
         for (int k = 17; k <= top; ++k)
         {
             const double a = std::pow (17.0 / (double) k, 1.1);
-            for (int i = 0; i < period; ++i) cyc[(size_t) i] += a * std::sin (2.0 * kPi * (double) k * i / period + ph[(size_t) k]);
+            const double cp = std::cos (ph[(size_t) k]), sp = std::sin (ph[(size_t) k]);
+            for (int i = 0; i < period; ++i)
+            {
+                const size_t j = (size_t) ((k * i) & (period - 1));   // sin(x + ph) from two tables: fast and exact
+                cyc[(size_t) i] += a * (sinTab[j] * cp + cosTab[j] * sp);
+            }
         }
         if (g == 0.0)
         {
@@ -319,6 +345,11 @@ struct Grain
     double lph[3] {};    // INTO GRAINS: this grain's own position in each LFO's rhythm
     float  gvs = -1.0f;  // INTO GRAINS: smoothed volume (no clicks on hard LFO edges)
     MipCache mc;
+    // 1.0.1 VOICE: a grain can sound as a PAIR of unison copies (mirrored pitch / sides), like a real stack
+    bool   twin = false;
+    double pos2 = 0.0, inc2 = 1.0;
+    float  tL1 = 1.0f, tR1 = 1.0f, tL2 = 0.0f, tR2 = 0.0f;
+    MipCache mc2;
 };
 
 // A grain that was just born — the UI turns these into flying shards.
@@ -395,7 +426,10 @@ public:
             for (int i = n; i < kMaxVoices; ++i)
                 if (voices[(size_t) i].active) voices[(size_t) i].stage = Stage::Release;
 
-            const bool legato = voices[0].active && voices[0].stage != Stage::Release;
+            // 1.0.1: with PORTA off every new note starts its envelope again (like Serum with legato off). Before, a note
+            // that overlapped the previous one only changed pitch - with a short, plucky envelope (SUSTAIN 0) it was
+            // silent and the melody seemed to lag. With PORTA on, overlapping notes still slide without a new attack (808s).
+            const bool legato = p.portaMs > 0.5f && voices[0].active && voices[0].stage != Stage::Release;
             for (int i = 0; i < n; ++i)
             {
                 auto& v = voices[(size_t) i];
@@ -592,8 +626,10 @@ public:
         prepareUnison (p);
         // CPU: the dry part under the grains is quiet - MIX >= 85 %: it plays one copy (the grains carry the voices),
         // MIX 60-85 %: 3 copies (both edges + the middle) instead of up to 9
-        const bool uniDry = uniN > 1 && p.loopMode == 0 && ! (p.grainOn && p.mix >= 0.85f);
-        const bool uniLite = uniDry && uniN > 3 && p.grainOn && p.mix >= 0.6f;
+        // 1.0.1: the dry part plays the whole stack; only under a dense cloud (grains on, MIX >= 85 %) it reads
+        // 3 copies - there the grains already sound the stack in pairs
+        const bool uniDry = uniN > 1 && p.loopMode == 0;
+        const bool uniLite = uniDry && uniN > 3 && p.grainOn && p.mix >= 0.85f;
         // CPU: dry part fully under the grains (MIX 100 %, no EVOLVE): nothing to read at all
         const bool dryMuted = p.grainOn && p.mix >= 0.999f && p.evolve <= 0.01f;
 
@@ -787,6 +823,14 @@ public:
                     const float w = g.perc ? percWindow (g.age, g.length) * 1.6f : window2 (g.age, g.length, g.fade, g.fadeR, g.tailCurve);
                     float l, r;
                     readAll (g.pos, i, l, r, g.mc, g.inc);
+                    if (g.twin)
+                    {
+                        float l2, r2;
+                        readAll (g.pos2, i, l2, r2, g.mc2, g.inc2);
+                        const float ml = l * g.tL1 + l2 * g.tL2, mr = r * g.tR1 + r2 * g.tR2;
+                        l = ml; r = mr;
+                        g.pos2 += g.inc2;
+                    }
                     if (g.tilt != 1.0f)
                     {
                         // grain colour: each grain a little brighter or darker (tilt around ~1.2 kHz)
@@ -864,10 +908,10 @@ public:
     // 1.0 VOICE: per-block tables of the unison copies (pitch ratio, stereo gains, grain weight)
     void prepareUnison (const Params& p)
     {
-        uniN = std::clamp (p.uniVoices, 1, 9);
+        uniN = std::clamp (p.uniVoices, 1, 16);
         if (uniN == 1) return;
         const float det = std::clamp (p.uniDetune, 0.0f, 1.0f), blend = std::clamp (p.uniBlend, 0.0f, 1.0f);
-        const double maxCents = 60.0 * std::pow ((double) det, 1.5);            // 25 % = +-7.5 cents, 100 % = +-60
+        const double maxCents = 100.0 * std::pow ((double) det, 1.5);           // 1.0.1: 25 % = +-12.5 cents, 100 % = +-100
         const float inner = 1.0f / (float) (uniN - 1) + 1.0e-4f;                // the middle copy (or the two middle ones)
         float sumW2 = 0.0f;
         for (int u = 0; u < uniN; ++u)
@@ -877,9 +921,11 @@ public:
             uniW[(size_t) u] = w;
             sumW2 += w * w;
             uniRatio[(size_t) u] = std::exp2 ((double) off * maxCents / 1200.0);
-            uniPan[(size_t) u] = std::abs (off) <= 1.0e-3f ? 0.0f : off * 0.8f; // the centre copy stays in the middle (mono bass)
+            uniPan[(size_t) u] = std::abs (off) <= 1.0e-3f ? 0.0f : off;       // 1.0.1: the edges go fully left / right
         }
-        const float norm = 1.0f / std::sqrt (std::max (1.0e-6f, sumW2));       // detuned copies add up in power
+        // 1.0.1: more voices = a bigger, louder stack (power ^0.35 instead of a flat ^0.5), the centre copy stays mono
+        const float norm = std::pow (std::max (1.0e-6f, sumW2), -0.35f);
+        uniGrow = std::pow (std::max (1.0e-6f, sumW2), 0.15f);
         const float meanW2 = sumW2 / (float) uniN;
         for (int u = 0; u < uniN; ++u)
         {
@@ -888,13 +934,14 @@ public:
             uniGR[(size_t) u] = std::sin (a) * 1.41421356f * uniW[(size_t) u] * norm;
             uniGrainW[(size_t) u] = uniW[(size_t) u] / std::sqrt (std::max (1.0e-6f, meanW2));
         }
-        // light set for a dry part that is mostly under the grains (MIX >= 70 %): 3 copies - both edges + the middle
+        // light dry set under a dense grain cloud (MIX >= 85 %, the grains already play the stack as pairs):
+        // both edges + the middle, at the same overall level as the full stack
         if (uniN > 3)
         {
             const int idx[3] = { 0, (uniN - 1) / 2, uniN - 1 };
             float s2 = 0.0f;
             for (int k = 0; k < 3; ++k) s2 += uniW[(size_t) idx[k]] * uniW[(size_t) idx[k]];
-            const float n3 = 1.0f / std::sqrt (std::max (1.0e-6f, s2));
+            const float n3 = uniGrow / std::sqrt (std::max (1.0e-6f, s2));
             for (int k = 0; k < 3; ++k)
             {
                 const int u = idx[k];
@@ -908,8 +955,9 @@ public:
     std::array<int, 3> liteIdx {};
     std::array<float, 3> liteGL {}, liteGR {};
     int uniN = 1;
-    std::array<double, 9> uniRatio {};
-    std::array<float, 9> uniW {}, uniPan {}, uniGL {}, uniGR {}, uniGrainW {};
+    std::array<double, 16> uniRatio {};
+    std::array<float, 16> uniW {}, uniPan {}, uniGL {}, uniGR {}, uniGrainW {};
+    float uniGrow = 1.0f;   // 1.0.1: a stack gets bigger with more voices (like Serum), not flattened to the same level
 
     int activeVoiceCount() const
     {
@@ -969,8 +1017,8 @@ private:
         float    strike = 0.0f;       // CHIME hammer: a short click every time a grain is born
         float    strikeLp = 0.0f;
         double   playPos = 0.0;
-        std::array<double, 9> uPos {};      // 1.0 VOICE: read position of every unison copy (clean part)
-        std::array<MipCache, 9> uMc {};
+        std::array<double, 16> uPos {};     // VOICE: read position of every unison copy (clean part)
+        std::array<MipCache, 16> uMc {};
         int      playDir = 1;            // PING-PONG direction of the plain playback
         bool     playDone = false;       // ONE-SHOT plain playback reached the end
         int64_t  age = 0;
@@ -1076,11 +1124,13 @@ private:
     // so the index comes straight from log2 instead of a search for every sample of every grain)
     static inline int pickMip (const SampleData& d, double step)
     {
+        // 1.0.1: the richest copy whose top harmonic still stays under ~19 kHz (copies are a quarter octave apart)
         const int n = (int) d.mips.size();
-        const double need = (double) d.mipTop[0] * std::max (1.0e-6, std::abs (step)) / d.mipLimit;
-        if (need <= 1.0) return 0;
-        int e; const double fr = std::frexp (need, &e);   // need = fr * 2^e, fr in [0.5, 1): needs ceil(log2 need) halvings
-        return std::min (n - 1, fr == 0.5 ? e - 1 : e);
+        const double maxTop = d.mipLimit / std::max (1.0e-6, std::abs (step));
+        if ((double) d.mipTop[0] <= maxTop) return 0;
+        int lo = 0, hi = n - 1;
+        while (lo < hi) { const int mid = (lo + hi) / 2; if ((double) d.mipTop[(size_t) mid] <= maxTop) hi = mid; else lo = mid + 1; }
+        return lo;
     }
 
     static inline double wrap (double x, double n)
@@ -1180,9 +1230,16 @@ private:
         bool reverse = p.shimmer > 0.0f && rng.uni() < p.shimmer * 0.3f;
         if (reverse && kind == 0) kind = 2;
         // 1.0 VOICE: the grain takes the pitch, side and weight of one unison copy (no extra grains)
-        int uni = -1;
-        if (uniN > 1) uni = std::min (uniN - 1, (int) (rng.uni() * (float) uniN));
-        const double ratio = baseRatio * std::exp2 (cents / 1200.0) * (uni >= 0 ? uniRatio[(size_t) uni] : 1.0);
+        int uni = -1, uni2 = -1;
+        if (uniN > 1)
+        {
+            // 1.0.1: the grain sounds as a pair - one copy and its mirror (other side, opposite detune)
+            uni = std::min (uniN - 1, (int) (rng.uni() * (float) uniN));
+            uni2 = uniN - 1 - uni;
+            if (uni2 == uni) uni2 = (uni + 1 + std::min (uniN - 2, (int) (rng.uni() * (float) (uniN - 1)))) % uniN;
+        }
+        const double ratio0 = baseRatio * std::exp2 (cents / 1200.0);
+        const double ratio = ratio0 * (uni >= 0 ? uniRatio[(size_t) uni] : 1.0);
 
         // position: POSITION + travel + SCATTER/SMEAR/BLOOM jitter + DRIFT wander
         const float jitter = scatter * 0.15f + scatter * scatter * 0.45f + smear * 0.12f + bloom * 0.08f;
@@ -1197,7 +1254,7 @@ private:
         const float width = std::clamp (scatter + bloom * 0.35f + smear * 0.2f, 0.0f, 1.0f);
         const float away = std::abs ((0.85f + 0.15f * width) * rng.bipolar()) + drift * 0.4f * std::abs (v.walk[3]);
         v.panSide = ! v.panSide;
-        const float pan = std::clamp ((v.panSide ? away : -away) * std::clamp (p.spread, 0.0f, 1.0f) + (uni >= 0 ? uniPan[(size_t) uni] * 0.6f : 0.0f), -1.0f, 1.0f);
+        const float pan = std::clamp ((v.panSide ? away : -away) * std::clamp (p.spread, 0.0f, 1.0f), -1.0f, 1.0f);
         const float a = (pan + 1.0f) * 0.25f * (float) kPi;
 
         g->active = true;
@@ -1229,9 +1286,23 @@ private:
         g->inc = reverse ? -ratio : ratio;
         g->mc = {};
         g->pos = reverse ? start + ratio * (double) length : start;
-        const float uw = uni >= 0 ? uniGrainW[(size_t) uni] : 1.0f;
-        g->gainL = std::cos (a) * 1.41421356f * uw;
-        g->gainR = std::sin (a) * 1.41421356f * uw;
+        g->gainL = std::cos (a) * 1.41421356f;
+        g->gainR = std::sin (a) * 1.41421356f;
+        g->twin = uni >= 0;
+        if (g->twin)
+        {
+            // the pair: each copy at its own side of the stack, power-normalised, then grown like the dry stack
+            g->inc2 = g->inc / ratio * (ratio0 * uniRatio[(size_t) uni2]);
+            g->pos2 = g->pos;
+            g->mc2 = {};
+            const float w1 = uniW[(size_t) uni], w2 = uniW[(size_t) uni2];
+            const float pn = uniGrow / std::sqrt (std::max (1.0e-6f, w1 * w1 + w2 * w2));
+            const float a1 = (std::clamp (pan + uniPan[(size_t) uni], -1.0f, 1.0f) + 1.0f) * 0.25f * (float) kPi;
+            const float a2 = (std::clamp (pan + uniPan[(size_t) uni2], -1.0f, 1.0f) + 1.0f) * 0.25f * (float) kPi;
+            g->tL1 = std::cos (a1) * 1.41421356f * w1 * pn; g->tR1 = std::sin (a1) * 1.41421356f * w1 * pn;
+            g->tL2 = std::cos (a2) * 1.41421356f * w2 * pn; g->tR2 = std::sin (a2) * 1.41421356f * w2 * pn;
+            g->gainL = g->gainR = 1.0f;
+        }
         g->pan = pan;
         g->kind = kind;
         g->perc = perc;
@@ -1251,6 +1322,7 @@ private:
             g->length = length = std::max (64, (int) ((0.06 + 0.35 * rng.uni()) * sr));
             g->pos = reverse ? start + ratio * (double) length : start;
         }
+        if (g->twin) g->pos2 = reverse ? start - g->inc2 * (double) length : start;   // the pair starts together
         // CHIME hammer: every grain strikes the bells (pings and sharp grains hit harder).
         // 0.99.2: only as hard as there is sound in the grains: all grain sticks down = no hammer, no phantom bells
         float srcLevel = s.level;

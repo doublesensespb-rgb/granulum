@@ -129,13 +129,17 @@ void Distortion::process (float* L, float* R, int n, int type, float drive, floa
     const int m = (int) up.getNumSamples();
     float* x0 = up.getChannelPointer (0);
     float* x1 = up.getChannelPointer (1);
+    // 1.0 fix: after a preset change (reset) the auto level starts blind (gain 1) and needed ~0.3 s to find the
+    // right gain - the first note burst out loud and distorted. Now it locks on in a few ms: while "fresh", the level
+    // followers run fast and the gain follows them sample by sample; after ~0.15 s of sound it hands over to the slow path.
+    const float fastK = 1.0f - (float) std::exp (-1.0 / (0.002 * osr));
     for (int i = 0; i < m; ++i)
     {
         driveSm += (drive - driveSm) * smK;
         mixSm   += (mix - mixSm) * smK;
-        agcSm   += (agc - agcSm) * agcK;
         float xf = 1.0f;
         if (xfadeLeft > 0) { xf = 1.0f - (float) xfadeLeft / (float) xfadeLen; --xfadeLeft; }
+        float in2[2], wet2[2];
         for (int c = 0; c < 2; ++c)
         {
             float* x = c == 0 ? x0 : x1;
@@ -145,14 +149,27 @@ void Distortion::process (float* L, float* R, int n, int type, float drive, floa
             const float d = y - dcX[c] + dcK * dcY[c];
             dcX[c] = y; dcY[c] = d;
             lp[c] = (1.0f - a) * d + a * lp[c];
-            envIn[c]  += (in * in - envIn[c]) * envK;
-            envWet[c] += (lp[c] * lp[c] - envWet[c]) * envK;
-            x[i] = in * (1.0f - mixSm) + lp[c] * mixSm * agcSm;
+            const float k = fresh ? fastK : envK;
+            envIn[c]  += (in * in - envIn[c]) * k;
+            envWet[c] += (lp[c] * lp[c] - envWet[c]) * k;
+            in2[c] = in; wet2[c] = lp[c];
         }
+        if (fresh)
+        {
+            const float ei = envIn[0] + envIn[1], ew = envWet[0] + envWet[1];
+            if (ei > 1.0e-9f && ew > 1.0e-9f)
+            {
+                agc = agcSm = jlimit (0.063f, 2.0f, std::sqrt (ei / ew));
+                if (++freshCount > (int) (0.15 * osr)) fresh = false;   // settled: back to the slow, smooth follower
+            }
+        }
+        else agcSm += (agc - agcSm) * agcK;
+        x0[i] = in2[0] * (1.0f - mixSm) + wet2[0] * mixSm * agcSm;
+        x1[i] = in2[1] * (1.0f - mixSm) + wet2[1] * mixSm * agcSm;
     }
     // auto level: the distorted signal follows the level of what came in (-24 .. +6 dB), smoothly
     const float ein = envIn[0] + envIn[1], ewet = envWet[0] + envWet[1];
-    if (ein > 1.0e-9f && ewet > 1.0e-9f)
+    if (! fresh && ein > 1.0e-9f && ewet > 1.0e-9f)
     {
         const float want = jlimit (0.063f, 2.0f, std::sqrt (ein / ewet));
         agc += (want - agc) * 0.05f;
@@ -798,9 +815,9 @@ AudioProcessorValueTreeState::ParameterLayout GranulumProcessor::createLayout()
     }
 
     // 1.0: OSC 1 VOICE (unison). 1 = off, old presets stay as they were
-    ps.push_back (std::make_unique<juce::AudioParameterInt> (ParameterID { ParamID::osc1Voices, 1 }, "OSC 1 Voices", 1, 9, 1));
+    ps.push_back (std::make_unique<juce::AudioParameterInt> (ParameterID { ParamID::osc1Voices, 1 }, "OSC 1 Voices", 1, 16, 1));
     ps.push_back (std::make_unique<P> (ParameterID { ParamID::osc1Detune, 1 }, "OSC 1 Detune", NormalisableRange<float> (0.0f, 1.0f), 0.25f, pct));
-    ps.push_back (std::make_unique<P> (ParameterID { ParamID::osc1Blend, 1 },  "OSC 1 Blend",  NormalisableRange<float> (0.0f, 1.0f), 0.6f, pct));
+    ps.push_back (std::make_unique<P> (ParameterID { ParamID::osc1Blend, 1 },  "OSC 1 Blend",  NormalisableRange<float> (0.0f, 1.0f), 0.75f, pct));
 
     // FILTER (key-tracked from C3 under the hood)
     ps.push_back (std::make_unique<B> (ParameterID { ParamID::filterOn, 1 }, "Filter On", false));
@@ -1382,7 +1399,7 @@ granulum::Params GranulumProcessor::voiceParams (const float* v, int osc) const
     if (osc == 0)
     {
         // 1.0 VOICE: unison copies of OSC 1 (ADDITIVE and WAVE alike)
-        p.uniVoices = jlimit (1, 9, (int) std::round (apvts.getRawParameterValue (ParamID::osc1Voices)->load()));
+        p.uniVoices = jlimit (1, 16, (int) std::round (apvts.getRawParameterValue (ParamID::osc1Voices)->load()));
         p.uniDetune = v[mtOsc1Detune];
         p.uniBlend  = v[mtOsc1Blend];
     }
@@ -1486,6 +1503,8 @@ void GranulumProcessor::processBlock (AudioBuffer<float>& buffer, MidiBuffer& mi
         distGate = pDistOn->load() > 0.5f ? 1.0f : 0.0f;
         masterEq.reset();
         masterComp.reset();
+        // 1.0 fix: OUTPUT used to glide 50 ms from the OLD preset's level (e.g. +9 dB -> 0 dB): the first note burst out
+        outGain.setCurrentAndTargetValue (Decibels::decibelsToGain (apvts.getRawParameterValue (ParamID::output)->load()));
     }
 
     if (work.getNumSamples() < numSamples)

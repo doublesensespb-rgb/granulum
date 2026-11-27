@@ -1,7 +1,7 @@
 # GRAIN FORM (repo: granulum) — guide for AI agents and developers
 
 Read this whole file before changing anything. It describes the product, the code, the build
-pipeline and how the owner wants to work. Current version: **1.0** on branch `test` (main still 0.99.6; 0.99.7-test / 0.99.8 / 0.99.9 were the labels before) (`project(... VERSION 1.0.0)` + display label `set(GRAINFORM_LABEL "1.0")` in CMakeLists.txt).
+pipeline and how the owner wants to work. Current version: **1.0.1** on branch `test` (main still 0.99.6; 0.99.7-test / 0.99.8 / 0.99.9 were the labels before) (`project(... VERSION 1.0.1)` + display label `set(GRAINFORM_LABEL "1.0.1")` in CMakeLists.txt).
 The UI shows the version on a small plate next to the title (taken from CMake `GRAINFORM_VERSION`, "0.9.8" -> "v0.98").
 
 ## 1. Product
@@ -200,6 +200,13 @@ spawnGrain picks one copy (pitch, +pan*0.6, weight uniGrainW). CPU: dry part wit
 60-85 % a 3-copy lite set, MIX 100 % reads nothing (`dryMuted`). uPos phases come from a hash of startStamp (main rng untouched,
 engine_test stays deterministic). UI: `VoiceBox` (count drag/wheel/double-click + two Knob::Size::Mini). WAVE buttons now share
 the RANDOM slot. Fix: wave/AIR tables are built when an LFO targets MIX WAVE / AIR even at 0 %. rdemo Bench3: VOICES / CLEAN / WAVE env.
+1.0.1: MONO legato only with PORTA > 0.5 ms (porta 0 retriggers every note - SUSTAIN 0 plucks were silent on overlaps).
+Wave / AIR mips every quarter octave (2^(1/4)), one gain for all (thin copies are no longer boosted), one cycle per mip;
+pickMip = binary search for the richest copy under mipLimit (19 kHz). Preset change: outGain snaps to the new OUTPUT;
+Distortion AGC has a "fresh" fast-lock mode after reset. OUTPUT knob baseSensitivity 750. LFO drop depth = fullSwingDepth()
+(current -> max, or -> min if already at the top). VOICE up to 16: +-100 cents * detune^1.5, BLEND default .75, pan +-1,
+level grows (sumW2^-0.35 dry, uniGrow for grains), grains play a mirrored PAIR of copies (Grain::twin, pos2/inc2/mc2),
+dry part under a dense cloud (grains on, MIX >= 85 %) uses a 3-copy lite set. rdemo Mono.cpp / Switch.cpp tests.
 Pills MIX WAVE / AIR: LFO chip (`pillChip`, `pillLfo`, `pillChipDrag`) = dot + depth, drag up/down / wheel = depth, right-click removes.
 CPU: `Params::maxOverlap` (14 tones, 6 noise, set in voiceParams) caps grains per voice; spawnGrain stretches `spacing`
 (by reference) to length/cap, and to 35-100 % of that in RELEASE by env; v.norm follows, so the level holds. Owner's heavy pad

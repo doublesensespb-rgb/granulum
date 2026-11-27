@@ -222,6 +222,7 @@ public:
     {
         for (int c = 0; c < 2; ++c) { lp[c] = dcX[c] = dcY[c] = hold[c] = pre[c] = 0.0f; count[c] = 0; envIn[c] = envWet[c] = 0.0f; }
         agc = 1.0f; agcSm = 1.0f; driveSm = mixSm = -1.0f; lastShp = prevShp = -1; xfadeLeft = 0;
+        fresh = true; freshCount = 0;   // 1.0: the auto level locks on fast after a reset (no loud first note)
         os.reset();
     }
     void process (float* L, float* R, int n, int type, float drive, float tone, float mix);
@@ -234,6 +235,7 @@ private:
     float envIn[2] {}, envWet[2] {}, agc = 1.0f;
     // TEST: per-sample smoothing (no zipper / clicks when DRIVE or MIX move), AGC glides, type changes crossfade
     float driveSm = -1.0f, mixSm = -1.0f, agcSm = 1.0f;
+    bool fresh = true; int freshCount = 0;
     int lastShp = -1, prevShp = -1, xfadeLeft = 0, xfadeLen = 1;
     float pre[2] {};   // gentle top cut before the shaper: noise crackles warm instead of fizzing
     juce::dsp::Oversampling<float> os { 2, 2, juce::dsp::Oversampling<float>::filterHalfBandPolyphaseIIR, true };
