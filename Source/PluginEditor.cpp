@@ -5877,6 +5877,9 @@ void GranulumEditor::setFold (int i, bool f)
 
 void GranulumEditor::timerCallback()
 {
+    // 1.0.7: the host stopped calling the plugin (many do on stop): show the plain values, nothing hangs half-modulated
+    if (const double last = proc.lastProcessMs.load (std::memory_order_relaxed); last > 0.0 && Time::getMillisecondCounterHiRes() - last > 200.0)
+        proc.restUiValues();
     // a preset / project can bring its own folded oscillators
     if (foldSig != (int) proc.uiFold[0] + 2 * (int) proc.uiFold[1] + 4 * (int) proc.uiFold[2] + 8 * (int) osc1WaveMode (proc)) { resized(); repaint(); }
 

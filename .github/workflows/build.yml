@@ -46,7 +46,7 @@ jobs:
           New-Item -ItemType Directory -Force out | Out-Null
           Copy-Item -Recurse "build/Granulum_artefacts/Release/VST3/GRAIN FORM.vst3" out/
           Copy-Item "build/Granulum_artefacts/Release/Standalone/GRAIN FORM.exe" out/
-          Compress-Archive -Path out/* -DestinationPath GRAIN-FORM-1.0.6-Windows.zip -Force
+          Compress-Archive -Path out/* -DestinationPath GRAIN-FORM-1.0.7-Windows.zip -Force
 
       - name: Push to builds branch
         shell: bash
@@ -55,7 +55,7 @@ jobs:
           for i in 1 2 3 4 5 6; do
             rm -rf pub
             git clone -q --depth 1 --branch builds "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${GITHUB_REPOSITORY}.git" pub
-            cp GRAIN-FORM-1.0.6-Windows.zip shots/*.png pub/ 2>/dev/null || true
+            cp GRAIN-FORM-1.0.7-Windows.zip shots/*.png pub/ 2>/dev/null || true
             cd pub
             git config user.name "github-actions"; git config user.email "github-actions@users.noreply.github.com"
             git add -A; git commit -q -m "Build ${GITHUB_SHA::7} ${{ github.job }}" || { cd ..; break; }
@@ -95,7 +95,7 @@ jobs:
              sudo xattr -dr com.apple.quarantine "/Library/Audio/Plug-Ins/VST3/GRAIN FORM.vst3" "/Library/Audio/Plug-Ins/Components/GRAIN FORM.component"
           3. Rescan plugins in your DAW.
           TXT
-          ditto -c -k --sequesterRsrc out GRAIN-FORM-1.0.6-macOS.zip
+          ditto -c -k --sequesterRsrc out GRAIN-FORM-1.0.7-macOS.zip
 
       - name: Push to builds branch
         shell: bash
@@ -104,7 +104,7 @@ jobs:
           for i in 1 2 3 4 5 6; do
             rm -rf pub
             git clone -q --depth 1 --branch builds "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${GITHUB_REPOSITORY}.git" pub
-            cp GRAIN-FORM-1.0.6-macOS.zip pub/ 2>/dev/null || true
+            cp GRAIN-FORM-1.0.7-macOS.zip pub/ 2>/dev/null || true
             cd pub
             git config user.name "github-actions"; git config user.email "github-actions@users.noreply.github.com"
             git add -A; git commit -q -m "Build ${GITHUB_SHA::7} ${{ github.job }}" || { cd ..; break; }

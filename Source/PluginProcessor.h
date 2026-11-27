@@ -478,7 +478,10 @@ public:
     static const char* modTargetId (int target);
     static int modIndexOf (const juce::String& paramId);
     void setModulation (int target, int lfo, float depth);
-    std::vector<std::pair<int, int>> listModulations() const;   // 1.0.5 LINKS: every {target, lfo}, LFO by LFO
+    std::vector<std::pair<int, int>> listModulations() const;
+    // 1.0.7: hosts that stop calling the plugin on stop (Ableton, Bitwig, Logic ...): the editor puts the plain values back
+    std::atomic<double> lastProcessMs { 0.0 };
+    void restUiValues();   // 1.0.5 LINKS: every {target, lfo}, LFO by LFO
     void copyLfo (int from, int to);                             // 1.0.5 ALT + drag: all settings of one LFO onto another (not its links)
     void removeModulation (int target, int lfo);
     bool hasModulation (int target, int lfo) const;

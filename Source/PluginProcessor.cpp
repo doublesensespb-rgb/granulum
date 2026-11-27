@@ -1262,6 +1262,19 @@ void GranulumProcessor::setModulation (int target, int lfo, float depth)
         }
 }
 
+void GranulumProcessor::restUiValues()
+{
+    for (int t = 0; t < kNumModTargets; ++t)
+        if (auto* p = modParams[(size_t) t]) modNorm[(size_t) t].store (p->getValue(), std::memory_order_relaxed);
+    for (int k = 0; k < granulum::kNumHarmonics; ++k)
+        harmLive[(size_t) k].store (harmNow[(size_t) k].load (std::memory_order_relaxed), std::memory_order_relaxed);
+    for (int l = 0; l < kNumLfos; ++l)
+    {
+        lfoPhaseOut[(size_t) l].store (0.0f, std::memory_order_relaxed);
+        lfoValueOut[(size_t) l].store (lfoShapeAt (l, 0.0f), std::memory_order_relaxed);
+    }
+}
+
 std::vector<std::pair<int, int>> GranulumProcessor::listModulations() const
 {
     std::vector<std::pair<int, int>> out;
@@ -1544,6 +1557,7 @@ void GranulumProcessor::noteOff (int note)
 
 void GranulumProcessor::processBlock (AudioBuffer<float>& buffer, MidiBuffer& midi)
 {
+    lastProcessMs.store (Time::getMillisecondCounterHiRes(), std::memory_order_relaxed);
     ScopedNoDenormals noDenormals;
     const int numSamples = buffer.getNumSamples();
 
