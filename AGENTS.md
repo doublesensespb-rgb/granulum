@@ -214,7 +214,7 @@ fold buttons hidden). `StepArrow` < > beside the filter type combos ("noArrow" c
 type names switch to LP/HP short forms when "HIGH PASS 48" does not fit.
 1.0.8: FACTORY PRESETS ship in BinaryData: Resources/presets/<folder>/*.gpreset (GLOB_RECURSE in CMakeLists) + factory_presets.txt
 (lines "folder|file", file names must be unique - BinaryData flattens folders). installFactoryPresets() (constructor, once per process)
-writes each one to presetFolder()/<folder>/<file> only if missing. The owner's set: 39 presets in 4 folders; their sample paths
+writes each one to presetFolder()/<folder>/<file> only if missing. The owner's set: 38 presets in 4 folders; their sample paths
 (OSC 3 off) were blanked. Local test: lsnap/genbd.py includes the presets, rdemo Inst.cpp with HOME=/tmp/fakehome.
 1.0.7: uiSounding counts only oscillators that are ON (a switched-off osc's voice never finished -> endless animation;
 found with tools/Still.cpp, which must show every preset standing still in silence). Hosts that stop calling processBlock:

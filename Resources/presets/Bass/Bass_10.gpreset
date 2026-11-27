@@ -1,24 +1,25 @@
 <?xml version="1.0" encoding="UTF-8"?>
 
-<GRANULUM samplePath="" harmonics="0.0000,0.0000,0.2308,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000"
-          presetName="Bass_10" presetFolder="Bass_Synths" randMask="1023"
-          noiseOrder="3" distOrder="2" modeOrder="2" randOrder="2" oscFold="000"
-          pluginVersion="1.0.6" grainMask="57351" mods="osc1Air:0:0.9300;subVol:0:0.9600;distDrive:0:0.3800;osc3Vol:0:0.0800;osc1WaveMix:0:-1.0000;harm3:0:0.4000;cutoff:0:0.6300;harm5:0:0.4300;harm7:0:1.0000;pitch:2:0.2800"
-          lfoShape1="0.0000,0.0000,1.000;0.0839,0.2907,0.000;0.0839,0.6395,0.000;0.1129,1.0000,0.996;0.4097,0.0000,-0.170;0.5516,0.0000,0.000;0.7452,0.3837,0.000;1.0000,0.0000,0.000"
-          lfoShape2="0.0000,0.0000,0.000;0.5000,1.0000,0.000;0.5000,1.0000,0.000;1.0000,0.0000,0.000"
-          lfoShape3="0.0000,0.0000,0.000;0.0000,0.0000,-0.446;0.0806,0.1279,0.000;0.1806,0.0000,0.000;0.5000,0.0000,0.000;1.0000,0.0000,0.000"
-          filtOrder="2">
+<GRANULUM samplePath="" harmonics="0.0000,0.0000,0.0000,0.0000,0.4923,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000"
+          presetName="Bass_11" presetFolder="Bass_Synths" randMask="1023"
+          noiseOrder="3" distOrder="2" modeOrder="2" randOrder="2" filtOrder="2"
+          oscFold="000" pluginVersion="1.0.5" grainMask="65535" mods="harm5:0:-0.9300;subVol:0:0.5400;eq3Gain:1:0.4100;distDrive:1:0.4900;pitch:2:0.0600;harm3:0:0.5300;harm7:1:0.1700"
+          lfoShape1="0.0000,0.0000,0.000;0.1387,0.9070,0.000;0.5226,0.2326,0.000;1.0000,0.0000,0.000"
+          lfoShape2="0.0000,0.0000,0.000;0.0806,0.0000,0.000;0.2290,0.0000,1.000;0.6871,0.2791,0.000;0.7871,0.0000,0.000;0.9710,0.0000,0.000;1.0000,0.0000,0.000"
+          lfoShape3="0.0000,0.0000,0.000;0.2097,1.0000,-0.388;1.0000,0.0000,0.000">
   <PARAM id="ampA" value="0.0"/>
   <PARAM id="ampD" value="300.0000305175781"/>
   <PARAM id="ampOn" value="1.0"/>
   <PARAM id="ampR" value="300.0000305175781"/>
   <PARAM id="ampS" value="1.0"/>
-  <PARAM id="bloom" value="0.237608402967453"/>
-  <PARAM id="chime" value="0.7164638042449951"/>
+  <PARAM id="bloom" value="0.7666666507720947"/>
+  <PARAM id="bpWidth" value="1.0"/>
+  <PARAM id="bpWidth2" value="1.0"/>
+  <PARAM id="chime" value="0.0"/>
   <PARAM id="chord" value="0.0"/>
   <PARAM id="clipOn" value="0.0"/>
-  <PARAM id="cutoff" value="81.34203338623047"/>
-  <PARAM id="cutoff2" value="517.1651000976562"/>
+  <PARAM id="cutoff" value="606.9603881835938"/>
+  <PARAM id="cutoff2" value="799.9998168945312"/>
   <PARAM id="delayDiv" value="9.0"/>
   <PARAM id="delayFb" value="0.4000000059604645"/>
   <PARAM id="delayMix" value="0.300000011920929"/>
@@ -31,34 +32,64 @@
   <PARAM id="delaySync" value="1.0"/>
   <PARAM id="delayTime" value="375.0"/>
   <PARAM id="delayTone" value="0.6000000238418579"/>
-  <PARAM id="density" value="0.3738068342208862"/>
-  <PARAM id="distDrive" value="0.0"/>
+  <PARAM id="density" value="0.4000000059604645"/>
+  <PARAM id="distDrive" value="0.07666666060686111"/>
   <PARAM id="distMix" value="1.0"/>
   <PARAM id="distOn" value="1.0"/>
   <PARAM id="distR1" value="1.0"/>
   <PARAM id="distR2" value="1.0"/>
   <PARAM id="distR3" value="1.0"/>
-  <PARAM id="distR4" value="0.0"/>
+  <PARAM id="distR4" value="1.0"/>
   <PARAM id="distTone" value="0.800000011920929"/>
-  <PARAM id="distType" value="2.0"/>
-  <PARAM id="drift" value="0.06325389444828033"/>
-  <PARAM id="filter2On" value="1.0"/>
+  <PARAM id="distType" value="0.0"/>
+  <PARAM id="drift" value="0.0"/>
+  <PARAM id="eq1Freq" value="79.99998474121094"/>
+  <PARAM id="eq1Gain" value="0.0"/>
+  <PARAM id="eq1On" value="1.0"/>
+  <PARAM id="eq1Q" value="0.7100000381469727"/>
+  <PARAM id="eq1Slope" value="0.0"/>
+  <PARAM id="eq1Type" value="1.0"/>
+  <PARAM id="eq2Freq" value="249.9999542236328"/>
+  <PARAM id="eq2Gain" value="0.0"/>
+  <PARAM id="eq2On" value="1.0"/>
+  <PARAM id="eq2Q" value="1.0"/>
+  <PARAM id="eq2Slope" value="0.0"/>
+  <PARAM id="eq2Type" value="2.0"/>
+  <PARAM id="eq3Freq" value="323.9320678710938"/>
+  <PARAM id="eq3Gain" value="3.446807861328125"/>
+  <PARAM id="eq3On" value="1.0"/>
+  <PARAM id="eq3Q" value="1.0"/>
+  <PARAM id="eq3Slope" value="0.0"/>
+  <PARAM id="eq3Type" value="2.0"/>
+  <PARAM id="eq4Freq" value="1619.596923828125"/>
+  <PARAM id="eq4Gain" value="-1.340425491333008"/>
+  <PARAM id="eq4On" value="1.0"/>
+  <PARAM id="eq4Q" value="4.983522891998291"/>
+  <PARAM id="eq4Slope" value="0.0"/>
+  <PARAM id="eq4Type" value="2.0"/>
+  <PARAM id="eq5Freq" value="1327.454711914062"/>
+  <PARAM id="eq5Gain" value="0.1914901733398438"/>
+  <PARAM id="eq5On" value="1.0"/>
+  <PARAM id="eq5Q" value="0.7100000381469727"/>
+  <PARAM id="eq5Slope" value="0.0"/>
+  <PARAM id="eq5Type" value="4.0"/>
+  <PARAM id="filter2On" value="0.0"/>
   <PARAM id="filter2R1" value="1.0"/>
   <PARAM id="filter2R2" value="1.0"/>
-  <PARAM id="filter2R3" value="0.0"/>
+  <PARAM id="filter2R3" value="1.0"/>
   <PARAM id="filter2R4" value="0.0"/>
   <PARAM id="filterOn" value="1.0"/>
   <PARAM id="filterR1" value="1.0"/>
   <PARAM id="filterR2" value="1.0"/>
-  <PARAM id="filterR3" value="0.0"/>
+  <PARAM id="filterR3" value="1.0"/>
   <PARAM id="filterR4" value="0.0"/>
   <PARAM id="freeze" value="0.0"/>
   <PARAM id="ftype" value="2.0"/>
-  <PARAM id="ftype2" value="8.0"/>
-  <PARAM id="gmix" value="0.8939679265022278"/>
+  <PARAM id="ftype2" value="9.0"/>
+  <PARAM id="gmix" value="1.0"/>
   <PARAM id="grainOn" value="1.0"/>
   <PARAM id="gshape" value="0.5"/>
-  <PARAM id="gsize" value="0.4221164286136627"/>
+  <PARAM id="gsize" value="0.4566666483879089"/>
   <PARAM id="lfo1Div" value="7.0"/>
   <PARAM id="lfo1Grains" value="0.0"/>
   <PARAM id="lfo1Mode" value="1.0"/>
@@ -66,7 +97,7 @@
   <PARAM id="lfo1Rate" value="1.00000011920929"/>
   <PARAM id="lfo1Rise" value="0.0"/>
   <PARAM id="lfo1Sync" value="1.0"/>
-  <PARAM id="lfo2Div" value="4.0"/>
+  <PARAM id="lfo2Div" value="2.0"/>
   <PARAM id="lfo2Grains" value="0.0"/>
   <PARAM id="lfo2Mode" value="1.0"/>
   <PARAM id="lfo2On" value="1.0"/>
@@ -85,14 +116,14 @@
   <PARAM id="loopStart" value="0.0"/>
   <PARAM id="mono" value="1.0"/>
   <PARAM id="osc1Air" value="0.0"/>
-  <PARAM id="osc1Grain" value="0.0"/>
+  <PARAM id="osc1Grain" value="1.0"/>
   <PARAM id="osc1Mode" value="0.0"/>
   <PARAM id="osc1Oct" value="-2.0"/>
   <PARAM id="osc1On" value="1.0"/>
   <PARAM id="osc1Pan" value="0.0"/>
   <PARAM id="osc1Semi" value="0.0"/>
   <PARAM id="osc1Tune" value="0.0"/>
-  <PARAM id="osc1Vol" value="0.800000011920929"/>
+  <PARAM id="osc1Vol" value="0.5600000023841858"/>
   <PARAM id="osc1Wave" value="1.0"/>
   <PARAM id="osc1WaveMix" value="0.0"/>
   <PARAM id="osc2Grain" value="0.0"/>
@@ -102,35 +133,35 @@
   <PARAM id="osc2Semi" value="0.0"/>
   <PARAM id="osc2Tune" value="0.0"/>
   <PARAM id="osc2Vol" value="0.800000011920929"/>
-  <PARAM id="osc3Color" value="0.5699999332427979"/>
+  <PARAM id="osc3Color" value="-0.2700000405311584"/>
   <PARAM id="osc3Grain" value="0.0"/>
   <PARAM id="osc3On" value="1.0"/>
   <PARAM id="osc3Pan" value="0.0"/>
-  <PARAM id="osc3Type" value="3.0"/>
-  <PARAM id="osc3Vol" value="0.06666667014360428"/>
-  <PARAM id="output" value="3.400001525878906"/>
+  <PARAM id="osc3Type" value="4.0"/>
+  <PARAM id="osc3Vol" value="0.0"/>
+  <PARAM id="output" value="12.29999923706055"/>
   <PARAM id="peakGain" value="0.0"/>
   <PARAM id="peakGain2" value="0.0"/>
   <PARAM id="peakQ" value="1.0"/>
   <PARAM id="peakQ2" value="1.0"/>
   <PARAM id="pitch" value="0.0"/>
   <PARAM id="porta" value="0.0"/>
-  <PARAM id="position" value="0.397525817155838"/>
+  <PARAM id="position" value="0.0"/>
   <PARAM id="reso" value="0.7070000171661377"/>
-  <PARAM id="reso2" value="4.798035144805908"/>
-  <PARAM id="revLowCut" value="152.5418395996094"/>
-  <PARAM id="revMix" value="0.02333333343267441"/>
+  <PARAM id="reso2" value="0.7070000171661377"/>
+  <PARAM id="revLowCut" value="438.2955017089844"/>
+  <PARAM id="revMix" value="0.09666667133569717"/>
   <PARAM id="revOn" value="1.0"/>
   <PARAM id="revR1" value="1.0"/>
   <PARAM id="revR2" value="1.0"/>
   <PARAM id="revR3" value="1.0"/>
   <PARAM id="revR4" value="0.0"/>
-  <PARAM id="revSize" value="0.2133333384990692"/>
-  <PARAM id="scatter" value="0.5247761011123657"/>
-  <PARAM id="shimmer" value="0.6147979497909546"/>
+  <PARAM id="revSize" value="0.3166666924953461"/>
+  <PARAM id="scatter" value="0.0"/>
+  <PARAM id="shimmer" value="0.0"/>
   <PARAM id="shimmerMode" value="0.0"/>
-  <PARAM id="smear" value="0.2300096750259399"/>
-  <PARAM id="speed" value="0.3050000667572021"/>
+  <PARAM id="smear" value="0.0"/>
+  <PARAM id="speed" value="1.000000238418579"/>
   <PARAM id="spread" value="1.0"/>
   <PARAM id="subH1" value="1.0"/>
   <PARAM id="subH2" value="0.0"/>
@@ -140,37 +171,8 @@
   <PARAM id="subOct" value="-2.0"/>
   <PARAM id="subOn" value="1.0"/>
   <PARAM id="subSemi" value="0.0"/>
-  <PARAM id="subVol" value="0.1866666674613953"/>
-  <PARAM id="eq1On" value="1.0"/>
-  <PARAM id="eq1Type" value="1.0"/>
-  <PARAM id="eq1Freq" value="79.99998474121094"/>
-  <PARAM id="eq1Gain" value="0.0"/>
-  <PARAM id="eq1Q" value="0.7100000381469727"/>
-  <PARAM id="eq1Slope" value="0.0"/>
-  <PARAM id="eq2On" value="1.0"/>
-  <PARAM id="eq2Type" value="2.0"/>
-  <PARAM id="eq2Freq" value="249.9999542236328"/>
-  <PARAM id="eq2Gain" value="0.0"/>
-  <PARAM id="eq2Q" value="1.0"/>
-  <PARAM id="eq2Slope" value="0.0"/>
-  <PARAM id="eq3On" value="1.0"/>
-  <PARAM id="eq3Type" value="2.0"/>
-  <PARAM id="eq3Freq" value="999.9999389648438"/>
-  <PARAM id="eq3Gain" value="0.0"/>
-  <PARAM id="eq3Q" value="1.0"/>
-  <PARAM id="eq3Slope" value="0.0"/>
-  <PARAM id="eq4On" value="1.0"/>
-  <PARAM id="eq4Type" value="2.0"/>
-  <PARAM id="eq4Freq" value="3049.832763671875"/>
-  <PARAM id="eq4Gain" value="5.93617057800293"/>
-  <PARAM id="eq4Q" value="1.0"/>
-  <PARAM id="eq4Slope" value="0.0"/>
-  <PARAM id="eq5On" value="1.0"/>
-  <PARAM id="eq5Type" value="4.0"/>
-  <PARAM id="eq5Freq" value="682.0512084960938"/>
-  <PARAM id="eq5Gain" value="0.2583045959472656"/>
-  <PARAM id="eq5Q" value="0.7100000381469727"/>
-  <PARAM id="eq5Slope" value="0.0"/>
+  <PARAM id="subTune" value="0.0"/>
+  <PARAM id="subVol" value="0.08666666597127914"/>
   <PARAM id="eqOn" value="1.0"/>
   <PARAM id="compOn" value="0.0"/>
   <PARAM id="compThresh" value="-18.0"/>
@@ -180,10 +182,7 @@
   <PARAM id="compGain" value="0.0"/>
   <PARAM id="compMix" value="1.0"/>
   <PARAM id="osc1Voices" value="1.0"/>
-  <PARAM id="osc1Detune" value="0.2866666615009308"/>
-  <PARAM id="osc1Blend" value="0.116666667163372"/>
-  <PARAM id="bpWidth" value="1.0"/>
-  <PARAM id="bpWidth2" value="1.0"/>
-  <PARAM id="subTune" value="0.0"/>
-  <PARAM id="grainSync" value="0.0"/>
+  <PARAM id="osc1Detune" value="0.25"/>
+  <PARAM id="osc1Blend" value="0.75"/>
+  <PARAM id="grainSync" value="1.0"/>
 </GRANULUM>

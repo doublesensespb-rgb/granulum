@@ -28,7 +28,6 @@ Bass|Bass_09.gpreset
 Bass|Bass_10.gpreset
 Bass|Bass_11.gpreset
 Bass|Bass_12.gpreset
-Bass|Bass_13.gpreset
 Fxs|Fx_01.gpreset
 Fxs|Fx_02.gpreset
 Fxs|Fx_03.gpreset
