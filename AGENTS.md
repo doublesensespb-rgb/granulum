@@ -1,7 +1,7 @@
 # GRAIN FORM (repo: granulum) — guide for AI agents and developers
 
 Read this whole file before changing anything. It describes the product, the code, the build
-pipeline and how the owner wants to work. Current version: **1.0.9** on branch `test` (main still 0.99.6; 0.99.7-test / 0.99.8 / 0.99.9 were the labels before) (`project(... VERSION 1.0.9)` + display label `set(GRAINFORM_LABEL "1.0.9")` in CMakeLists.txt).
+pipeline and how the owner wants to work. Current version: **1.1.0** on branch `test` (main still 0.99.6; 0.99.7-test / 0.99.8 / 0.99.9 were the labels before) (`project(... VERSION 1.1.0)` + display label `set(GRAINFORM_LABEL "1.1.0")` in CMakeLists.txt).
 The UI shows the version on a small plate next to the title (taken from CMake `GRAINFORM_VERSION`, "0.9.8" -> "v0.98").
 
 ## 1. Product
@@ -212,6 +212,8 @@ dry part under a dense cloud (grains on, MIX >= 85 %) uses a 3-copy lite set. rd
 1.0.2: subParams sets uniVoices = 1 (the sub inherited OSC 1's VOICE). OSC 2-4 folding removed (uiFold forced false,
 fold buttons hidden). `StepArrow` < > beside the filter type combos ("noArrow" combos, GranulumLook::positionComboBoxText);
 type names switch to LP/HP short forms when "HIGH PASS 48" does not fit.
+1.1.0: the owner's final factory set (36 presets: Atmos_Synths_Pads 20, Bass 11, Fxs 5) in Resources/presets; sample paths of
+Synth_02/16/20 blanked (OSC 3 off); renders bit-identical to his files. 11 of them carry filterVer 1 (old filter), 25 none (= old).
 1.0.9: KEY per filter (params filterKey / filterKey2, default on; keySwitch / keySwitch2 GrainSwitch at the right end of the
 filter value row, value boxes there narrowed with Knob::boxWidth). Filter "modern" mode (FilterUnit::classic = false,
 processModern): Butterworth stages, RESO scales only the last stage (peak = RESO on 12/24/48, pass band 0 dB, no resoComp),
